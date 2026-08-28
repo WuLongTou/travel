@@ -138,6 +138,62 @@ el.eventLogBtn.addEventListener('click', () => {
 });
 el.exportLogBtn.addEventListener('click', exportLog);
 
+// ---------- 性能预算（§9.5）：上限滑杆 + FPS 自适应降级 ----------
+el.perfSystems = document.getElementById('perf-systems');
+el.perfSystemsVal = document.getElementById('perf-systems-val');
+el.perfBodies = document.getElementById('perf-bodies');
+el.perfBodiesVal = document.getElementById('perf-bodies-val');
+el.autoQualityBtn = document.getElementById('btn-auto-quality');
+
+function syncPerfConfig() {
+  sim.config.maxDetailSystems = parseInt(el.perfSystems.value, 10);
+  sim.config.maxDetailBodies = parseInt(el.perfBodies.value, 10);
+  el.perfSystemsVal.textContent = String(sim.config.maxDetailSystems);
+  el.perfBodiesVal.textContent = String(sim.config.maxDetailBodies);
+}
+el.perfSystems.addEventListener('input', syncPerfConfig);
+el.perfBodies.addEventListener('input', syncPerfConfig);
+syncPerfConfig();
+
+el.autoQualityBtn.addEventListener('click', () => {
+  sim.config.autoQuality = !sim.config.autoQuality;
+  if (!sim.config.autoQuality) sim.config.qualityTier = 0; // 关闭时恢复全质量
+  el.autoQualityBtn.textContent = sim.config.autoQuality ? '⚙ 自动降级：开' : '⚙ 自动降级：关';
+});
+
+// FPS 看门狗：EMA 帧率连续偏低则升档降级（0→1→2），恢复良好再缓慢降档。
+// 档位只在 <40 判低、>50 判好，40~50 为稳持带，避免临界帧率来回跳。
+// tier 含义（sim._manageDetails 消费）：
+//   1 = 冻结 LOD 升级、停止创建新细节系统（存量保留）
+//   2 = 再把最远的细节系统卸载到上限一半，点尺寸缩小
+let fpsEma = 60;
+let perfCheckTimer = 0;
+let goodFpsTimer = 0;
+function watchPerformance(dt) {
+  const fps = 1 / Math.max(dt, 1e-4);
+  fpsEma += (fps - fpsEma) * 0.05;
+  window.__fpsEma = Math.round(fpsEma);
+  perfCheckTimer += dt;
+  if (perfCheckTimer < 5) return;
+  perfCheckTimer = 0;
+  if (!sim.config.autoQuality) return;
+  const tier = sim.config.qualityTier;
+  if (fpsEma < 40 && tier < 2) {
+    sim.config.qualityTier = tier + 1;
+    goodFpsTimer = 0;
+    sim.events.push({ time: sim.time, text: `⚙️ 帧率偏低（${fpsEma.toFixed(0)} FPS），自动降级到档位 ${sim.config.qualityTier}` });
+  } else if (fpsEma > 45 && tier > 0) {
+    goodFpsTimer += 5;
+    if (goodFpsTimer >= 10) {
+      sim.config.qualityTier = tier - 1; // 逐档恢复，避免来回跳
+      goodFpsTimer = 0;
+      sim.events.push({ time: sim.time, text: `⚙️ 帧率恢复（${fpsEma.toFixed(0)} FPS），质量回到档位 ${sim.config.qualityTier}` });
+    }
+  } else {
+    goodFpsTimer = 0;
+  }
+}
+
 // 智能镜头：先全局见证结构形成，黑洞时代自动跟拍；关闭后自由观察
 el.followBtn.addEventListener('click', () => {
   const next = !renderer.state.follow;
@@ -203,7 +259,8 @@ function updateHud() {
     el.hudNear.textContent = '—';
   }
   const formed = sim.seeds.reduce((n, s) => n + (s.detail ? 1 : 0), 0);
-  el.hudCosmos.textContent = `已成形系统 ${formed} · 细节体 ${sim.activeDetails.length}`;
+  const tier = sim.config.qualityTier;
+  el.hudCosmos.textContent = `已成形系统 ${formed} · 细节体 ${sim.activeDetails.reduce((n, s) => n + s.detail.bodies.length, 0)}${tier > 0 ? ` · 降级${tier}` : ''}`;
 }
 
 // ---------- 事件日志面板（可回放时间线 + 导出） ----------
@@ -250,6 +307,7 @@ function renderFrame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   renderer.render(dt, audio);
+  watchPerformance(dt);
   const label = `${sim.time.toFixed(1)}s · ${sim.era} · ${sim.probe.label}`;
   if (el.status.textContent !== label) setStatus(label);
   hudTimer += dt;

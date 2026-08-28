@@ -144,7 +144,15 @@ export class CosmicSimulation {
     //   wormholeDist     虫洞跃迁距离（世界单位）
     //   wormholeDuration 虫洞动画时长（秒）
     //   wormholeWindow   判定"持续捕获"的时间窗口（秒），窗口内被同一系统再次捕获即触发虫洞
-    this.config = { wormholeDist: 480, wormholeDuration: 1.4, wormholeWindow: 8 };
+    //   maxDetailSystems 同时持有内部细节的系统数上限
+    //   maxDetailBodies  全部活跃系统的细节天体总数上限
+    //   qualityTier      降级档位 0/1/2（由 main.js 的 FPS 看门狗维护；0=全质量）
+    //   autoQuality      低帧率自动降级开关
+    this.config = {
+      wormholeDist: 480, wormholeDuration: 1.4, wormholeWindow: 8,
+      maxDetailSystems: 3, maxDetailBodies: 500,
+      qualityTier: 0, autoQuality: true,
+    };
     this.seenLevels = new Set();
     this.seenMilestones = new Set();
     this.particles = [];
@@ -842,26 +850,60 @@ export class CosmicSimulation {
   _manageDetails(dt) {
     this.activeDetails.length = 0;
     const pr = this.probe;
+    const cfg = this.config;
+    // ---- 性能预算（§9.5）----
+    // tier>=2：主动收缩——把最远的细节系统卸载到上限一半，体数预算立即减半
+    if (cfg.qualityTier >= 2) {
+      const withDetail = this.seeds.filter((s) => s.detail);
+      const cap = Math.max(1, Math.floor(cfg.maxDetailSystems / 2));
+      if (withDetail.length > cap) {
+        withDetail.sort((a, b) => {
+          const db = Math.hypot(b.pos[0] - pr.pos[0], b.pos[1] - pr.pos[1], b.pos[2] - pr.pos[2]);
+          const da = Math.hypot(a.pos[0] - pr.pos[0], a.pos[1] - pr.pos[1], a.pos[2] - pr.pos[2]);
+          return db - da; // 最远的先卸载
+        });
+        for (let i = 0; i < withDetail.length - cap; i++) withDetail[i].detail = null;
+      }
+    }
+    let systemsWithDetail = 0;
+    let totalBodies = 0;
     for (const s of this.seeds) {
       const r = this._detailRadius(s);
       if (r <= 0) continue;
       const d = Math.hypot(pr.pos[0] - s.pos[0], pr.pos[1] - s.pos[1], pr.pos[2] - s.pos[2]);
       // 远到一定程度不加载；接近到 1.4R 时一次创建多级 LOD 内部天体
-      if (!s.detail && d < r * 1.4) this._ensureDetailSystem(s);
+      if (!s.detail && d < r * 1.4) {
+        const overBudget = cfg.qualityTier >= 1
+          || systemsWithDetail >= cfg.maxDetailSystems
+          || totalBodies >= cfg.maxDetailBodies;
+        if (overBudget) {
+          // tier>=1 是持续状态不提示；预算上限触发时提示一次（每系统一次）
+          if (cfg.qualityTier < 1 && !s.budgetNotified) {
+            s.budgetNotified = true;
+            this.events.push({ time: this.time, text: `⚙️ 已达细节预算上限（${cfg.maxDetailSystems} 系统 / ${cfg.maxDetailBodies} 天体），远处系统保持远景表示` });
+          }
+          continue;
+        }
+        this._ensureDetailSystem(s);
+      }
       if (s.detail) {
         // 离开太远就释放；卸载后下次再次接近会重新创建并按 LOD 渐进显示
         if (d > r * 2.4) {
           s.detail = null;
+          s.budgetNotified = false;
           continue;
         }
         // 渐进 LOD：当前距离对应的 LOD 等级 >= lodReached 时立即升级（一次性），
         // 否则 lodLerp 平滑插值（让"凝聚过程"在视觉上能感受到）
         const target = this._detailLODFor(s);
-        if (target > s.detail.lodReached) s.detail.lodReached = target;
+        // tier>=1：冻结 LOD 升级（不再增加天体数量），已有的继续展示
+        if (cfg.qualityTier < 1 && target > s.detail.lodReached) s.detail.lodReached = target;
         const lerpRate = Math.min(1, dt * 1.6);
         s.detail.lodLerp += (s.detail.lodReached - s.detail.lodLerp) * lerpRate;
         this._updateDetailBodies(s, dt);
         this.activeDetails.push(s);
+        systemsWithDetail += 1;
+        totalBodies += s.detail.bodies.length;
       }
     }
     // 在小球前方动态补充新的休眠系统，让航线可以无限延伸。
@@ -1980,6 +2022,8 @@ export function createCosmosRenderer(canvas, sim) {
           col[i * 3 + 1] *= fadeIn;
           col[i * 3 + 2] *= fadeIn;
           size[i] *= 0.25 + 0.75 * ease;
+          // 降级档位 2：细节点整体缩小，降低 overdraw
+          if (sim.config.qualityTier >= 2) size[i] *= 0.8;
         }
         v.geo.attributes.position.needsUpdate = true;
         v.geo.attributes.color.needsUpdate = true;
