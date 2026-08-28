@@ -44,9 +44,7 @@ const LOD_FAR = 1.0;        // 远景（光晕/盘面）
 const LOD_MID = 0.7;        // 进入 R*0.7 出现旋臂亮点
 const LOD_NEAR = 0.4;       // 进入 R*0.4 出现大量恒星 / 中心核
 const LOD_INNER = 0.18;     // 进入 R*0.18 出现行星 / 尘埃
-// 持续捕获检测：若小球在同一个系统附近连续被弹回 / 重生，则改用虫洞跃迁逃逸
-const WORMHOLE_RECAPTURE_WINDOW = 8; // 秒
-const WORMHOLE_LAUNCH_DIST = 480;    // 跳跃距离
+// 虫洞参数已实例化为 sim.config（可经 UI 滑杆实时调整），默认值见构造函数
 
 const CLASS_DEFS = [
   { key: 'small',  name: '小质量晕', count: 24, durBase: 3, durSpan: 1, massMin: 0.13, massMax: 0.24 },
@@ -142,6 +140,11 @@ export class CosmicSimulation {
   constructor() {
     this.time = 0;
     this.events = [];
+    // 运行时可调配置（UI 滑杆直通）：
+    //   wormholeDist     虫洞跃迁距离（世界单位）
+    //   wormholeDuration 虫洞动画时长（秒）
+    //   wormholeWindow   判定"持续捕获"的时间窗口（秒），窗口内被同一系统再次捕获即触发虫洞
+    this.config = { wormholeDist: 480, wormholeDuration: 1.4, wormholeWindow: 8 };
     this.seenLevels = new Set();
     this.seenMilestones = new Set();
     this.particles = [];
@@ -173,6 +176,7 @@ export class CosmicSimulation {
       wormholeTimer: 0,
       wormholeFrom: [0, 0, 0],
       wormholeTo: [0, 0, 0],
+      wormholeDuration: 1.4,
       // 死亡方式：atmosphere 大气烧蚀 / vaporize 恒星汽化 / tidal 潮汐撕碎 /
       // wormhole 虫洞逃逸（不播死亡特效）/ generic 兜底。渲染层据此选特效。
       deathType: 'generic',
@@ -867,7 +871,7 @@ export class CosmicSimulation {
     if (
       captureSeedIdx >= 0
       && captureSeedIdx === pr.lastCaptureSeed
-      && this.time - pr.lastCaptureTime < WORMHOLE_RECAPTURE_WINDOW
+      && this.time - pr.lastCaptureTime < this.config.wormholeWindow
     ) {
       this._wormholeEscape(captureSeedIdx, label);
       return;
@@ -923,7 +927,7 @@ export class CosmicSimulation {
     } else {
       dir = randomUnit();
     }
-    const dist = WORMHOLE_LAUNCH_DIST;
+    const dist = this.config.wormholeDist;
     const to = [
       pr.pos[0] + dir[0] * dist,
       pr.pos[1] + dir[1] * dist,
@@ -931,7 +935,8 @@ export class CosmicSimulation {
     ];
     pr.wormholeFrom = from;
     pr.wormholeTo = to;
-    pr.wormholeTimer = 1.4; // 动画时长
+    pr.wormholeTimer = this.config.wormholeDuration;
+    pr.wormholeDuration = this.config.wormholeDuration;
     // 物理上把小球瞬移到 to 处，避免在动画中继续被强引力拉回
     pr.pos = to.slice();
     pr.prevPos = to.slice();
@@ -2431,8 +2436,9 @@ export function createCosmosRenderer(canvas, sim) {
 
     // 虫洞特效：probe.wormholeTimer > 0 时驱动全屏叠加层
     if (pr.wormholeTimer > 0) {
-      const elapsed = 1.4 - pr.wormholeTimer;
-      wormholeOverlay.mat.uniforms.uProgress.value = Math.min(1, elapsed / 1.4);
+      const whDur = pr.wormholeDuration || 1.4;
+      const elapsed = whDur - pr.wormholeTimer;
+      wormholeOverlay.mat.uniforms.uProgress.value = Math.min(1, elapsed / whDur);
     } else {
       wormholeOverlay.mat.uniforms.uProgress.value = 0;
     }

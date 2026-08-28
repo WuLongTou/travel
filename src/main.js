@@ -105,6 +105,27 @@ function syncIntensity() {
 el.intensity.addEventListener('input', syncIntensity);
 syncIntensity();
 
+// ---------- 虫洞参数（直通 sim.config，即时生效） ----------
+el.whDist = document.getElementById('wormhole-dist');
+el.whDistVal = document.getElementById('wormhole-dist-val');
+el.whDur = document.getElementById('wormhole-duration');
+el.whDurVal = document.getElementById('wormhole-duration-val');
+el.whWin = document.getElementById('wormhole-window');
+el.whWinVal = document.getElementById('wormhole-window-val');
+
+function syncWormholeConfig() {
+  sim.config.wormholeDist = parseFloat(el.whDist.value);
+  sim.config.wormholeDuration = parseFloat(el.whDur.value);
+  sim.config.wormholeWindow = parseFloat(el.whWin.value);
+  el.whDistVal.textContent = sim.config.wormholeDist.toFixed(0);
+  el.whDurVal.textContent = sim.config.wormholeDuration.toFixed(1) + 's';
+  el.whWinVal.textContent = sim.config.wormholeWindow.toFixed(0) + 's';
+}
+el.whDist.addEventListener('input', syncWormholeConfig);
+el.whDur.addEventListener('input', syncWormholeConfig);
+el.whWin.addEventListener('input', syncWormholeConfig);
+syncWormholeConfig();
+
 // 智能镜头：先全局见证结构形成，黑洞时代自动跟拍；关闭后自由观察
 el.followBtn.addEventListener('click', () => {
   const next = !renderer.state.follow;
