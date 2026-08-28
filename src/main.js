@@ -1,5 +1,5 @@
 // 入口：宇宙大爆炸叙事 + 渲染 + 音频引擎 + 控制面板
-import { CosmicSimulation, createCosmosRenderer } from './cosmos.js';
+import { CosmicSimulation, createCosmosRenderer, LEVEL_LABELS } from './cosmos.js';
 import { AudioEngine } from './audio.js';
 import './style.css';
 
@@ -20,6 +20,10 @@ const el = {
   followBtn: document.getElementById('btn-follow'),
   status: document.getElementById('status'),
   eventToast: document.getElementById('event-toast'),
+  hudProbe: document.getElementById('hud-probe'),
+  hudCam: document.getElementById('hud-cam'),
+  hudNear: document.getElementById('hud-near'),
+  hudCosmos: document.getElementById('hud-cosmos'),
 };
 
 function setStatus(text) {
@@ -145,12 +149,38 @@ function showEvent(text) {
   showNextEvent();
 }
 
+// ---------- 航行信息面板 ----------
+// 低频刷新（4Hz）：面板是给人读的，无需每帧重排 DOM
+const CAM_LABELS = { cruise: '跟拍', interact: '交互框选', detail: '细节框选' };
+let hudTimer = 0;
+function updateHud() {
+  const pr = sim.probe;
+  const speed = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
+  el.hudProbe.textContent = `第 ${pr.generation} 代 · 速度 ${speed.toFixed(1)}`;
+  el.hudCam.textContent = renderer.state.follow
+    ? (CAM_LABELS[renderer.state.mode] || renderer.state.mode)
+    : '自由观察';
+  const ns = pr.nearestSystem >= 0 ? sim.seeds[pr.nearestSystem] : null;
+  if (ns) {
+    const stage = !ns.awakened ? '休眠'
+      : ns.growth < 1 ? `形成中 ${Math.floor(ns.growth * 100)}%`
+      : '已成形';
+    el.hudNear.textContent = `${LEVEL_LABELS[ns.level] || ns.level} · ${pr.nearestDist.toFixed(0)} · ${stage}`;
+  } else {
+    el.hudNear.textContent = '—';
+  }
+  const formed = sim.seeds.reduce((n, s) => n + (s.detail ? 1 : 0), 0);
+  el.hudCosmos.textContent = `已成形系统 ${formed} · 细节体 ${sim.activeDetails.length}`;
+}
+
 function renderFrame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   renderer.render(dt, audio);
   const label = `${sim.time.toFixed(1)}s · ${sim.era} · ${sim.probe.label}`;
   if (el.status.textContent !== label) setStatus(label);
+  hudTimer += dt;
+  if (hudTimer >= 0.25) { hudTimer = 0; updateHud(); }
   if (sim.events.length > lastEventIndex) {
     const fresh = sim.events.slice(lastEventIndex);
     lastEventIndex = sim.events.length;
