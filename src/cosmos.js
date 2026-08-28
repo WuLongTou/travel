@@ -168,6 +168,8 @@ export class CosmicSimulation {
     this.lastTickTime = 0;
     // 二级系统首次提示
     this.seenSubSystem = false;
+    // 死亡序列：非空表示小球正在经历死亡演出（物理冻结）
+    this._deathPending = null;
     this.probe = {
       pos: [0, 0, 0],
       // 上一物理步的位置：渲染层在两物理步之间插值，消除固定步长造成的“一颤一颤”
@@ -213,6 +215,13 @@ export class CosmicSimulation {
       interactCooldown: 0,
       _orbitSeed: -1,
       _orbitDirPrev: [1, 0, 0],
+      // 死亡序列状态：true = 正在坠入/汽化/被撕碎（物理冻结，渲染层播死亡演出），
+      // 结束后才真正重生（渲染层据此做潮汐拉伸/汽化收缩等小球演出）
+      dying: false,
+      // 死亡序列的剩余时长/总时长/杀手天体位置（渲染层驱动小球演出用）
+      dyingT: 0,
+      dyingDur: 1,
+      deathKillerPos: [0, 0, 0],
     };
     this.activeDetails = [];
     this.lastSeedAwakenTime = -100;
@@ -928,6 +937,55 @@ export class CosmicSimulation {
     b.children = children;
   }
 
+  // ---- 死亡序列（§9.3）：捕获后先播一段"坠入/汽化/被撕碎"演出，
+  // 物理冻结、杀手引用实时取 pos（绕行天体也在动），结束后才重生 ----
+  static DEATH_DUR = { atmosphere: 1.1, vaporize: 0.7, tidal: 1.3, generic: 0.8 };
+
+  _beginDeath(killer, label, captureSeedIdx, deathType, launchR) {
+    if (this._deathPending) return; // 已在死亡演出中
+    const pr = this.probe;
+    pr.deathType = deathType;
+    pr.deathPos = [pr.pos[0], pr.pos[1], pr.pos[2]];
+    pr.dying = true;
+    const dur = CosmicSimulation.DEATH_DUR[deathType] || 0.8;
+    pr.dyingT = dur;
+    pr.dyingDur = dur;
+    this._deathPending = {
+      killer, label, captureSeedIdx, deathType, launchR,
+      t: dur,
+      stopDist: (killer.radius || 0.2) * 0.25,
+      tang: randomUnit(1), // 潮汐撕碎的螺旋切向
+    };
+  }
+
+  _updateDeath(dt) {
+    const dp = this._deathPending;
+    const pr = this.probe;
+    dp.t -= dt;
+    pr.dyingT = Math.max(0, dp.t);
+    const kp = dp.killer.pos;
+    pr.deathKillerPos = [kp[0], kp[1], kp[2]];
+    // 插值连续：本步移动前同步 prevPos
+    pr.prevPos[0] = pr.pos[0]; pr.prevPos[1] = pr.pos[1]; pr.prevPos[2] = pr.pos[2];
+    // 朝杀手天体下沉（捕获得点距离本就很近，下沉是小幅收尾动作）
+    const rx = kp[0] - pr.pos[0], ry = kp[1] - pr.pos[1], rz = kp[2] - pr.pos[2];
+    const d = Math.max(1e-4, Math.hypot(rx, ry, rz));
+    const ux = rx / d, uy = ry / d, uz = rz / d;
+    const sink = Math.min(1.5 * dt, Math.max(0, d - dp.stopDist));
+    pr.pos[0] += ux * sink; pr.pos[1] += uy * sink; pr.pos[2] += uz * sink;
+    if (dp.deathType === 'tidal' && d > dp.stopDist * 2) {
+      // 潮汐撕碎：叠加切向螺旋漂移，坠入轨迹是盘旋而非直线
+      pr.pos[0] += dp.tang[0] * 0.8 * dt;
+      pr.pos[1] += dp.tang[1] * 0.8 * dt;
+      pr.pos[2] += dp.tang[2] * 0.8 * dt;
+    }
+    if (dp.t <= 0) {
+      pr.dying = false;
+      this._deathPending = null;
+      this._respawnFrom(dp.killer.pos, dp.launchR, dp.label, dp.captureSeedIdx, dp.deathType);
+    }
+  }
+
   _manageDetails(dt) {
     this.activeDetails.length = 0;
     const pr = this.probe;
@@ -1249,9 +1307,8 @@ export class CosmicSimulation {
       // 星团 / 星系 / 超星系团 / 黑洞 都是集合 / 多体，靠内部成员捕获
       const cap = this._captureRadius(s);
       if (mature && pr.respawnGrace <= 0 && d < cap && (s.level === 'dust' || s.level === 'void' || s.level === 'planet' || s.level === 'star')) {
-        // 在系统边缘之外重生，速度足够逃出，继续航行
-        // 恒星整体捕获 = 汽化；星尘/行星 = 大气烧蚀
-        this._respawnFrom(s.pos, Math.max(this._systemRadius(s) * 1.1, cap * 4), LEVEL_LABELS[s.level] || '天体', s.idx, s.level === 'star' ? 'vaporize' : 'atmosphere');
+        // 进入死亡序列：恒星整体捕获 = 汽化；星尘/行星 = 大气烧蚀
+        this._beginDeath(s, LEVEL_LABELS[s.level] || '天体', s.idx, s.level === 'star' ? 'vaporize' : 'atmosphere', Math.max(this._systemRadius(s) * 1.1, cap * 4));
         return;
       }
     }
@@ -1271,7 +1328,7 @@ export class CosmicSimulation {
             const label = `${LEVEL_LABELS[parent.level] || '天体'}·${typeLabel}`;
             // 二级行星/卫星 = 大气烧蚀；星系核/黑洞成员 = 潮汐撕碎；恒星 = 汽化
             const deathType = (body.type === 'blackhole' || body.type === 'galaxy') ? 'tidal' : body.type === 'star' ? 'vaporize' : 'atmosphere';
-            this._respawnFrom(body.pos, Math.max(1.6, body.radius * 7), label, s.idx, deathType);
+            this._beginDeath(body, label, s.idx, deathType, Math.max(1.6, body.radius * 7));
             return;
           }
         }
@@ -1472,8 +1529,9 @@ export class CosmicSimulation {
 
     // 靠近大系统时才实时生成内部细节，远离后卸载。
     this._manageDetails(dt);
-    // 小球完全由惯性 + 引力 + 阻尼驱动，没有预定航线。
-    this._updateProbe(dt);
+    // 死亡序列期间物理冻结，只播演出；结束后在 _updateDeath 内重生
+    if (this._deathPending) this._updateDeath(dt);
+    else this._updateProbe(dt);
 
     // 自动日志：每 30s 记录一条宇宙状态快照（供导出回放，不进 toast 队列）
     if (this.time - this.lastTickTime >= 30) {
@@ -2311,6 +2369,8 @@ export function createCosmosRenderer(canvas, sim) {
   const _v2 = new THREE.Vector3();
   const _v3 = new THREE.Vector3();
   const _v4 = new THREE.Vector3();
+  const _deathDir = new THREE.Vector3();
+  const _X_AXIS = new THREE.Vector3(1, 0, 0);
 
   function resize(w, h) {
     renderer.setSize(w, h);
@@ -2596,6 +2656,15 @@ export function createCosmosRenderer(canvas, sim) {
     updateStructures(dtReal, audioLevels, pulse);
     updateDetailVisuals(alpha);
 
+    // 死亡序列起点：立即播死亡特效，并标记本次死亡已播（重生时不再重复）
+    if (pr.dying && !state._prevDying) {
+      state._deathFx = DEATH_FX[pr.deathType] || DEATH_FX.generic;
+      if (pr.deathType !== 'wormhole') {
+        spawnDeathFx(pr.deathPos, state._deathFx);
+        state._fxSpawnedForDeath = true;
+      }
+    }
+    state._prevDying = pr.dying;
     if (pr.generation !== lastProbeGeneration) {
       lastProbeGeneration = pr.generation;
       trailCount = 0;
@@ -2603,9 +2672,11 @@ export function createCosmosRenderer(canvas, sim) {
       // 重生后速度方向突变：立即把平滑方向对准新航向，避免镜头甩偏
       const pv0 = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
       if (pv0 > 0.02) state.dirSmooth.set(pr.vel[0] / pv0, pr.vel[1] / pv0, pr.vel[2] / pv0);
-      // 死亡方式驱动的特效与配色（虫洞逃逸不播死亡特效）
+      // 死亡方式驱动的特效与配色（虫洞逃逸不播死亡特效）；
+      // 死亡序列起点已播过则不重复
       state._deathFx = DEATH_FX[pr.deathType] || DEATH_FX.generic;
-      if (pr.deathType !== 'wormhole') spawnDeathFx(pr.deathPos, state._deathFx);
+      if (pr.deathType !== 'wormhole' && !state._fxSpawnedForDeath) spawnDeathFx(pr.deathPos, state._deathFx);
+      state._fxSpawnedForDeath = false;
     }
     probeMesh.position.set(px, py, pz);
     probeGlow.position.copy(probeMesh.position);
@@ -2617,11 +2688,32 @@ export function createCosmosRenderer(canvas, sim) {
     const glowScale = 2.1 * Math.max(0.55, Math.min(2.2, 16 / Math.max(camDist, 4)));
     probeGlow.scale.setScalar(glowScale);
     probeHalo.scale.setScalar(glowScale * 1.4);
-    // 重生高亮配色跟随死亡方式：汽化偏白、烧蚀偏暖橙、潮汐偏蓝白
+    // ---- 死亡演出：潮汐拉伸（意大利面化）/ 汽化收缩 / 烧蚀压缩 + 配色跟随 ----
+    if (pr.dying) {
+      const k = 1 - Math.max(0, pr.dyingT) / Math.max(1e-4, pr.dyingDur);
+      if (pr.deathType === 'tidal') {
+        const kp = pr.deathKillerPos;
+        _deathDir.set(kp[0] - px, kp[1] - py, kp[2] - pz);
+        if (_deathDir.lengthSq() > 1e-8) {
+          _deathDir.normalize();
+          probeMesh.quaternion.setFromUnitVectors(_X_AXIS, _deathDir);
+        }
+        probeMesh.scale.set(1 + 3.5 * k, Math.max(0.12, 1 - 0.8 * k), Math.max(0.12, 1 - 0.8 * k));
+        probeGlow.scale.setScalar(glowScale * (1 + 1.2 * k));
+      } else if (pr.deathType === 'vaporize') {
+        probeMesh.scale.setScalar(Math.max(0.06, 1 - k));
+        probeGlow.scale.setScalar(glowScale * (1 + 2.5 * k));
+      } else {
+        probeMesh.scale.setScalar(1 - 0.3 * k);
+      }
+    } else {
+      probeMesh.scale.setScalar(1);
+    }
+    // 重生高亮/死亡期间配色跟随死亡方式：汽化偏白、烧蚀偏暖橙、潮汐偏蓝白
     const deathFx = state._deathFx || DEATH_FX.generic;
-    const probeColor = pr.respawnFlash > 0.05 ? deathFx.halo : 0xffffff;
-    probeGlow.material.color.setHex(probeColor);
-    probeHalo.material.color.setHex(pr.respawnFlash > 0.05 ? deathFx.halo : 0x9fc8ff);
+    const highlight = pr.dying || pr.respawnFlash > 0.05;
+    probeGlow.material.color.setHex(highlight ? deathFx.halo : 0xffffff);
+    probeHalo.material.color.setHex(highlight ? deathFx.halo : 0x9fc8ff);
 
     if (pr.respawnFlash > 0.01) {
       respawnSprite.visible = true;
