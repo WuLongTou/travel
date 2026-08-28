@@ -63,6 +63,9 @@ html, body {
   right: 22px;
   bottom: 22px;
   width: 320px;
+  max-height: min(72vh, 640px);
+  overflow-y: auto;
+  scrollbar-width: thin;
   padding: 16px 18px;
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);

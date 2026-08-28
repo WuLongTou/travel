@@ -166,6 +166,8 @@ export class CosmicSimulation {
     // 自动日志：周期性状态快照（事件本身已在 this.events，导出时合并）
     this.ticks = [];
     this.lastTickTime = 0;
+    // 二级系统首次提示
+    this.seenSubSystem = false;
     this.probe = {
       pos: [0, 0, 0],
       // 上一物理步的位置：渲染层在两物理步之间插值，消除固定步长造成的“一颤一颤”
@@ -862,7 +864,68 @@ export class CosmicSimulation {
       b.pos[0] = s.pos[0] + s.u[0] * c * b.orbit.radius + s.v[0] * sn * b.orbit.radius + s.axis[0] * b.orbit.height;
       b.pos[1] = s.pos[1] + s.u[1] * c * b.orbit.radius + s.v[1] * sn * b.orbit.radius + s.axis[1] * b.orbit.height;
       b.pos[2] = s.pos[2] + s.u[2] * c * b.orbit.radius + s.v[2] * sn * b.orbit.radius + s.axis[2] * b.orbit.height;
+      // 二级系统：行星/卫星绕恒星本身运动（母星是移动目标，用其本步位置）
+      if (b.children) {
+        for (const ch of b.children) {
+          ch.prevAngle = ch.orbit.angle;
+          ch.orbit.angle += ch.orbit.speed * dt;
+          const cc = Math.cos(ch.orbit.angle), cs = Math.sin(ch.orbit.angle);
+          ch.pos[0] = b.pos[0] + s.u[0] * cc * ch.orbit.radius + s.v[0] * cs * ch.orbit.radius + s.axis[0] * ch.orbit.height;
+          ch.pos[1] = b.pos[1] + s.u[1] * cc * ch.orbit.radius + s.v[1] * cs * ch.orbit.radius + s.axis[1] * ch.orbit.height;
+          ch.pos[2] = b.pos[2] + s.u[2] * cc * ch.orbit.radius + s.v[2] * cs * ch.orbit.radius + s.axis[2] * ch.orbit.height;
+        }
+      }
     }
+  }
+
+  // ---- 二级系统（§9.2/9.8）：靠近集合系统内的某颗恒星时，
+  // 为它生成行星/卫星。恒星（type 'star'）半径小，触发半径用其
+  // 半径的固定倍数，保证"贴近了才看清它带着一串行星"。----
+  _updateSubSystems(s) {
+    if (this.config.qualityTier >= 1) return; // 降级时不新增二级系统
+    const pr = this.probe;
+    for (const b of s.detail.bodies) {
+      if (b.type !== 'star' || b.children || b._hidden || !b.orbit) continue;
+      const d = Math.hypot(pr.pos[0] - b.pos[0], pr.pos[1] - b.pos[1], pr.pos[2] - b.pos[2]);
+      const trigger = Math.max(2.0, b.radius * 55);
+      if (d < trigger) {
+        this._generateStarChildren(s, b);
+        if (!this.seenSubSystem) {
+          this.seenSubSystem = true;
+          this.events.push({ time: this.time, text: '🪐 小球贴近一颗恒星，它的行星系统在眼前显现' });
+        }
+      }
+    }
+  }
+
+  _generateStarChildren(s, b) {
+    const rng = this._seededRandom((s.idx * 131 + b.orbit.angle * 1000 | 0) + 7919);
+    const baseSpeed = 0.25 + s.mass * 0.12;
+    const TAU = Math.PI * 2;
+    const children = [];
+    const n = 2 + Math.floor(rng() * 3); // 2~4 颗
+    for (let i = 0; i < n; i++) {
+      const isGas = rng() < 0.25;
+      const orbitR = 0.35 + rng() * 1.1;
+      children.push({
+        type: isGas ? 'gas' : 'planet',
+        mass: isGas ? 0.0006 + rng() * 0.002 : 0.002 + rng() * 0.007,
+        radius: isGas ? 0.010 + rng() * 0.010 : 0.018 + rng() * 0.016,
+        colorSeed: rng(),
+        lod: 0,
+        pos: [b.pos[0], b.pos[1], b.pos[2]],
+        orbit: {
+          radius: orbitR,
+          height: (rng() - 0.5) * orbitR * 0.3,
+          speed: (0.55 + rng() * 0.35) * baseSpeed / Math.sqrt(0.3 + orbitR),
+          angle: rng() * TAU,
+        },
+        prevAngle: 0,
+        parent: s.idx,
+        parentBody: b, // 渲染层需要母星显示位置
+      });
+    }
+    b.children = children;
   }
 
   _manageDetails(dt) {
@@ -919,6 +982,7 @@ export class CosmicSimulation {
         const lerpRate = Math.min(1, dt * 1.6);
         s.detail.lodLerp += (s.detail.lodReached - s.detail.lodLerp) * lerpRate;
         this._updateDetailBodies(s, dt);
+        this._updateSubSystems(s);
         this.activeDetails.push(s);
         systemsWithDetail += 1;
         totalBodies += s.detail.bodies.length;
@@ -1054,6 +1118,18 @@ export class CosmicSimulation {
           if (r2 < 1e-6) continue;
           const f = G * PROBE_GRAVITY_MULT * b.mass / Math.pow(r2 + 0.12, 0.95);
           ax += f * dx; ay += f * dy; az += f * dz;
+          // 二级系统的行星/卫星质量小，但贴近时仍有可感知的引力
+          if (b.children) {
+            for (const ch of b.children) {
+              const cx = ch.pos[0] - pr.pos[0];
+              const cy = ch.pos[1] - pr.pos[1];
+              const cz = ch.pos[2] - pr.pos[2];
+              const cr2 = cx * cx + cy * cy + cz * cz;
+              if (cr2 < 1e-6) continue;
+              const cf = G * PROBE_GRAVITY_MULT * ch.mass / Math.pow(cr2 + 0.12, 0.95);
+              ax += cf * cx; ay += cf * cy; az += cf * cz;
+            }
+          }
         }
       }
       pr.vel[0] += ax * h; pr.vel[1] += ay * h; pr.vel[2] += az * h;
@@ -1181,18 +1257,23 @@ export class CosmicSimulation {
     }
     for (const s of this.activeDetails) {
       for (const b of s.detail.bodies) {
-        const dx = b.pos[0] - pr.pos[0];
-        const dy = b.pos[1] - pr.pos[1];
-        const dz = b.pos[2] - pr.pos[2];
-        const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        const hitR = b.radius + 0.18;
-        if (pr.respawnGrace <= 0 && d < hitR) {
-          const parent = this.seeds[b.parent];
-          const label = `${LEVEL_LABELS[parent.level] || '天体'}·${b.type === 'star' ? '恒星' : b.type === 'planet' ? '行星' : b.type === 'galaxy' ? '星系核' : b.type === 'gas' ? '星云气体' : '黑洞'}`;
-          // 星系核/黑洞成员 = 潮汐撕碎；恒星 = 汽化；行星/气体 = 大气烧蚀
-          const deathType = (b.type === 'blackhole' || b.type === 'galaxy') ? 'tidal' : b.type === 'star' ? 'vaporize' : 'atmosphere';
-          this._respawnFrom(b.pos, Math.max(1.6, b.radius * 7), label, s.idx, deathType);
-          return;
+        const bodiesToCheck = b.children ? [b, ...b.children] : [b];
+        for (const body of bodiesToCheck) {
+          const dx = body.pos[0] - pr.pos[0];
+          const dy = body.pos[1] - pr.pos[1];
+          const dz = body.pos[2] - pr.pos[2];
+          const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+          const hitR = body.radius + 0.18;
+          if (pr.respawnGrace <= 0 && d < hitR) {
+            const parent = this.seeds[body.parent];
+            const isChild = body !== b;
+            const typeLabel = body.type === 'star' ? '恒星' : body.type === 'planet' ? (isChild ? '卫星' : '行星') : body.type === 'galaxy' ? '星系核' : body.type === 'gas' ? '星云气体' : '黑洞';
+            const label = `${LEVEL_LABELS[parent.level] || '天体'}·${typeLabel}`;
+            // 二级行星/卫星 = 大气烧蚀；星系核/黑洞成员 = 潮汐撕碎；恒星 = 汽化
+            const deathType = (body.type === 'blackhole' || body.type === 'galaxy') ? 'tidal' : body.type === 'star' ? 'vaporize' : 'atmosphere';
+            this._respawnFrom(body.pos, Math.max(1.6, body.radius * 7), label, s.idx, deathType);
+            return;
+          }
         }
       }
     }
@@ -1945,10 +2026,13 @@ export function createCosmosRenderer(canvas, sim) {
       if (s.detail) {
         const bodies = s.detail.bodies;
         if (!v) {
+          // 预留二级系统槽位：靠近恒星后生成的行星/卫星追加写入同一点云
+          const CHILD_CAP = 64;
+          const cap = bodies.length + CHILD_CAP;
           const geo = new THREE.BufferGeometry();
-          const pos = new Float32Array(bodies.length * 3);
-          const col = new Float32Array(bodies.length * 3);
-          const size = new Float32Array(bodies.length);
+          const pos = new Float32Array(cap * 3);
+          const col = new Float32Array(cap * 3);
+          const size = new Float32Array(cap);
           geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
           geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
           geo.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
@@ -2043,6 +2127,43 @@ export function createCosmosRenderer(canvas, sim) {
           // 降级档位 2：细节点整体缩小，降低 overdraw
           if (sim.config.qualityTier >= 2) size[i] *= 0.8;
         }
+        // ---- 二级系统：恒星子行星/卫星追加到预留槽位 ----
+        // 显示位置 = 母星显示位置 + 自身轨道偏转（角度同样插值）
+        const cap = size.length;
+        let slot = bodies.length;
+        for (const b of bodies) {
+          if (!b.children) continue;
+          const pb = b;
+          const pa = pb.prevAngle + (pb.orbit.angle - pb.prevAngle) * alpha;
+          const pcd = Math.cos(pa), psn = Math.sin(pa);
+          const sx = s.pos[0] + s.u[0] * pcd * pb.orbit.radius + s.v[0] * psn * pb.orbit.radius + s.axis[0] * pb.orbit.height;
+          const sy = s.pos[1] + s.u[1] * pcd * pb.orbit.radius + s.v[1] * psn * pb.orbit.radius + s.axis[1] * pb.orbit.height;
+          const sz = s.pos[2] + s.u[2] * pcd * pb.orbit.radius + s.v[2] * psn * pb.orbit.radius + s.axis[2] * pb.orbit.height;
+          for (const ch of b.children) {
+            if (slot >= cap) break;
+            const ca = ch.prevAngle + (ch.orbit.angle - ch.prevAngle) * alpha;
+            const ccd = Math.cos(ca), csn = Math.sin(ca);
+            pos[slot * 3] = sx + s.u[0] * ccd * ch.orbit.radius + s.v[0] * csn * ch.orbit.radius + s.axis[0] * ch.orbit.height;
+            pos[slot * 3 + 1] = sy + s.u[1] * ccd * ch.orbit.radius + s.v[1] * csn * ch.orbit.radius + s.axis[1] * ch.orbit.height;
+            pos[slot * 3 + 2] = sz + s.u[2] * ccd * ch.orbit.radius + s.v[2] * csn * ch.orbit.radius + s.axis[2] * ch.orbit.height;
+            const tint = ch.colorSeed;
+            if (ch.type === 'gas') {
+              col[slot * 3] = 0.50 + tint * 0.25;
+              col[slot * 3 + 1] = 0.35 + tint * 0.25;
+              col[slot * 3 + 2] = 0.85 + tint * 0.15;
+              size[slot] = 0.10 + tint * 0.08;
+            } else {
+              col[slot * 3] = 0.55 + tint * 0.2;
+              col[slot * 3 + 1] = 0.72 + tint * 0.2;
+              col[slot * 3 + 2] = 0.95;
+              size[slot] = 0.10;
+            }
+            if (sim.config.qualityTier >= 2) size[slot] *= 0.8;
+            slot++;
+          }
+        }
+        // 未用槽位尺寸清零（children 生成后不会消失，通常无需清理，防御旧数据）
+        for (let i = slot; i < cap; i++) size[i] = 0;
         v.geo.attributes.position.needsUpdate = true;
         v.geo.attributes.color.needsUpdate = true;
         v.geo.attributes.aSize.needsUpdate = true;
