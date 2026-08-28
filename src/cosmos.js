@@ -178,6 +178,18 @@ export class CosmicSimulation {
       deathType: 'generic',
       // 被捕获的位置：死亡特效（烧蚀/汽化/潮汐涟漪）播放点
       deathPos: [0, 0, 0],
+      // ---- 绕行检测：判定小球在"自由航行"还是"绕着某天体互动" ----
+      // orbitAngleAcc：相对 influencer 连线方向角的衰减累计（指数窗 ~1.4s），
+      // 直线飞掠时几乎不增长，绕弧线时持续增长；
+      // orbitTangent：相对速度的切向占比（绕行时高，直线冲时低）；
+      // straightTime：连续近似直线飞行时长（退出交互的判据）；
+      // interactCooldown：退出交互后的冷却，杜绝 cruise↔interact 来回跳。
+      orbitAngleAcc: 0,
+      orbitTangent: 0,
+      straightTime: 0,
+      interactCooldown: 0,
+      _orbitSeed: -1,
+      _orbitDirPrev: [1, 0, 0],
     };
     this.activeDetails = [];
     this.lastSeedAwakenTime = -100;
@@ -1033,6 +1045,50 @@ export class CosmicSimulation {
     pr.influencer = bestInf;
     pr.influenceStrength = bestStr;
 
+    // ---- 绕行检测：自由航行 = 没有绕任何一个天体运动 ----
+    // 每步累计"相对 influencer 连线方向转过的角度"（指数衰减窗），
+    // 并计算相对速度的切向占比：
+    //   直线飞掠 → 方向角几乎不转、切向占比低 → free flight；
+    //   被束缚绕行 → 方向角持续累计、切向占比高 → 与天体互动。
+    // 只依赖运动学量，不依赖被修改过的引力公式量纲，稳健且可调。
+    pr.interactCooldown = Math.max(0, pr.interactCooldown - dt);
+    if (pr.influencer >= 0) {
+      const s = this.seeds[pr.influencer];
+      const rx = pr.pos[0] - s.pos[0];
+      const ry = pr.pos[1] - s.pos[1];
+      const rz = pr.pos[2] - s.pos[2];
+      const rl = Math.max(1e-6, Math.hypot(rx, ry, rz));
+      const nx = rx / rl, ny = ry / rl, nz = rz / rl;
+      if (pr.influencer !== pr._orbitSeed) {
+        // 目标系统切换：清空累计，从当前方向重新开始观测
+        pr._orbitSeed = pr.influencer;
+        pr.orbitAngleAcc = 0;
+        pr.straightTime = 0;
+        pr._orbitDirPrev = [nx, ny, nz];
+      }
+      const prev = pr._orbitDirPrev;
+      const dot = Math.min(1, Math.max(-1, prev[0] * nx + prev[1] * ny + prev[2] * nz));
+      const dTheta = Math.acos(dot);
+      pr.orbitAngleAcc = pr.orbitAngleAcc * Math.exp(-dt / 1.4) + dTheta;
+      const vs = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
+      if (vs > 1e-4) {
+        const vr = pr.vel[0] * nx + pr.vel[1] * ny + pr.vel[2] * nz;
+        const vt = Math.sqrt(Math.max(0, vs * vs - vr * vr));
+        pr.orbitTangent = vt / vs;
+      }
+      pr._orbitDirPrev = [nx, ny, nz];
+      if (pr.orbitAngleAcc < 0.6 && pr.orbitTangent < 0.35) {
+        pr.straightTime += dt;
+      } else {
+        pr.straightTime = 0;
+      }
+    } else {
+      pr._orbitSeed = -1;
+      pr.orbitAngleAcc = 0;
+      pr.orbitTangent = 0;
+      pr.straightTime = 0;
+    }
+
     // 捕获检测：落到天体核心/事件视界就重生，不做任何预定弹射。
     // 注意：星团/星系/超星系团本身是"集合"，不会作为整体捕获小球；
     // 小球只会被这些集合中的单个成员（恒星/行星/黑洞）持久捕获。
@@ -1843,15 +1899,28 @@ export function createCosmosRenderer(canvas, sim) {
           detailVisuals.set(s.idx, v);
         }
         const pos = v.pos, col = v.col, size = v.size;
+        const lerpLod = s.detail.lodLerp;
         for (let i = 0; i < bodies.length; i++) {
           const b = bodies[i];
+          // LOD 未解锁的天体真正不可见（此前会被渲染在静止轨道位置上，
+          // 破坏"靠近才展开"的节奏）
+          if (b._hidden) {
+            size[i] = 0;
+            continue;
+          }
+          // LOD 出场动画：每层天体随 lodLerp 从系统核心沿轨道旋出并淡入，
+          // 靠近时的观感是"星系在眼前展开成无数独立天体"
+          const fadeIn = b.lod === 0 ? clamp01(lerpLod * 2.5) : clamp01(lerpLod - b.lod);
+          const ease = easeInOut(fadeIn);
           if (b.orbit) {
-            // 在相邻两个物理步之间插值轨道角，让绕行天体也平滑运动
+            // 在相邻两个物理步之间插值轨道角，让绕行天体也平滑运动；
+            // 轨道半径乘展开系数——出场时从内圈旋到最终轨道
+            const rEff = b.orbit.radius * (0.3 + 0.7 * ease);
             const ang = b.prevAngle + (b.orbit.angle - b.prevAngle) * alpha;
             const c = Math.cos(ang), sn = Math.sin(ang);
-            pos[i * 3] = s.pos[0] + s.u[0] * c * b.orbit.radius + s.v[0] * sn * b.orbit.radius + s.axis[0] * b.orbit.height;
-            pos[i * 3 + 1] = s.pos[1] + s.u[1] * c * b.orbit.radius + s.v[1] * sn * b.orbit.radius + s.axis[1] * b.orbit.height;
-            pos[i * 3 + 2] = s.pos[2] + s.u[2] * c * b.orbit.radius + s.v[2] * sn * b.orbit.radius + s.axis[2] * b.orbit.height;
+            pos[i * 3] = s.pos[0] + s.u[0] * c * rEff + s.v[0] * sn * rEff + s.axis[0] * b.orbit.height;
+            pos[i * 3 + 1] = s.pos[1] + s.u[1] * c * rEff + s.v[1] * sn * rEff + s.axis[1] * b.orbit.height;
+            pos[i * 3 + 2] = s.pos[2] + s.u[2] * c * rEff + s.v[2] * sn * rEff + s.axis[2] * b.orbit.height;
           } else {
             pos[i * 3] = b.pos[0]; pos[i * 3 + 1] = b.pos[1]; pos[i * 3 + 2] = b.pos[2];
           }
@@ -1862,22 +1931,32 @@ export function createCosmosRenderer(canvas, sim) {
             col[i * 3 + 2] = 0.85 + tint * 0.15;
             size[i] = 0.10 + tint * 0.08;
           } else if (b.type === 'star') {
-            col[i * 3] = 0.95 + tint * 0.05;
-            col[i * 3 + 1] = 0.72 + tint * 0.18;
-            col[i * 3 + 2] = 0.45 + tint * 0.2;
-            size[i] = 0.15 + tint * 0.16;
+            // 恒星光温分层：蓝白 → 黄白 → 橙红，"满天星"的层次感
+            if (tint < 0.28) {
+              col[i * 3] = 0.72; col[i * 3 + 1] = 0.84; col[i * 3 + 2] = 1.0;
+            } else if (tint < 0.68) {
+              col[i * 3] = 1.0; col[i * 3 + 1] = 0.88; col[i * 3 + 2] = 0.62;
+            } else {
+              col[i * 3] = 1.0; col[i * 3 + 1] = 0.58; col[i * 3 + 2] = 0.34;
+            }
+            size[i] = 0.24 + tint * 0.30;
           } else if (b.type === 'planet') {
             col[i * 3] = 0.55 + tint * 0.2;
             col[i * 3 + 1] = 0.72 + tint * 0.2;
             col[i * 3 + 2] = 0.95;
-            size[i] = 0.10;
+            size[i] = 0.15;
           } else if (b.type === 'galaxy') {
-            col[i * 3] = 0.55; col[i * 3 + 1] = 0.62; col[i * 3 + 2] = 1.0;
-            size[i] = 0.34;
+            col[i * 3] = 0.62; col[i * 3 + 1] = 0.70; col[i * 3 + 2] = 1.0;
+            size[i] = 0.62;
           } else {
             col[i * 3] = 1.0; col[i * 3 + 1] = 0.55; col[i * 3 + 2] = 0.22;
             size[i] = 0.26;
           }
+          // 加色混合下颜色乘 fadeIn 即为透明度：出场时从核心亮起
+          col[i * 3] *= fadeIn;
+          col[i * 3 + 1] *= fadeIn;
+          col[i * 3 + 2] *= fadeIn;
+          size[i] *= 0.25 + 0.75 * ease;
         }
         v.geo.attributes.position.needsUpdate = true;
         v.geo.attributes.color.needsUpdate = true;
@@ -1901,14 +1980,16 @@ export function createCosmosRenderer(canvas, sim) {
   scene.add(probeMesh);
 
   // 内层亮环（白色实心外层光晕 + 浅蓝光晕）
+  // 光晕尺度收敛：靠近多天体系统时主角不能喧宾夺主——
+  // "展开成星系"的观感要求点云天体在画面上比小球光晕更醒目
   const probeGlow = makeSprite(glowTex, 0xffffff);
-  probeGlow.scale.setScalar(2.6);
+  probeGlow.scale.setScalar(1.55);
   probeGlow.renderOrder = 15;
   scene.add(probeGlow);
 
   const probeHalo = makeSprite(glowTex, 0x9fc8ff);
-  probeHalo.scale.setScalar(4.5);
-  probeHalo.material.opacity = 0.55;
+  probeHalo.scale.setScalar(2.7);
+  probeHalo.material.opacity = 0.42;
   probeHalo.renderOrder = 14;
   scene.add(probeHalo);
 
@@ -2170,6 +2251,23 @@ export function createCosmosRenderer(canvas, sim) {
       const g = seedGroups[i];
       const lv = s.level;
       g.group.position.set(s.pos[0], s.pos[1], s.pos[2]);
+      // 小球贴近后，集合类系统（星团/星系/超星系团/尘埃云）的远景表示
+      // 让位于内部点云：视觉从"一个发光天体"切换成"无数天体组成的星系"。
+      // 淡出区间与 LOD0 出现阈值（detailR*0.7）衔接，避免视觉空窗。
+      const pd = Math.hypot(
+        sim.probe.pos[0] - s.pos[0],
+        sim.probe.pos[1] - s.pos[1],
+        sim.probe.pos[2] - s.pos[2],
+      );
+      const detailR = sim._detailRadius(s) || sim._systemRadius(s);
+      const isCollection = lv === 'cluster' || lv === 'galaxy' || lv === 'supercluster'
+        || lv === 'dust' || lv === 'void';
+      // 核心光斑/实心球在 detail 点云创建（1.4R）前后就让位，
+      // "一个发光天体"的观感随点云出场平滑交接给"无数天体"
+      const coreFade = isCollection ? smoothstep(detailR * 1.0, detailR * 1.5, pd) : 1;
+      const nearFade = isCollection
+        ? smoothstep(detailR * 0.7, detailR * 1.15, pd)
+        : 1;
       const m4 = new THREE.Matrix4().makeBasis(
         new THREE.Vector3(s.u[0], s.u[1], s.u[2]),
         new THREE.Vector3(s.v[0], s.v[1], s.v[2]),
@@ -2186,11 +2284,13 @@ export function createCosmosRenderer(canvas, sim) {
       g.coreScale += (targetCore - g.coreScale) * k;
       g.core.scale.setScalar(Math.max(0.001, g.coreScale * pulse));
       g.core.material.color.copy(levelColor(lv));
-      g.core.visible = lv !== 'blackhole';
+      g.core.material.opacity = coreFade;
+      g.core.visible = lv !== 'blackhole' && coreFade > 0.02;
 
       const targetSolid = levelSolidScale(lv, s);
       g.solid.scale.setScalar(targetSolid * pulse);
-      g.solid.visible = lv !== 'void' && targetSolid > 0.01;
+      // 集合类系统的远景实心球近距隐藏（点云接管）；黑洞视界黑球保留
+      g.solid.visible = lv !== 'void' && targetSolid > 0.01 && coreFade > 0.05;
       if (lv === 'blackhole') {
         g.solid.material.color.setRGB(0, 0, 0);
       } else {
@@ -2208,9 +2308,9 @@ export function createCosmosRenderer(canvas, sim) {
       // 旋涡星系盘（越晚期的大结构越大，保证在全局视角也清晰可见）
       const diskBase = lv === 'supercluster' ? 3.8 + s.mass * 1.1 : 2.6 + s.mass * 0.85;
       g.disk.scale.setScalar(Math.max(0.001, diskBase * (0.22 + 0.78 * g.diskAmt) * pulse));
-      g.disk.material.opacity = 0.14 + 0.46 * g.diskAmt * (0.8 + audioLevels.bass * 0.3);
+      g.disk.material.opacity = (0.14 + 0.46 * g.diskAmt * (0.8 + audioLevels.bass * 0.3)) * nearFade;
       g.disk.material.color.copy(levelColor(lv));
-      g.disk.visible = g.diskAmt > 0.01;
+      g.disk.visible = g.diskAmt > 0.01 && nearFade > 0.02;
 
       // 黑洞内盘 / 光子环 / 喷流
       const bhScale = 1.65 + s.mass * 0.34;
@@ -2241,14 +2341,14 @@ export function createCosmosRenderer(canvas, sim) {
       else { haloTarget = 2.0 + s.mass * 0.55; haloFade = 0.9; } // void / dust
       g.halo.scale.setScalar(Math.max(0.001, haloTarget * pulse * (0.5 + 0.5 * Math.max(g.diskAmt, g.bhAmt))));
       g.halo.material.color.copy(levelColor(lv));
-      g.halo.material.opacity = 0.30 * haloFade;
+      g.halo.material.opacity = 0.30 * haloFade * nearFade;
       g.halo.visible = g.halo.material.opacity > 0.01;
 
-      // 超星系团伴星系
+      // 超星系团伴星系（近看由点云的 6 个星系核接管）
       for (let n = 0; n < g.nodes.length; n++) {
         g.nodes[n].scale.setScalar((0.28 + (n % 3) * 0.12) * g.nodeAmt * pulse);
-        g.nodes[n].material.opacity = 0.7 * g.nodeAmt;
-        g.nodes[n].visible = g.nodeAmt > 0.01;
+        g.nodes[n].material.opacity = 0.7 * g.nodeAmt * nearFade;
+        g.nodes[n].visible = g.nodeAmt > 0.01 && nearFade > 0.02;
       }
 
       // 旋转动画：星系盘与黑洞吸积盘持续旋转
@@ -2304,11 +2404,13 @@ export function createCosmosRenderer(canvas, sim) {
     probeMesh.position.set(px, py, pz);
     probeGlow.position.copy(probeMesh.position);
     probeHalo.position.copy(probeMesh.position);
-    // probe glow 始终在屏幕上看起来是个明显的光点；远时更大、近时稍小
+    // probe glow 始终在屏幕上看起来是个明显的光点；远时更大、近时稍小。
+    // 基准收敛：靠近多天体系统时主角不能喧宾夺主——
+    // "展开成星系"的观感要求点云天体在画面上比小球光晕更醒目
     const camDist = camera.position.distanceTo(probeMesh.position);
-    const glowScale = 3.5 * Math.max(0.7, Math.min(2.5, 16 / Math.max(camDist, 4)));
+    const glowScale = 2.1 * Math.max(0.55, Math.min(2.2, 16 / Math.max(camDist, 4)));
     probeGlow.scale.setScalar(glowScale);
-    probeHalo.scale.setScalar(glowScale * 1.7);
+    probeHalo.scale.setScalar(glowScale * 1.4);
     // 重生高亮配色跟随死亡方式：汽化偏白、烧蚀偏暖橙、潮汐偏蓝白
     const deathFx = state._deathFx || DEATH_FX.generic;
     const probeColor = pr.respawnFlash > 0.05 ? deathFx.halo : 0xffffff;
@@ -2376,25 +2478,48 @@ export function createCosmosRenderer(canvas, sim) {
               if (d < bestD) { bestD = d; bestB = b; }
             }
           }
-          // 离小球最近的 detail body：若距离 < 该 body 所在系统半径的 0.6，
-          // 切到 detail 模式，让用户能看清"它在与什么交互"
-          if (bestB && bestD < sim._systemRadius(sim.seeds[bestB.parent]) * 0.6) {
-            mode = 'detail';
-            anchorX = bestB.pos[0];
-            anchorY = bestB.pos[1];
-            anchorZ = bestB.pos[2];
-            aabbRadius = Math.max(2, bestD * 0.9 + bestB.radius * 1.2);
+          // 离小球最近的 detail body：切 detail 模式让用户看清"它在与什么交互"。
+          // 同样带滞回：进入 0.6R，维持放宽到 0.85R，避免在成员密集的系统
+          // 内部因最近距离抖动而 detail↔cruise 闪跳。
+          if (bestB) {
+            const parentR = sim._systemRadius(sim.seeds[bestB.parent]);
+            const inDetail = state.mode === 'detail' && state._detailBody === bestB;
+            if (bestD < (inDetail ? parentR * 0.85 : parentR * 0.6)) {
+              mode = 'detail';
+              state._detailBody = bestB;
+              anchorX = bestB.pos[0];
+              anchorY = bestB.pos[1];
+              anchorZ = bestB.pos[2];
+              aabbRadius = Math.max(2, bestD * 0.9 + bestB.radius * 1.2);
+            }
           }
         }
         if (mode === 'cruise' && pr.influencer >= 0) {
           const s = sim.seeds[pr.influencer];
           const sd = Math.hypot(px - s.pos[0], py - s.pos[1], pz - s.pos[2]);
-          // 进入条件放宽：只要该系统在小球的强影响范围（约 2 倍系统半径）内，
-          // 就切到上帝视角。这样引力拉扯阶段镜头不会甩。
-          if (pr.influenceStrength > 0.05 && sd < sim._systemRadius(s) * 2.5) {
+          const R = sim._systemRadius(s);
+          // 交互判定（带滞回）：自由航行 = 没有绕任何一个天体运动，
+          // 且离天体还有较远距离。只有真正深入系统本体、并确实在绕行
+          // （方向角持续累计）或被极强束缚（黑洞贴脸）时才切上帝视角；
+          // 远距离的引力偏转 / 直线穿越不再误触发。
+          // 进入阈值 0.9R 与维持阈值 1.9R 构成滞回带，
+          // 退出后 interactCooldown 冷却 4s，杜绝 cruise↔interact 来回跳。
+          if (state.mode === 'interact' && pr.influencer === state._interactSeed) {
+            // 维持：阈值放宽，且未恢复持续直线飞行
+            if (sd < R * 1.9 && pr.straightTime < 2.5) {
+              mode = 'interact';
+            }
+          } else if (
+            pr.interactCooldown <= 0
+            && sd < R * 0.9
+            && (pr.orbitAngleAcc > 2.0 || pr.influenceStrength > 0.9)
+          ) {
             mode = 'interact';
+          }
+          if (mode === 'interact') {
+            state._interactSeed = pr.influencer;
             anchorX = s.pos[0]; anchorY = s.pos[1]; anchorZ = s.pos[2];
-            aabbRadius = Math.max(3, sd * 0.55 + sim._systemRadius(s) * 0.9);
+            aabbRadius = Math.max(3, sd * 0.55 + R * 0.9);
           }
         }
         // 持续计数：每次进入 interact/detail 就重置 modeHold，超时后回到 cruise
@@ -2402,11 +2527,20 @@ export function createCosmosRenderer(canvas, sim) {
           // 模式稳定后倒计时；只有持续满足条件才让交互模式自然结束
           if (mode !== 'cruise') {
             state.modeHold = Math.max(0, state.modeHold - dtReal);
-            if (state.modeHold <= 0) mode = 'cruise';
+            if (state.modeHold <= 0) {
+              mode = 'cruise';
+              state._holdExpired = true; // modeHold 到期不是条件退出，不设冷却
+            }
           }
         } else {
           state._modeTransitions = (state._modeTransitions || 0) + 1;
           state._lastTransition = `${state.mode}->${mode}@t=${sim.time.toFixed(1)}`;
+          // 从 interact 因条件不满足而退出时启动冷却：小球刚离开系统时
+          // 绕行判据可能短暂抖动，冷却期内不再进入，镜头稳定回到跟拍
+          if (state.mode === 'interact' && mode === 'cruise' && !state._holdExpired) {
+            pr.interactCooldown = 4.0;
+          }
+          state._holdExpired = false;
           state.mode = mode;
           state.modeHold = (mode === 'cruise') ? 0 : 6.0; // 交互模式至少持续 6s
         }
