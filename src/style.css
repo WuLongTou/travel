@@ -1,0 +1,208 @@
+:root {
+  --panel-bg: rgba(10, 14, 28, 0.72);
+  --panel-border: rgba(120, 160, 255, 0.18);
+  --text: #dce6ff;
+  --text-dim: #8fa3c8;
+  --accent: #6ea8ff;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #05060d;
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+#scene {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+#scene:active {
+  cursor: grabbing;
+}
+
+/* 标题 */
+.title {
+  position: fixed;
+  top: 22px;
+  left: 26px;
+  pointer-events: none;
+  user-select: none;
+  z-index: 10;
+}
+.title h1 {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  background: linear-gradient(90deg, #dce6ff, #6ea8ff 60%, #c9a6ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.title .dim { color: var(--text-dim); }
+.title .sub {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+}
+
+/* 控制面板 */
+.panel {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  width: 320px;
+  padding: 16px 18px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  z-index: 10;
+}
+.panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 3px;
+  margin-bottom: 12px;
+}
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+button {
+  flex: 1 1 auto;
+  min-width: 92px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  color: var(--text);
+  background: rgba(110, 168, 255, 0.12);
+  border: 1px solid rgba(110, 168, 255, 0.3);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.05s;
+}
+button:hover {
+  background: rgba(110, 168, 255, 0.24);
+  border-color: rgba(110, 168, 255, 0.55);
+}
+button:active {
+  transform: scale(0.97);
+}
+.slider-row {
+  margin-bottom: 10px;
+}
+.slider-row label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+.slider-row input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  height: 4px;
+}
+.status {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  margin-top: 4px;
+  min-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 图例 */
+.legend {
+  position: fixed;
+  left: 26px;
+  bottom: 24px;
+  display: flex;
+  gap: 18px;
+  font-size: 12px;
+  color: var(--text-dim);
+  z-index: 10;
+  user-select: none;
+  background: var(--panel-bg);
+  padding: 10px 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: 0 0 8px currentColor;
+}
+
+/* 提示 */
+.hint {
+  position: fixed;
+  top: 22px;
+  right: 26px;
+  font-size: 11.5px;
+  color: rgba(143, 163, 200, 0.75);
+  z-index: 10;
+  user-select: none;
+  text-align: right;
+  pointer-events: none;
+}
+
+/* 大事件提示 */
+.event-toast {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, calc(-50% + 120px));
+  padding: 10px 22px;
+  font-size: 15px;
+  letter-spacing: 2px;
+  color: #fff;
+  background: rgba(10, 14, 28, 0.55);
+  border: 1px solid rgba(255, 190, 110, 0.45);
+  border-radius: 999px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 0 24px rgba(255, 170, 80, 0.25);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.35s ease, transform 0.35s ease;
+  z-index: 20;
+  white-space: nowrap;
+}
+.event-toast.show {
+  opacity: 1;
+  transform: translate(-50%, calc(-50% + 90px));
+}
+
+@media (max-width: 640px) {
+  .panel { width: calc(100vw - 32px); right: 16px; bottom: 16px; }
+  .legend { display: none; }
+  .title h1 { font-size: 20px; }
+  .hint { display: none; }
+  .event-toast { font-size: 12.5px; white-space: normal; width: 82vw; text-align: center; }
+}
