@@ -3,8 +3,13 @@ import { CosmicSimulation, createCosmosRenderer, LEVEL_LABELS } from './cosmos.j
 import { AudioEngine } from './audio.js';
 import './style.css';
 
+// 初始条件从 localStorage 恢复（"🎲 重开宇宙"reload 后仍生效）
+const INIT_CFG_KEY = 'cosmos-init-config';
+let savedInitConfig = {};
+try { savedInitConfig = JSON.parse(localStorage.getItem(INIT_CFG_KEY) || '{}') || {}; } catch { savedInitConfig = {}; }
+
 const canvas = document.getElementById('scene');
-const sim = new CosmicSimulation();
+const sim = new CosmicSimulation(savedInitConfig);
 const renderer = createCosmosRenderer(canvas, sim);
 const audio = new AudioEngine();
 
@@ -160,6 +165,40 @@ el.autoQualityBtn.addEventListener('click', () => {
   if (!sim.config.autoQuality) sim.config.qualityTier = 0; // 关闭时恢复全质量
   el.autoQualityBtn.textContent = sim.config.autoQuality ? '⚙ 自动降级：开' : '⚙ 自动降级：关';
 });
+
+// ---------- 初始条件（§9.6）：改完滑杆 → 🎲 重开宇宙应用 ----------
+el.initFilament = document.getElementById('init-filament');
+el.initFilamentVal = document.getElementById('init-filament-val');
+el.initDisp = document.getElementById('init-disp');
+el.initDispVal = document.getElementById('init-disp-val');
+el.initBias = document.getElementById('init-bias');
+el.initBiasVal = document.getElementById('init-bias-val');
+el.regenBtn = document.getElementById('btn-regen');
+
+function syncInitConfig() {
+  sim.config.filamentStrength = parseFloat(el.initFilament.value);
+  sim.config.velocityDispersion = parseFloat(el.initDisp.value);
+  sim.config.massBias = parseFloat(el.initBias.value);
+  el.initFilamentVal.textContent = sim.config.filamentStrength.toFixed(1) + '×';
+  el.initDispVal.textContent = sim.config.velocityDispersion.toFixed(2) + '×';
+  el.initBiasVal.textContent = (sim.config.massBias > 0 ? '+' : '') + sim.config.massBias.toFixed(1);
+  localStorage.setItem(INIT_CFG_KEY, JSON.stringify({
+    filamentStrength: sim.config.filamentStrength,
+    velocityDispersion: sim.config.velocityDispersion,
+    massBias: sim.config.massBias,
+  }));
+}
+// 先把持久化值回填滑杆再同步：sim 构造时已注入 localStorage 的初始条件，
+// 若直接用滑杆 HTML 默认值同步，会把持久化配置冲掉
+el.initFilament.value = String(sim.config.filamentStrength);
+el.initDisp.value = String(sim.config.velocityDispersion);
+el.initBias.value = String(sim.config.massBias);
+el.initFilament.addEventListener('input', syncInitConfig);
+el.initDisp.addEventListener('input', syncInitConfig);
+el.initBias.addEventListener('input', syncInitConfig);
+syncInitConfig();
+
+el.regenBtn.addEventListener('click', () => location.reload());
 
 // FPS 看门狗：EMA 帧率连续偏低则升档降级（0→1→2），恢复良好再缓慢降档。
 // 档位只在 <40 判低、>50 判好，40~50 为稳持带，避免临界帧率来回跳。

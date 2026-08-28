@@ -137,7 +137,7 @@ const EVENT_MESSAGES = {
 };
 
 export class CosmicSimulation {
-  constructor() {
+  constructor(initialConfig = {}) {
     this.time = 0;
     this.events = [];
     // 运行时可调配置（UI 滑杆直通）：
@@ -148,10 +148,16 @@ export class CosmicSimulation {
     //   maxDetailBodies  全部活跃系统的细节天体总数上限
     //   qualityTier      降级档位 0/1/2（由 main.js 的 FPS 看门狗维护；0=全质量）
     //   autoQuality      低帧率自动降级开关
+    // 初始条件（仅构造时生效，"🎲 重开宇宙"后应用）：
+    //   filamentStrength    纤维凝聚强度：越高越多暗物质晕贴小球航向分布（默认 1）
+    //   velocityDispersion  速度弥散：物质初速的随机散布倍率，1=自然爆炸（默认 1）
+    //   massBias            质量函数偏置：-1 偏小质量、+1 偏大质量（默认 0）
     this.config = {
       wormholeDist: 480, wormholeDuration: 1.4, wormholeWindow: 8,
       maxDetailSystems: 3, maxDetailBodies: 500,
       qualityTier: 0, autoQuality: true,
+      filamentStrength: 1, velocityDispersion: 1, massBias: 0,
+      ...initialConfig,
     };
     this.seenLevels = new Set();
     this.seenMilestones = new Set();
@@ -214,18 +220,21 @@ export class CosmicSimulation {
   }
 
   _init() {
+    const cfg = this.config;
     // 先确定小球的初始喷射方向。部分暗物质晕会分布在这个方向附近，
     // 形成一条自然的高密度纤维结构，因此小球有机会一路遇到各类天体；
     // 但它没有目标清单，是否相遇完全由引力和惯性决定。
     const probeDir = randomUnit();
     // 所有物质都诞生于同一奇点附近，但初始速度很大。
+    // velocityDispersion 缩放随机散布（保持平均速度不变）：0.3=整齐膨胀，2=剧烈湍流
+    const disp = cfg.velocityDispersion;
     for (let i = 0; i < N_PARTICLES; i++) {
       const dir = randomUnit();
       const r = 0.015 + Math.pow(Math.random(), 1.4) * 0.30;
-      const speed = BASE_SPEED * (0.82 + Math.random() * 0.62);
+      const speed = BASE_SPEED * (1 + (0.82 + Math.random() * 0.62 - 1) * disp);
       const tan = randomUnit(1);
       // 切向只占很小比例，保证视觉上是“爆炸式径向飞散”
-      const tv = 0.20 + Math.random() * 0.35;
+      const tv = (0.20 + Math.random() * 0.35) * disp;
       this.particles.push({
         pos: [dir[0] * r, dir[1] * r, dir[2] * r],
         vel: [
@@ -245,18 +254,27 @@ export class CosmicSimulation {
     }
 
     // 暗物质晕（未来天体的引力种子），同样被大爆炸高速抛出。
+    // massBias 在小质量与巨质量之间搬运数量份额（-1..1），中档数量不变。
+    const countFor = (def) => {
+      const b = cfg.massBias;
+      const f = def.key === 'small' ? 1 - b * 0.5 : def.key === 'giant' ? 1 + b : 1;
+      return Math.max(2, Math.round(def.count * f));
+    };
     let idx = 0;
     for (const def of CLASS_DEFS) {
-      for (let k = 0; k < def.count; k++) {
+      const count = countFor(def);
+      for (let k = 0; k < count; k++) {
         let dir = randomUnit();
         // 宇宙纤维结构：越大/越远的系统越可能贴近小球航向附近。
         // 这不是目标航线，只是提高自然相遇概率；相遇后仍完全由物理决定。
+        // filamentStrength 整体缩放贴附概率：0=完全均匀各向同性，2=强纤维
         let biasProb = 0.55;
         let scatterScale = 0.12;
         if (def.key === 'small') { biasProb = 0.65; scatterScale = 0.09; }
         else if (def.key === 'medium') { biasProb = 0.80; scatterScale = 0.06; }
         else if (def.key === 'large') { biasProb = 0.88; scatterScale = 0.035; }
         else { biasProb = 0.92; scatterScale = 0.025; }
+        biasProb = Math.min(0.98, biasProb * cfg.filamentStrength);
         if (Math.random() < biasProb) {
           const scatter = randomUnit(1);
           const bx = probeDir[0] + scatter[0] * scatterScale;
@@ -268,7 +286,7 @@ export class CosmicSimulation {
         // 暴胀已经把暗物质晕推到很远的地方；奇点附近是空的。
         // 不同类型沿径向分带：小质量晕最近，巨质量黑洞种子最远，
         // 小球航行时才会由近到远、由小到大逐步遇到。
-        const t = k / Math.max(1, def.count - 1);
+        const t = count > 1 ? k / (count - 1) : 0;
         let r;
         if (def.key === 'small') r = 180 + t * 1800 + Math.random() * 80;
         else if (def.key === 'medium') r = 380 + t * 2800 + Math.random() * 150;
