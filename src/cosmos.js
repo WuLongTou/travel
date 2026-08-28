@@ -181,8 +181,6 @@ export class CosmicSimulation {
       // 上一物理步的位置：渲染层在两物理步之间插值，消除固定步长造成的“一颤一颤”
       prevPos: [0, 0, 0],
       vel: [0, 0, 0],
-      // 上一渲染帧的速度：渲染层据此估算加速度，被引力急拉时锁住镜头航向
-      prevVel: [0, 0, 0],
       phase: 'bigbang',
       phaseTime: 0,
       nearestSystem: -1,
@@ -209,18 +207,6 @@ export class CosmicSimulation {
       deathType: 'generic',
       // 被捕获的位置：死亡特效（烧蚀/汽化/潮汐涟漪）播放点
       deathPos: [0, 0, 0],
-      // ---- 绕行检测：判定小球在"自由航行"还是"绕着某天体互动" ----
-      // orbitAngleAcc：相对 influencer 连线方向角的衰减累计（指数窗 ~1.4s），
-      // 直线飞掠时几乎不增长，绕弧线时持续增长；
-      // orbitTangent：相对速度的切向占比（绕行时高，直线冲时低）；
-      // straightTime：连续近似直线飞行时长（退出交互的判据）；
-      // interactCooldown：退出交互后的冷却，杜绝 cruise↔interact 来回跳。
-      orbitAngleAcc: 0,
-      orbitTangent: 0,
-      straightTime: 0,
-      interactCooldown: 0,
-      _orbitSeed: -1,
-      _orbitDirPrev: [1, 0, 0],
       // 死亡序列状态：true = 正在坠入/汽化/被撕碎（物理冻结，渲染层播死亡演出），
       // 结束后才真正重生（渲染层据此做潮汐拉伸/汽化收缩等小球演出）
       dying: false,
@@ -1295,50 +1281,6 @@ export class CosmicSimulation {
     pr.influencer = bestInf;
     pr.influenceStrength = bestStr;
 
-    // ---- 绕行检测：自由航行 = 没有绕任何一个天体运动 ----
-    // 每步累计"相对 influencer 连线方向转过的角度"（指数衰减窗），
-    // 并计算相对速度的切向占比：
-    //   直线飞掠 → 方向角几乎不转、切向占比低 → free flight；
-    //   被束缚绕行 → 方向角持续累计、切向占比高 → 与天体互动。
-    // 只依赖运动学量，不依赖被修改过的引力公式量纲，稳健且可调。
-    pr.interactCooldown = Math.max(0, pr.interactCooldown - dt);
-    if (pr.influencer >= 0) {
-      const s = this.seeds[pr.influencer];
-      const rx = pr.pos[0] - s.pos[0];
-      const ry = pr.pos[1] - s.pos[1];
-      const rz = pr.pos[2] - s.pos[2];
-      const rl = Math.max(1e-6, Math.hypot(rx, ry, rz));
-      const nx = rx / rl, ny = ry / rl, nz = rz / rl;
-      if (pr.influencer !== pr._orbitSeed) {
-        // 目标系统切换：清空累计，从当前方向重新开始观测
-        pr._orbitSeed = pr.influencer;
-        pr.orbitAngleAcc = 0;
-        pr.straightTime = 0;
-        pr._orbitDirPrev = [nx, ny, nz];
-      }
-      const prev = pr._orbitDirPrev;
-      const dot = Math.min(1, Math.max(-1, prev[0] * nx + prev[1] * ny + prev[2] * nz));
-      const dTheta = Math.acos(dot);
-      pr.orbitAngleAcc = pr.orbitAngleAcc * Math.exp(-dt / 1.4) + dTheta;
-      const vs = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
-      if (vs > 1e-4) {
-        const vr = pr.vel[0] * nx + pr.vel[1] * ny + pr.vel[2] * nz;
-        const vt = Math.sqrt(Math.max(0, vs * vs - vr * vr));
-        pr.orbitTangent = vt / vs;
-      }
-      pr._orbitDirPrev = [nx, ny, nz];
-      if (pr.orbitAngleAcc < 0.6 && pr.orbitTangent < 0.35) {
-        pr.straightTime += dt;
-      } else {
-        pr.straightTime = 0;
-      }
-    } else {
-      pr._orbitSeed = -1;
-      pr.orbitAngleAcc = 0;
-      pr.orbitTangent = 0;
-      pr.straightTime = 0;
-    }
-
     // 捕获检测：落到天体核心/事件视界就重生，不做任何预定弹射。
     // 注意：星团/星系/超星系团本身是"集合"，不会作为整体捕获小球；
     // 小球只会被这些集合中的单个成员（恒星/行星/黑洞）持久捕获。
@@ -2406,17 +2348,9 @@ export function createCosmosRenderer(canvas, sim) {
   const state = {
     time: 0, timeScale: 0.8, musicIntensity: 1, follow: true,
     physAcc: 0,
-    dirSmooth: new THREE.Vector3(-1, 0, 0).normalize(),
-    // 智能镜头三种模式：
-    //   'cruise'  跟拍小球（自由航行）
-    //   'interact' 交互锁定（拉远框选小球 + 影响力系统）
-    //   'detail'  细节框选（框选小球 + 最近一个 detail body）
-    // 不同模式有不同的 followDist / 目标 / 视野比例
-    mode: 'cruise',
-    modeLerp: 0,   // 0=完全 cruise, 1=完全 interact/detail；用于平滑过渡
-    detailAnchor: [0, 0, 0], // detail 模式的框选对象
-    // 模式持续时间：超时后回落到 cruise，避免镜头长期卡在大视角
-    modeHold: 0,
+    // 轨迹跟拍相机的固定世界方位（不随小球速度/模式变化）：
+    // az 方位角、el 俯角（≈31°）、dist 距离——只平移，永不旋转
+    followView: { az: -2.35, el: 0.54, dist: 50 },
   };
 
   const _v1 = new THREE.Vector3();
@@ -2723,9 +2657,6 @@ export function createCosmosRenderer(canvas, sim) {
       lastProbeGeneration = pr.generation;
       trailCount = 0;
       trailGeo.setDrawRange(0, 0);
-      // 重生后速度方向突变：立即把平滑方向对准新航向，避免镜头甩偏
-      const pv0 = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
-      if (pv0 > 0.02) state.dirSmooth.set(pr.vel[0] / pv0, pr.vel[1] / pv0, pr.vel[2] / pv0);
       // 死亡方式驱动的特效与配色（虫洞逃逸不播死亡特效）；
       // 死亡序列起点已播过则不重复
       state._deathFx = DEATH_FX[pr.deathType] || DEATH_FX.generic;
@@ -2812,221 +2743,24 @@ export function createCosmosRenderer(canvas, sim) {
         controls.target.lerp(_v3, Math.min(1, dtReal * 2.4));
         camera.lookAt(controls.target);
       } else {
-        // 智能镜头第二阶段：跟拍小球，根据状态切换模式
+        // ---- 轨迹跟拍相机（唯一自动镜头）----
+        // 完全不跟随小球的速度方向（用户要求去掉所有"跟随小球视角"）：
+        // 相机保持固定的世界方位偏移，只随小球平移、永不旋转——
+        // 轨迹在画面里朝固定方向稳定延伸，足够远（50 单位、约 30° 俯角），
+        // 任何绕行/引力拉扯都不会引起镜头旋转或晃动。
         const pv = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
-        // ---- 决定当前镜头模式（必须在更新 dirSmooth 之前算） ----
-        // 优先级：detail > interact > cruise
-        // interact/detail 的进入条件更宽：只要小球进入了"某系统的强引力范围"，
-        // 镜头立刻切到上帝视角，避免在引力拉扯时跟拍视角甩来甩去。
-        let mode = 'cruise';
-        let anchorX = 0, anchorY = 0, anchorZ = 0;
-        let aabbRadius = 0;
-        if (sim.activeDetails.length > 0) {
-          let bestB = null;
-          let bestD = Infinity;
-          for (const s of sim.activeDetails) {
-            for (const b of s.detail.bodies) {
-              if (b._hidden) continue;
-              const d = Math.hypot(b.pos[0] - px, b.pos[1] - py, b.pos[2] - pz);
-              if (d < bestD) { bestD = d; bestB = b; }
-            }
-          }
-          // 离小球最近的 detail body：切 detail 模式让用户看清"它在与什么交互"。
-          // 同样带滞回：进入 0.6R，维持放宽到 0.85R，避免在成员密集的系统
-          // 内部因最近距离抖动而 detail↔cruise 闪跳。
-          if (bestB) {
-            const parentR = sim._systemRadius(sim.seeds[bestB.parent]);
-            const inDetail = state.mode === 'detail' && state._detailBody === bestB;
-            if (bestD < (inDetail ? parentR * 0.85 : parentR * 0.6)) {
-              mode = 'detail';
-              state._detailBody = bestB;
-              anchorX = bestB.pos[0];
-              anchorY = bestB.pos[1];
-              anchorZ = bestB.pos[2];
-              aabbRadius = Math.max(2, bestD * 0.9 + bestB.radius * 1.2);
-            }
-          }
-        }
-        if (mode === 'cruise' && pr.influencer >= 0) {
-          const s = sim.seeds[pr.influencer];
-          const sd = Math.hypot(px - s.pos[0], py - s.pos[1], pz - s.pos[2]);
-          const R = sim._systemRadius(s);
-          // 交互判定（带滞回）：自由航行 = 没有绕任何一个天体运动，
-          // 且离天体还有较远距离。只有真正深入系统本体、并确实在绕行
-          // （方向角持续累计）或被极强束缚（黑洞贴脸）时才切上帝视角；
-          // 远距离的引力偏转 / 直线穿越不再误触发。
-          // 进入阈值 0.9R 与维持阈值 1.9R 构成滞回带，
-          // 退出后 interactCooldown 冷却 4s，杜绝 cruise↔interact 来回跳。
-          if (state.mode === 'interact' && pr.influencer === state._interactSeed) {
-            // 维持：阈值放宽，且未恢复持续直线飞行
-            if (sd < R * 1.9 && pr.straightTime < 2.5) {
-              mode = 'interact';
-            }
-          } else if (
-            pr.interactCooldown <= 0
-            && sd < R * 0.9
-            && (pr.orbitAngleAcc > 2.0 || pr.influenceStrength > 0.9)
-          ) {
-            mode = 'interact';
-          }
-          if (mode === 'interact') {
-            state._interactSeed = pr.influencer;
-            anchorX = s.pos[0]; anchorY = s.pos[1]; anchorZ = s.pos[2];
-            aabbRadius = Math.max(3, sd * 0.55 + R * 0.9);
-          }
-        }
-        // 持续计数：每次进入 interact/detail 就重置 modeHold，超时后回到 cruise
-        if (mode === state.mode) {
-          // 模式稳定后倒计时；只有持续满足条件才让交互模式自然结束
-          if (mode !== 'cruise') {
-            state.modeHold = Math.max(0, state.modeHold - dtReal);
-            if (state.modeHold <= 0) {
-              mode = 'cruise';
-              state._holdExpired = true; // modeHold 到期不是条件退出，不设冷却
-            }
-          }
-        } else {
-          state._modeTransitions = (state._modeTransitions || 0) + 1;
-          state._lastTransition = `${state.mode}->${mode}@t=${sim.time.toFixed(1)}`;
-          // 从 interact 因条件不满足而退出时启动冷却：小球刚离开系统时
-          // 绕行判据可能短暂抖动，冷却期内不再进入，镜头稳定回到跟拍
-          if (state.mode === 'interact' && mode === 'cruise' && !state._holdExpired) {
-            pr.interactCooldown = 4.0;
-          }
-          state._holdExpired = false;
-          state.mode = mode;
-          state.modeHold = (mode === 'cruise') ? 0 : 6.0; // 交互模式至少持续 6s
-        }
-        // 模式混合：cruise↔interact/detail 平滑过渡
-        // 独立于 modeHold：进入交互模式时 0.5 秒内 ml 升到 1
-        const targetLerp = (mode === 'cruise') ? 0 : 1;
-        const lerpRate = (mode === 'cruise') ? 1.0 : 4.0; // 进入快，退出更慢
-        state.modeLerp += (targetLerp - state.modeLerp) * Math.min(1, dtReal * lerpRate);
-        const ml = state.modeLerp;
-        const mlVisible = ml; // 视觉过渡用的混合量
-
-        // ---- dirSmooth 只在 cruise 模式下更新 ----
-        // 关键修复：引力拉扯下速度方向会一帧大角度反转，让镜头甩来甩去。
-        // 这里采用三重防护：
-        //   1) lerp 上限 0.06/帧（极慢收敛），让 dirSmooth 反映"惯性航向"而非"瞬时速度"
-        //   2) xz 平面优先：保证 cruise 模式镜头不出现 y 轴急剧旋转
-        //   3) 若小球加速度大于阈值（被引力急拉），暂停更新 dirSmooth，让镜头保持当前角度
-        // ---- 绕行广角（用户反馈）：小球绕天体运动时，镜头不再贴着追速度方向
-        // （绕圈时方向持续旋转，跟拍视角会一直打转、又近又晃）。改为：
-        //   检测到绕行（orbitAngleAcc 升高）→ 镜头拉远抬高、航向跟随近乎冻结，
-        // 让小球带着轨迹在画面里转圈；恢复直线飞行后平滑回到正常跟拍。
-        // smoothstep 窗口按信号量纲校准：orbitAngleAcc 是 ~1.4s 指数窗内
-        // 累计的方向角（弧度），稳定绕行时 ≈ 角速率 × 1.4——
-        // 慢速大圈(~0.5 rad/s)≈0.7，快速小圈(≥1 rad/s)≥1.4，直线飞掠≈0
-        const orbitFactor = smoothstep(0.3, 1.5, pr.orbitAngleAcc);
-        if (mode === 'cruise' && pv > 0.02) {
-          // 计算小球加速度大小：影响剧烈时（dv/帧 > 0.5）就锁住 dirSmooth
-          const ax = pr.vel[0] - pr.prevVel[0];
-          const ay = pr.vel[1] - pr.prevVel[1];
-          const az = pr.vel[2] - pr.prevVel[2];
-          const accelMag = Math.hypot(ax, ay, az) / Math.max(dtReal, 1e-4);
-          if (accelMag < 0.6) {
-            const txv = pr.vel[0] / pv;
-            const tyv = pr.vel[1] / pv;
-            const tzv = pr.vel[2] / pv;
-            // 角度偏差大时缓慢收敛（避免重生/急转后甩）
-            const dot = Math.min(1, Math.max(-1, state.dirSmooth.x * txv + state.dirSmooth.y * tyv + state.dirSmooth.z * tzv));
-            // 绕行时把收敛率压到 ~15%：镜头方位角近乎固定，轨迹完整入画
-            const k = Math.min(0.06, dtReal * (0.6 + (1 - dot) * 1.2)) * (1 - 0.85 * orbitFactor);
-            state.dirSmooth.x += (txv - state.dirSmooth.x) * k;
-            state.dirSmooth.y += (tyv - state.dirSmooth.y) * k;
-            state.dirSmooth.z += (tzv - state.dirSmooth.z) * k;
-            // 归一化；若 xz 投影过小，强制 y 分量为 0 避免垂直翻转
-            const dl = Math.hypot(state.dirSmooth.x, state.dirSmooth.y, state.dirSmooth.z) || 1;
-            state.dirSmooth.x /= dl; state.dirSmooth.y /= dl; state.dirSmooth.z /= dl;
-          }
-        }
-        // 记录上一物理步速度，下一帧用于判断加速度
-        pr.prevVel = [pr.vel[0], pr.vel[1], pr.vel[2]];
-        _v1.set(px, py, pz);
-        const tsBoost = Math.max(0.3, Math.sqrt(state.timeScale));
-
-        // ---- 计算镜头目标位置 / 视点 ----
-        // 关键修复：target 和 camera 位置都按当前 mode 计算，不按 ml 阈值分支。
-        // 之前用 ml<0.01 切换 cruise/interact 公式，导致 mode 切回 cruise 但 ml 还是
-        // 高位时，target 已被 lerp 拉回 probe，但 camera 还停在 (probe+anchor)/2 视点
-        // 的"上帝视角"位置，造成 probe 偏离屏幕中央。
-        // 视点：cruise = probe；interact/detail = (probe + anchor) / 2
-        let targetX, targetY, targetZ;
-        if (mode === 'cruise') {
-          targetX = px; targetY = py; targetZ = pz;
-        } else {
-          targetX = (px + anchorX) * 0.5;
-          targetY = (py + anchorY) * 0.5;
-          targetZ = (pz + anchorZ) * 0.5;
-        }
-        // ml 用来平滑 target 的过渡（避免 mode 切换时 target 跳变）
-        const finalTgtX = px + (targetX - px) * ml;
-        const finalTgtY = py + (targetY - py) * ml;
-        const finalTgtZ = pz + (targetZ - pz) * ml;
-        _v3.set(finalTgtX, finalTgtY, finalTgtZ);
-
-        // 镜头距离：根据 AABB 半径自动算出能框下所有对象的距离
-        const fovRad = (camera.fov * Math.PI) / 180;
-        const distForFrame = (aabbRadius * 1.65) / Math.max(0.05, Math.sin(fovRad * 0.5));
-        // cruise 基础 16；绕行时按 orbitFactor 拉远到最高 40，让轨迹入画
-        const cruiseDist = 16 + 24 * orbitFactor;
-        const targetDist = Math.max(
-          cruiseDist * (1 - ml) + (distForFrame > cruiseDist ? distForFrame : cruiseDist) * ml,
-          12,
+        const fv = state.followView; // { az, el, dist } 固定世界方位
+        const cAz = Math.cos(fv.az), sAz = Math.sin(fv.az);
+        const cEl = Math.cos(fv.el), sEl = Math.sin(fv.el);
+        _v2.set(
+          px + sAz * cEl * fv.dist,
+          py + sEl * fv.dist,
+          pz + cAz * cEl * fv.dist,
         );
-
-        // ---- 镜头位置（按 mode 计算） ----
-        let cruiseX, cruiseY, cruiseZ;
-        let interactX, interactY, interactZ;
-
-        // cruise 位置：沿 dirSmooth 反方向退 + 抬高。
-        // dirSmooth 的 xz 投影过小时（y 轴运动），保留当前 camera 相对 probe 的角度。
-        const dxs = state.dirSmooth.x;
-        const dzs = state.dirSmooth.z;
-        const dlen2 = dxs * dxs + dzs * dzs;
-        if (dlen2 > 1e-3) {
-          const ilen = 1 / Math.sqrt(dlen2);
-          cruiseX = px + dxs * ilen * (-targetDist);
-          cruiseZ = pz + dzs * ilen * (-targetDist);
-        } else {
-          const offX = camera.position.x - px;
-          const offZ = camera.position.z - pz;
-          const offLen = Math.hypot(offX, offZ) || 1;
-          cruiseX = px + (offX / offLen) * (-targetDist);
-          cruiseZ = pz + (offZ / offLen) * (-targetDist);
-        }
-        // 绕行时镜头抬高（最高 +9）：俯角看到轨迹圆；直线飞行回落到 +3
-        cruiseY = py + 3.0 + 9 * orbitFactor;
-
-        // interact/detail 位置：视点(target)反 anchor 方向拉远，俯视
-        let dx, dy, dz;
-        if (mode === 'interact' || mode === 'detail') {
-          dx = targetX - anchorX;
-          dy = targetY - anchorY;
-          dz = targetZ - anchorZ;
-        } else {
-          dx = targetX - px;
-          dy = targetY - py;
-          dz = targetZ - pz;
-        }
-        const dl = Math.hypot(dx, dy, dz) || 1;
-        dx /= dl; dy /= dl; dz /= dl;
-        const rightLen = Math.hypot(dx, dz) || 1;
-        const nx = dx / rightLen, nz = dz / rightLen;
-        interactX = targetX + nx * (-targetDist * 0.85);
-        interactY = targetY + targetDist * 0.35;
-        interactZ = targetZ + nz * (-targetDist * 0.85);
-
-        // 混合两个位置（用 ml 而不是 mlVisible 阈值，避免 ml=0 时跳变）
-        const camX = cruiseX * (1 - ml) + interactX * ml;
-        const camY = cruiseY * (1 - ml) + interactY * ml;
-        const camZ = cruiseZ * (1 - ml) + interactZ * ml;
-        _v2.set(camX, camY, camZ);
-
-        // 平滑插值（位置/视点都做 0.10/帧 上限；引力拉扯下保证镜头不甩）
-        const posK = Math.min(0.10, dtReal * (2.2 + pv * 0.10) * tsBoost);
-        const tgtK = Math.min(0.12, dtReal * (3.2 + pv * 0.10) * tsBoost);
+        _v3.set(px, py, pz);
+        const tsBoost = Math.max(0.3, Math.sqrt(state.timeScale));
+        const posK = Math.min(0.10, dtReal * (2.2 + pv * 0.05) * tsBoost);
+        const tgtK = Math.min(0.12, dtReal * (3.2 + pv * 0.05) * tsBoost);
         camera.position.lerp(_v2, posK);
         controls.target.lerp(_v3, tgtK);
         camera.lookAt(controls.target);

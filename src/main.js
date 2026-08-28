@@ -233,11 +233,11 @@ function watchPerformance(dt) {
   }
 }
 
-// 智能镜头：先全局见证结构形成，黑洞时代自动跟拍；关闭后自由观察
+// 轨迹跟拍开关：开 = 固定广角自动跟拍；关 = 自由观察
 el.followBtn.addEventListener('click', () => {
   const next = !renderer.state.follow;
   renderer.setFollowEnabled(next);
-  el.followBtn.textContent = next ? '🎥 智能镜头：开' : '🎥 智能镜头：关';
+  el.followBtn.textContent = next ? '🎥 轨迹跟拍：开' : '🎥 轨迹跟拍：关';
 });
 
 // ---------- 主循环 ----------
@@ -279,15 +279,12 @@ function showEvent(text) {
 
 // ---------- 航行信息面板 ----------
 // 低频刷新（4Hz）：面板是给人读的，无需每帧重排 DOM
-const CAM_LABELS = { cruise: '跟拍', interact: '交互框选', detail: '细节框选' };
 let hudTimer = 0;
 function updateHud() {
   const pr = sim.probe;
   const speed = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
   el.hudProbe.textContent = `第 ${pr.generation} 代 · 速度 ${speed.toFixed(1)}`;
-  el.hudCam.textContent = renderer.state.follow
-    ? (CAM_LABELS[renderer.state.mode] || renderer.state.mode)
-    : '自由观察';
+  el.hudCam.textContent = renderer.state.follow ? '轨迹跟拍' : '自由观察';
   const ns = pr.nearestSystem >= 0 ? sim.seeds[pr.nearestSystem] : null;
   if (ns) {
     const stage = !ns.awakened ? '休眠'
