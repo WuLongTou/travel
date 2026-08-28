@@ -24,6 +24,10 @@ const el = {
   hudCam: document.getElementById('hud-cam'),
   hudNear: document.getElementById('hud-near'),
   hudCosmos: document.getElementById('hud-cosmos'),
+  eventPanel: document.getElementById('event-panel'),
+  eventList: document.getElementById('event-list'),
+  eventLogBtn: document.getElementById('btn-event-log'),
+  exportLogBtn: document.getElementById('btn-export-log'),
 };
 
 function setStatus(text) {
@@ -126,6 +130,14 @@ el.whDur.addEventListener('input', syncWormholeConfig);
 el.whWin.addEventListener('input', syncWormholeConfig);
 syncWormholeConfig();
 
+// ---------- 事件日志面板开关与导出 ----------
+el.eventLogBtn.addEventListener('click', () => {
+  const open = el.eventPanel.classList.toggle('open');
+  el.eventLogBtn.textContent = open ? '📜 关闭日志' : '📜 事件日志';
+  if (open) renderEventList();
+});
+el.exportLogBtn.addEventListener('click', exportLog);
+
 // 智能镜头：先全局见证结构形成，黑洞时代自动跟拍；关闭后自由观察
 el.followBtn.addEventListener('click', () => {
   const next = !renderer.state.follow;
@@ -194,6 +206,46 @@ function updateHud() {
   el.hudCosmos.textContent = `已成形系统 ${formed} · 细节体 ${sim.activeDetails.length}`;
 }
 
+// ---------- 事件日志面板（可回放时间线 + 导出） ----------
+const EVENT_LIST_CAP = 80; // 面板最多渲染最近 80 条，完整内容走导出
+// 里程碑/结局类事件在时间线里高亮
+const MILESTONE_RE = /成形|诞生|出现|形成|点亮|撕碎|汽化|烧蚀|跃迁/;
+function renderEventList() {
+  if (el.eventList.dataset.n === String(sim.events.length)) return;
+  el.eventList.dataset.n = String(sim.events.length);
+  const items = sim.events.slice(-EVENT_LIST_CAP);
+  el.eventList.innerHTML = items.map((e) => {
+    const cls = MILESTONE_RE.test(e.text) ? ' class="ev-milestone"' : '';
+    return `<div${cls}><span class="ev-t">${e.time.toFixed(1)}s</span>${e.text}</div>`;
+  }).join('');
+  el.eventList.scrollTop = el.eventList.scrollHeight;
+}
+
+// 完整日志：宇宙状态 + 全部事件 + 周期快照，JSON 一把导出（可回放时间线）
+function buildLogJson() {
+  const pr = sim.probe;
+  return JSON.stringify({
+    exportedAt: new Date().toISOString(),
+    simTime: +sim.time.toFixed(1),
+    era: sim.era,
+    generation: pr.generation,
+    respawns: pr.respawns,
+    config: sim.config,
+    probe: { pos: pr.pos.map((v) => +v.toFixed(1)), speed: +Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]).toFixed(1) },
+    events: sim.events,
+    ticks: sim.ticks,
+  }, null, 2);
+}
+
+function exportLog() {
+  const blob = new Blob([buildLogJson()], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `cosmos-log-${sim.time.toFixed(0)}s.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 function renderFrame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
@@ -201,7 +253,11 @@ function renderFrame(now) {
   const label = `${sim.time.toFixed(1)}s · ${sim.era} · ${sim.probe.label}`;
   if (el.status.textContent !== label) setStatus(label);
   hudTimer += dt;
-  if (hudTimer >= 0.25) { hudTimer = 0; updateHud(); }
+  if (hudTimer >= 0.25) {
+    hudTimer = 0;
+    updateHud();
+    if (el.eventPanel.classList.contains('open')) renderEventList();
+  }
   if (sim.events.length > lastEventIndex) {
     const fresh = sim.events.slice(lastEventIndex);
     lastEventIndex = sim.events.length;
@@ -278,6 +334,7 @@ window.__stars = renderer.stars;
 window.__ripples = renderer.ripples;
 window.__audio = audio;
 window.__frames = 0;
+window.__exportLog = buildLogJson;
 {
   const origRender = renderer.render.bind(renderer);
   renderer.render = (...a) => { window.__frames++; return origRender(...a); };

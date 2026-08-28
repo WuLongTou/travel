@@ -236,10 +236,52 @@ button:active {
   transform: translate(-50%, calc(-50% + 90px));
 }
 
+/* 事件日志面板：默认折叠，左侧竖排时间线 */
+.event-panel {
+  position: fixed;
+  left: 26px;
+  top: 96px;
+  bottom: 88px;
+  width: 320px;
+  display: none;
+  flex-direction: column;
+  padding: 12px 14px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 10;
+}
+.event-panel.open { display: flex; }
+.event-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.event-panel-head .panel-title { margin-bottom: 0; }
+.event-panel-head button { min-width: 0; flex: none; padding: 5px 10px; font-size: 11.5px; }
+.event-list {
+  flex: 1;
+  overflow-y: auto;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--text);
+  scrollbar-width: thin;
+}
+.event-list .ev-t {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  margin-right: 6px;
+}
+.event-list .ev-milestone { color: #ffd9a0; }
+
 @media (max-width: 640px) {
   .panel { width: calc(100vw - 32px); right: 16px; bottom: 16px; }
   .legend { display: none; }
   .hud { display: none; }
+  .event-panel { display: none !important; }
   .title h1 { font-size: 20px; }
   .hint { display: none; }
   .event-toast { font-size: 12.5px; white-space: normal; width: 82vw; text-align: center; }

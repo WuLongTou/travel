@@ -23,6 +23,7 @@
       <button id="btn-file">📁 上传音乐</button>
       <button id="btn-mic">🎤 麦克风</button>
       <button id="btn-follow">🎥 智能镜头：开</button>
+      <button id="btn-event-log">📜 事件日志</button>
       <input type="file" id="file-input" accept="audio/*" hidden />
     </div>
     <div class="slider-row">
@@ -68,6 +69,15 @@
     <div class="hud-row"><span class="hud-k">镜头</span><span class="hud-v" id="hud-cam">—</span></div>
     <div class="hud-row"><span class="hud-k">最近系统</span><span class="hud-v" id="hud-near">—</span></div>
     <div class="hud-row"><span class="hud-k">宇宙</span><span class="hud-v" id="hud-cosmos">—</span></div>
+  </div>
+
+  <!-- 事件日志面板：可回放的完整事件时间线，默认折叠 -->
+  <div class="event-panel" id="event-panel">
+    <div class="event-panel-head">
+      <span class="panel-title">事件日志</span>
+      <button id="btn-export-log" title="导出完整日志 JSON（含事件与周期快照）">⬇ 导出</button>
+    </div>
+    <div class="event-list" id="event-list"></div>
   </div>
 
   <!-- 大事件提示 -->

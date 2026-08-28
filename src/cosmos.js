@@ -149,6 +149,9 @@ export class CosmicSimulation {
     this.seenMilestones = new Set();
     this.particles = [];
     this.seeds = [];
+    // 自动日志：周期性状态快照（事件本身已在 this.events，导出时合并）
+    this.ticks = [];
+    this.lastTickTime = 0;
     this.probe = {
       pos: [0, 0, 0],
       // 上一物理步的位置：渲染层在两物理步之间插值，消除固定步长造成的“一颤一颤”
@@ -1330,6 +1333,21 @@ export class CosmicSimulation {
     this._manageDetails(dt);
     // 小球完全由惯性 + 引力 + 阻尼驱动，没有预定航线。
     this._updateProbe(dt);
+
+    // 自动日志：每 30s 记录一条宇宙状态快照（供导出回放，不进 toast 队列）
+    if (this.time - this.lastTickTime >= 30) {
+      this.lastTickTime = this.time;
+      const pr = this.probe;
+      this.ticks.push({
+        t: +this.time.toFixed(1),
+        era: this.era,
+        gen: pr.generation,
+        speed: +Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]).toFixed(1),
+        pos: pr.pos.map((v) => +v.toFixed(1)),
+        formed: this.seeds.reduce((n, s) => n + (s.detail ? 1 : 0), 0),
+        detailBodies: this.activeDetails.reduce((n, s) => n + s.detail.bodies.length, 0),
+      });
+    }
   }
 }
 
