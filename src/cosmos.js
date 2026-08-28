@@ -2911,6 +2911,14 @@ export function createCosmosRenderer(canvas, sim) {
         //   1) lerp 上限 0.06/帧（极慢收敛），让 dirSmooth 反映"惯性航向"而非"瞬时速度"
         //   2) xz 平面优先：保证 cruise 模式镜头不出现 y 轴急剧旋转
         //   3) 若小球加速度大于阈值（被引力急拉），暂停更新 dirSmooth，让镜头保持当前角度
+        // ---- 绕行广角（用户反馈）：小球绕天体运动时，镜头不再贴着追速度方向
+        // （绕圈时方向持续旋转，跟拍视角会一直打转、又近又晃）。改为：
+        //   检测到绕行（orbitAngleAcc 升高）→ 镜头拉远抬高、航向跟随近乎冻结，
+        // 让小球带着轨迹在画面里转圈；恢复直线飞行后平滑回到正常跟拍。
+        // smoothstep 窗口按信号量纲校准：orbitAngleAcc 是 ~1.4s 指数窗内
+        // 累计的方向角（弧度），稳定绕行时 ≈ 角速率 × 1.4——
+        // 慢速大圈(~0.5 rad/s)≈0.7，快速小圈(≥1 rad/s)≥1.4，直线飞掠≈0
+        const orbitFactor = smoothstep(0.3, 1.5, pr.orbitAngleAcc);
         if (mode === 'cruise' && pv > 0.02) {
           // 计算小球加速度大小：影响剧烈时（dv/帧 > 0.5）就锁住 dirSmooth
           const ax = pr.vel[0] - pr.prevVel[0];
@@ -2923,7 +2931,8 @@ export function createCosmosRenderer(canvas, sim) {
             const tzv = pr.vel[2] / pv;
             // 角度偏差大时缓慢收敛（避免重生/急转后甩）
             const dot = Math.min(1, Math.max(-1, state.dirSmooth.x * txv + state.dirSmooth.y * tyv + state.dirSmooth.z * tzv));
-            const k = Math.min(0.06, dtReal * (0.6 + (1 - dot) * 1.2));
+            // 绕行时把收敛率压到 ~15%：镜头方位角近乎固定，轨迹完整入画
+            const k = Math.min(0.06, dtReal * (0.6 + (1 - dot) * 1.2)) * (1 - 0.85 * orbitFactor);
             state.dirSmooth.x += (txv - state.dirSmooth.x) * k;
             state.dirSmooth.y += (tyv - state.dirSmooth.y) * k;
             state.dirSmooth.z += (tzv - state.dirSmooth.z) * k;
@@ -2960,7 +2969,8 @@ export function createCosmosRenderer(canvas, sim) {
         // 镜头距离：根据 AABB 半径自动算出能框下所有对象的距离
         const fovRad = (camera.fov * Math.PI) / 180;
         const distForFrame = (aabbRadius * 1.65) / Math.max(0.05, Math.sin(fovRad * 0.5));
-        const cruiseDist = 16;
+        // cruise 基础 16；绕行时按 orbitFactor 拉远到最高 40，让轨迹入画
+        const cruiseDist = 16 + 24 * orbitFactor;
         const targetDist = Math.max(
           cruiseDist * (1 - ml) + (distForFrame > cruiseDist ? distForFrame : cruiseDist) * ml,
           12,
@@ -2986,7 +2996,8 @@ export function createCosmosRenderer(canvas, sim) {
           cruiseX = px + (offX / offLen) * (-targetDist);
           cruiseZ = pz + (offZ / offLen) * (-targetDist);
         }
-        cruiseY = py + 3.0;
+        // 绕行时镜头抬高（最高 +9）：俯角看到轨迹圆；直线飞行回落到 +3
+        cruiseY = py + 3.0 + 9 * orbitFactor;
 
         // interact/detail 位置：视点(target)反 anchor 方向拉远，俯视
         let dx, dy, dz;
