@@ -120,6 +120,14 @@ export const LEVEL_LABELS = {
   blackhole: '黑洞',
 };
 
+// 死亡文案：不同天体类型的死法不同，事件提示与特效（见渲染层 DEATH_FX）同步区分
+const DEATH_VERBS = {
+  atmosphere: (label) => `🔥 小球坠入【${label}】大气，烧蚀解体`,
+  vaporize: (label) => `☀️ 小球被【${label}】吞没汽化`,
+  tidal: (label) => `🕳️ 小球被【${label}】潮汐撕碎`,
+  generic: (label) => `🛟 小球被【${label}】完全捕获`,
+};
+
 const EVENT_LEVELS = ['planet', 'star', 'cluster', 'galaxy', 'supercluster', 'blackhole'];
 const EVENT_MESSAGES = {
   planet: '🪐 第一代行星凝聚成形',
@@ -165,6 +173,11 @@ export class CosmicSimulation {
       wormholeTimer: 0,
       wormholeFrom: [0, 0, 0],
       wormholeTo: [0, 0, 0],
+      // 死亡方式：atmosphere 大气烧蚀 / vaporize 恒星汽化 / tidal 潮汐撕碎 /
+      // wormhole 虫洞逃逸（不播死亡特效）/ generic 兜底。渲染层据此选特效。
+      deathType: 'generic',
+      // 被捕获的位置：死亡特效（烧蚀/汽化/潮汐涟漪）播放点
+      deathPos: [0, 0, 0],
     };
     this.activeDetails = [];
     this.lastSeedAwakenTime = -100;
@@ -836,7 +849,7 @@ export class CosmicSimulation {
     this._generateFrontierSeed();
   }
 
-  _respawnFrom(center, launchR, label, captureSeedIdx = -1) {
+  _respawnFrom(center, launchR, label, captureSeedIdx = -1, deathType = 'generic') {
     const pr = this.probe;
     // ---- 持续捕获检测：若短时间内反复被同一系统捕获，改用虫洞跃迁逃逸 ----
     if (
@@ -854,6 +867,9 @@ export class CosmicSimulation {
     pr.respawns += 1;
     pr.respawnFlash = 1;
     pr.respawnGrace = 6; // 重生后 6 秒内不再捕获，保证能飞出系统继续航行
+    // 记录死亡方式与位置（渲染层在generation变化时播放对应特效）
+    pr.deathType = deathType;
+    pr.deathPos = [pr.pos[0], pr.pos[1], pr.pos[2]];
     const rx = pr.pos[0] - center[0];
     const ry = pr.pos[1] - center[1];
     const rz = pr.pos[2] - center[2];
@@ -873,7 +889,8 @@ export class CosmicSimulation {
     pr.prevPos = pr.pos.slice();
     pr.vel = [ex * PROBE_RESPAWN_SPEED, ey * PROBE_RESPAWN_SPEED, ez * PROBE_RESPAWN_SPEED];
     pr.label = `自${label}系统重生航行`;
-    this.events.push({ time: this.time, text: `🛟 小球被【${label}】完全捕获，已在边缘重生第${pr.generation}代并继续航行` });
+    const verb = DEATH_VERBS[deathType] || DEATH_VERBS.generic;
+    this.events.push({ time: this.time, text: `${verb(label)}，已在边缘重生第${pr.generation}代并继续航行` });
   }
 
   // 虫洞跃迁：被持续捕获时不再重生到系统边缘，而是动画跳跃到远方一个新位置继续航行
@@ -1033,7 +1050,8 @@ export class CosmicSimulation {
       const cap = this._captureRadius(s);
       if (mature && pr.respawnGrace <= 0 && d < cap && (s.level === 'dust' || s.level === 'void' || s.level === 'planet' || s.level === 'star')) {
         // 在系统边缘之外重生，速度足够逃出，继续航行
-        this._respawnFrom(s.pos, Math.max(this._systemRadius(s) * 1.1, cap * 4), LEVEL_LABELS[s.level] || '天体', s.idx);
+        // 恒星整体捕获 = 汽化；星尘/行星 = 大气烧蚀
+        this._respawnFrom(s.pos, Math.max(this._systemRadius(s) * 1.1, cap * 4), LEVEL_LABELS[s.level] || '天体', s.idx, s.level === 'star' ? 'vaporize' : 'atmosphere');
         return;
       }
     }
@@ -1047,7 +1065,9 @@ export class CosmicSimulation {
         if (pr.respawnGrace <= 0 && d < hitR) {
           const parent = this.seeds[b.parent];
           const label = `${LEVEL_LABELS[parent.level] || '天体'}·${b.type === 'star' ? '恒星' : b.type === 'planet' ? '行星' : b.type === 'galaxy' ? '星系核' : b.type === 'gas' ? '星云气体' : '黑洞'}`;
-          this._respawnFrom(b.pos, Math.max(1.6, b.radius * 7), label, s.idx);
+          // 星系核/黑洞成员 = 潮汐撕碎；恒星 = 汽化；行星/气体 = 大气烧蚀
+          const deathType = (b.type === 'blackhole' || b.type === 'galaxy') ? 'tidal' : b.type === 'star' ? 'vaporize' : 'atmosphere';
+          this._respawnFrom(b.pos, Math.max(1.6, b.radius * 7), label, s.idx, deathType);
           return;
         }
       }
@@ -1898,6 +1918,75 @@ export function createCosmosRenderer(canvas, sim) {
   scene.add(respawnSprite);
   let lastProbeGeneration = sim.probe.generation;
 
+  // ---- 差异化死亡特效（§9.3 碰撞与吸积）----
+  // 小球死法不同，特效不同：
+  //   atmosphere 行星/星尘大气烧蚀：暖橙单环，慢扩散
+  //   vaporize   恒星吞没汽化：白炽强闪，快扩散短寿命
+  //   tidal      黑洞/星系核潮汐撕碎：蓝白三重涟漪（延迟回声），最长寿命
+  //   wormhole   虫洞逃逸：全屏虫洞叠加层已足够，不播死亡特效
+  //   generic    兜底 = 原蓝色重生环
+  const DEATH_FX = {
+    atmosphere: { ring: 0xff8a4a, launch: 0xffb36b, halo: 0xffc9a0, expand: 6.5, life: 1.6, rings: 1, glow: 0.5 },
+    vaporize: { ring: 0xfff3c4, launch: 0xffffff, halo: 0xfff3c4, expand: 12, life: 0.8, rings: 1, glow: 0.9 },
+    tidal: { ring: 0xa8d4ff, launch: 0x9fd0ff, halo: 0xbfe0ff, expand: 8.5, life: 1.9, rings: 3, glow: 0.7 },
+    generic: { ring: 0x8ef0ff, launch: 0x8ef0ff, halo: 0x9ff0ff, expand: 9, life: 1.1, rings: 1, glow: 0.5 },
+  };
+  // 死亡点特效池：3 道涟漪环 + 1 个中心炽光，按需激活
+  const deathRings = [0, 1, 2].map(() => {
+    const sprite = makeSprite(ringTex, 0xffffff);
+    sprite.visible = false;
+    sprite.renderOrder = 23;
+    scene.add(sprite);
+    return { sprite, active: false, age: 0, life: 1, expand: 9 };
+  });
+  const deathGlow = makeSprite(glowTex, 0xffffff);
+  deathGlow.visible = false;
+  deathGlow.renderOrder = 23;
+  scene.add(deathGlow);
+  let deathGlowAge = -1; // <0 表示未激活
+
+  // 在死亡位置生成对应类型的特效
+  function spawnDeathFx(pos, fx) {
+    deathRings.forEach((r, i) => {
+      r.active = i < fx.rings;
+      // 潮汐撕碎的第 2/3 道涟漪延迟出现，形成"撕碎回声"
+      r.age = -i * 0.24;
+      r.life = fx.life;
+      r.expand = fx.expand;
+      r.sprite.position.set(pos[0], pos[1], pos[2]);
+      r.sprite.material.color.setHex(fx.ring);
+      r.sprite.material.rotation = Math.random() * Math.PI;
+      r.sprite.visible = false;
+    });
+    deathGlowAge = 0;
+    deathGlow.position.set(pos[0], pos[1], pos[2]);
+    deathGlow.material.color.setHex(fx.ring);
+  }
+
+  function updateDeathFx(dt) {
+    for (const r of deathRings) {
+      if (!r.active) continue;
+      r.age += dt;
+      if (r.age < 0) continue; // 延迟未到
+      if (r.age >= r.life) { r.active = false; r.sprite.visible = false; continue; }
+      const k = r.age / r.life;
+      r.sprite.visible = true;
+      r.sprite.scale.setScalar(1.4 + k * r.expand * 3);
+      r.sprite.material.opacity = (1 - k) * 0.85;
+    }
+    if (deathGlowAge >= 0) {
+      const life = 0.55;
+      deathGlowAge += dt;
+      if (deathGlowAge >= life) { deathGlowAge = -1; deathGlow.visible = false; }
+      else {
+        const k = deathGlowAge / life;
+        deathGlow.visible = true;
+        deathGlow.scale.setScalar(1.5 + k * 6);
+        deathGlow.material.opacity = (1 - k) * 0.8;
+      }
+    }
+  }
+
   const TRAIL_N = 750;
   const trailPos = new Float32Array(TRAIL_N * 3);
   const trailCol = new Float32Array(TRAIL_N * 4);
@@ -2208,6 +2297,9 @@ export function createCosmosRenderer(canvas, sim) {
       // 重生后速度方向突变：立即把平滑方向对准新航向，避免镜头甩偏
       const pv0 = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
       if (pv0 > 0.02) state.dirSmooth.set(pr.vel[0] / pv0, pr.vel[1] / pv0, pr.vel[2] / pv0);
+      // 死亡方式驱动的特效与配色（虫洞逃逸不播死亡特效）
+      state._deathFx = DEATH_FX[pr.deathType] || DEATH_FX.generic;
+      if (pr.deathType !== 'wormhole') spawnDeathFx(pr.deathPos, state._deathFx);
     }
     probeMesh.position.set(px, py, pz);
     probeGlow.position.copy(probeMesh.position);
@@ -2217,18 +2309,22 @@ export function createCosmosRenderer(canvas, sim) {
     const glowScale = 3.5 * Math.max(0.7, Math.min(2.5, 16 / Math.max(camDist, 4)));
     probeGlow.scale.setScalar(glowScale);
     probeHalo.scale.setScalar(glowScale * 1.7);
-    const probeColor = pr.respawnFlash > 0.05 ? 0x9ff0ff : 0xffffff;
+    // 重生高亮配色跟随死亡方式：汽化偏白、烧蚀偏暖橙、潮汐偏蓝白
+    const deathFx = state._deathFx || DEATH_FX.generic;
+    const probeColor = pr.respawnFlash > 0.05 ? deathFx.halo : 0xffffff;
     probeGlow.material.color.setHex(probeColor);
-    probeHalo.material.color.setHex(pr.respawnFlash > 0.05 ? 0x9ff0ff : 0x9fc8ff);
+    probeHalo.material.color.setHex(pr.respawnFlash > 0.05 ? deathFx.halo : 0x9fc8ff);
 
     if (pr.respawnFlash > 0.01) {
       respawnSprite.visible = true;
       respawnSprite.position.copy(probeMesh.position);
       respawnSprite.scale.setScalar(1.6 + (1 - pr.respawnFlash) * 9);
       respawnSprite.material.opacity = Math.min(1, pr.respawnFlash * 1.1);
+      respawnSprite.material.color.setHex(deathFx.launch);
     } else {
       respawnSprite.visible = false;
     }
+    updateDeathFx(dtReal);
     pushTrail(px, py, pz);
 
     // 虫洞特效：probe.wormholeTimer > 0 时驱动全屏叠加层
