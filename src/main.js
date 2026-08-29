@@ -198,6 +198,16 @@ el.initDisp.addEventListener('input', syncInitConfig);
 el.initBias.addEventListener('input', syncInitConfig);
 syncInitConfig();
 
+// 初始条件只在构造时消费，改完必须重开宇宙。松手后让「重开宇宙」按钮呼吸，
+// 明确告诉用户下一步点哪里（静态角标见 index.html 的 <em> 提示）。
+// 注意：不能借用 #status —— 主循环每帧都会把它改写成"时间·纪元·小球状态"。
+function markRegenPending() {
+  el.regenBtn.classList.add('pending');
+}
+el.initFilament.addEventListener('change', markRegenPending);
+el.initDisp.addEventListener('change', markRegenPending);
+el.initBias.addEventListener('change', markRegenPending);
+
 el.regenBtn.addEventListener('click', () => location.reload());
 
 // FPS 看门狗：EMA 帧率连续偏低则升档降级（0→1→2），恢复良好再缓慢降档。

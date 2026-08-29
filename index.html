@@ -19,53 +19,53 @@
   <div class="panel">
     <div class="panel-title">控制</div>
     <div class="btn-row">
-      <button id="btn-play">▶ 播放示例音乐</button>
-      <button id="btn-file">📁 上传音乐</button>
-      <button id="btn-mic">🎤 麦克风</button>
-      <button id="btn-follow">🎥 智能镜头：开</button>
-      <button id="btn-event-log">📜 事件日志</button>
-      <button id="btn-auto-quality">⚙ 自动降级：开</button>
-      <button id="btn-regen">🎲 重开宇宙</button>
+      <button id="btn-play" title="播放 / 暂停。首次点击启动内置合成示例音轨；播放中点击暂停，再次点击继续。若当前是麦克风模式，则重新开启麦克风。">▶ 播放示例音乐</button>
+      <button id="btn-file" title="选择本地音频文件（mp3 / wav / flac 等）播放，用你自己的音乐驱动宇宙演化。">📁 上传音乐</button>
+      <button id="btn-mic" title="改用麦克风输入：用环境声或外放音乐实时驱动可视化。需要浏览器麦克风授权。">🎤 麦克风</button>
+      <button id="btn-follow" title="智能镜头开关。开启：自动跟随小球，远景上帝视角固定朝向，靠近天体时切到轨道视角看运行轨迹。关闭：自由观察，可用左键旋转 / 右键平移 / 滚轮缩放。">🎥 智能镜头：开</button>
+      <button id="btn-event-log" title="展开 / 收起事件日志面板：按时间线回放宇宙里发生过的所有事件（诞生、捕获、死亡、跃迁、降级等），可导出为 JSON。">📜 事件日志</button>
+      <button id="btn-auto-quality" title="帧率自适应降级。开启：帧率持续偏低时自动降低细节（冻结 LOD 升级、停止新建细节系统、卸载最远的系统）；帧率恢复后逐档还原。关闭：始终保持全质量，掉帧也不降。">⚙ 自动降级：开</button>
+      <button id="btn-regen" title="用当前初始条件（纤维凝聚 / 速度弥散 / 质量偏置）重新生成一个宇宙。改动那三个初始条件滑杆后，需要点这里才会生效。">🎲 重开宇宙</button>
       <input type="file" id="file-input" accept="audio/*" hidden />
     </div>
     <div class="slider-row">
-      <label>时间流速 <span id="time-scale-val"></span></label>
+      <label title="物理与宇宙演化的推进速度倍率（0.05×～3×）。调小看细节，调大快速跳过演化。只影响时间流逝，不影响音乐播放速度。">时间流速 <span id="time-scale-val"></span></label>
       <input type="range" id="time-scale" min="0.05" max="3" step="0.05" value="1" />
     </div>
     <div class="slider-row">
-      <label>音乐强度 <span id="intensity-val"></span></label>
+      <label title="音乐驱动幅度（0～2.5×）：缩放节拍与能量对画面（粒子尺寸、发光、涟漪）的影响强度。0 = 完全不受音乐影响。">音乐强度 <span id="intensity-val"></span></label>
       <input type="range" id="intensity" min="0" max="2.5" step="0.1" value="1" />
     </div>
     <div class="slider-row">
-      <label>虫洞距离 <span id="wormhole-dist-val"></span></label>
+      <label title="虫洞跃迁的距离（世界单位）。小球被同一系统持续捕获时会触发跃迁逃逸，这个值决定一次跳多远。">虫洞距离 <span id="wormhole-dist-val"></span></label>
       <input type="range" id="wormhole-dist" min="120" max="1000" step="20" value="480" />
     </div>
     <div class="slider-row">
-      <label>虫洞动画 <span id="wormhole-duration-val"></span></label>
+      <label title="虫洞跃迁动画的时长（秒）。仅是过场动画的长短，不影响跃迁距离和触发条件。">虫洞动画 <span id="wormhole-duration-val"></span></label>
       <input type="range" id="wormhole-duration" min="0.6" max="3" step="0.1" value="1.4" />
     </div>
     <div class="slider-row">
-      <label>持续捕获窗口 <span id="wormhole-window-val"></span></label>
+      <label title="判定「持续捕获」的时间窗口（秒）：在这个时长内被同一个系统再次捕获，就触发虫洞跃迁逃逸。调大更容易触发跃迁，调小则小球会在系统里停留更久。">持续捕获窗口 <span id="wormhole-window-val"></span></label>
       <input type="range" id="wormhole-window" min="2" max="20" step="1" value="8" />
     </div>
     <div class="slider-row">
-      <label>细节系统上限 <span id="perf-systems-val"></span></label>
+      <label title="同时拥有内部细节（可分辨的单个天体）的系统数量上限（1～6）。超出的系统保持远景表示。这是性能与观感的主要权衡点，配置差就调小。">细节系统上限 <span id="perf-systems-val"></span></label>
       <input type="range" id="perf-systems" min="1" max="6" step="1" value="3" />
     </div>
     <div class="slider-row">
-      <label>细节体上限 <span id="perf-bodies-val"></span></label>
+      <label title="所有活跃系统的细节天体总数上限（100～800）。达到上限后不再为远处系统生成细节体。配合上一项共同控制渲染负载。">细节体上限 <span id="perf-bodies-val"></span></label>
       <input type="range" id="perf-bodies" min="100" max="800" step="50" value="500" />
     </div>
     <div class="slider-row">
-      <label>纤维凝聚 <span id="init-filament-val"></span></label>
+      <label title="初始条件 · 纤维凝聚强度（0～2）：影响暗物质晕沿「宇宙纤维」分布的集中度。0 = 完全均匀各向同性，1 = 自然，2 = 强纤维（天体明显成串成片）。改完需点「重开宇宙」生效。"><span>纤维凝聚<em>重开宇宙后生效</em></span><span id="init-filament-val"></span></label>
       <input type="range" id="init-filament" min="0" max="2" step="0.1" value="1" />
     </div>
     <div class="slider-row">
-      <label>速度弥散 <span id="init-disp-val"></span></label>
+      <label title="初始条件 · 速度弥散（0.3～2）：大爆炸时物质初速的随机散布倍率（平均速度不变）。0.3 = 整齐膨胀，1 = 自然爆炸，2 = 剧烈湍流，结构形成更快更乱。改完需点「重开宇宙」生效。"><span>速度弥散<em>重开宇宙后生效</em></span><span id="init-disp-val"></span></label>
       <input type="range" id="init-disp" min="0.3" max="2" step="0.05" value="1" />
     </div>
     <div class="slider-row">
-      <label>质量偏置 <span id="init-bias-val"></span></label>
+      <label title="初始条件 · 质量函数偏置（-1～+1）：在「多小质量」与「多大质量」之间搬运数量份额。0 = 自然分布，+1 = 偏多巨质量天体（黑洞/星系更容易出现），-1 = 偏多小天体。改完需点「重开宇宙」生效。"><span>质量偏置<em>重开宇宙后生效</em></span><span id="init-bias-val"></span></label>
       <input type="range" id="init-bias" min="-1" max="1" step="0.1" value="0" />
     </div>
     <div class="status" id="status">正在初始化…</div>
