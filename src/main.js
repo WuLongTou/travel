@@ -26,6 +26,8 @@ const el = {
   status: document.getElementById('status'),
   eventToast: document.getElementById('event-toast'),
   hudProbe: document.getElementById('hud-probe'),
+  hudGrav: document.getElementById('hud-grav'),
+  hudOrbit: document.getElementById('hud-orbit'),
   hudCam: document.getElementById('hud-cam'),
   hudNear: document.getElementById('hud-near'),
   hudCosmos: document.getElementById('hud-cosmos'),
@@ -210,6 +212,94 @@ el.initBias.addEventListener('change', markRegenPending);
 
 el.regenBtn.addEventListener('click', () => location.reload());
 
+// ---------- 引力实验参数（实时直通 sim.config，立即生效） ----------
+el.gravG = document.getElementById('grav-g');
+el.gravGVal = document.getElementById('grav-g-val');
+el.massScale = document.getElementById('mass-scale');
+el.massScaleVal = document.getElementById('mass-scale-val');
+el.radiusScale = document.getElementById('radius-scale');
+el.radiusScaleVal = document.getElementById('radius-scale-val');
+el.trailLen = document.getElementById('trail-len');
+el.trailLenVal = document.getElementById('trail-len-val');
+el.camZoom = document.getElementById('cam-zoom');
+el.camZoomVal = document.getElementById('cam-zoom-val');
+el.camPanX = document.getElementById('cam-panx');
+el.camPanXVal = document.getElementById('cam-panx-val');
+el.camPanY = document.getElementById('cam-pany');
+el.camPanYVal = document.getElementById('cam-pany-val');
+el.probeSpeed = document.getElementById('probe-speed');
+el.probeSpeedVal = document.getElementById('probe-speed-val');
+el.probeAz = document.getElementById('probe-az');
+el.probeAzVal = document.getElementById('probe-az-val');
+el.probeEl = document.getElementById('probe-el');
+el.probeElVal = document.getElementById('probe-el-val');
+el.resetProbeBtn = document.getElementById('btn-reset-probe');
+el.resetParamsBtn = document.getElementById('btn-reset-params');
+
+// 取值范围已在 HTML 的 min/max 上钳制，这里只做一次兜底，防止极端值把积分打爆
+const GRAV_DEFAULTS = {
+  gravityG: 16, bodyMassScale: 1, bodyRadiusScale: 1,
+  trailLength: 750, camZoom: 34, camPanX: 0, camPanY: 0,
+};
+const clampNum = (v, lo, hi, dflt) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt;
+};
+
+function syncGravConfig() {
+  const c = sim.config;
+  c.gravityG = clampNum(el.gravG.value, 4, 40, GRAV_DEFAULTS.gravityG);
+  c.bodyMassScale = clampNum(el.massScale.value, 0.25, 3, GRAV_DEFAULTS.bodyMassScale);
+  c.bodyRadiusScale = clampNum(el.radiusScale.value, 0.5, 2, GRAV_DEFAULTS.bodyRadiusScale);
+  c.trailLength = Math.round(clampNum(el.trailLen.value, 100, 3000, GRAV_DEFAULTS.trailLength));
+  c.camZoom = clampNum(el.camZoom.value, 10, 80, GRAV_DEFAULTS.camZoom);
+  c.camPanX = clampNum(el.camPanX.value, -30, 30, GRAV_DEFAULTS.camPanX);
+  c.camPanY = clampNum(el.camPanY.value, -30, 30, GRAV_DEFAULTS.camPanY);
+  el.gravGVal.textContent = c.gravityG.toFixed(1);
+  el.massScaleVal.textContent = c.bodyMassScale.toFixed(2) + '×';
+  el.radiusScaleVal.textContent = c.bodyRadiusScale.toFixed(2) + '×';
+  const secs = (c.trailLength * 0.045).toFixed(1);
+  el.trailLenVal.textContent = `${c.trailLength} 点 / ${secs}s`;
+  el.camZoomVal.textContent = c.camZoom.toFixed(0);
+  el.camPanXVal.textContent = c.camPanX.toFixed(0);
+  el.camPanYVal.textContent = c.camPanY.toFixed(0);
+}
+[el.gravG, el.massScale, el.radiusScale, el.trailLen,
+  el.camZoom, el.camPanX, el.camPanY].forEach((n) => {
+  n.addEventListener('input', syncGravConfig);
+});
+syncGravConfig();
+
+// 初速矢量（只在点「重置小球」时读取）
+function syncProbeLaunch() {
+  el.probeSpeedVal.textContent = parseFloat(el.probeSpeed.value).toFixed(1);
+  el.probeAzVal.textContent = parseFloat(el.probeAz.value).toFixed(0) + '°';
+  el.probeElVal.textContent = parseFloat(el.probeEl.value).toFixed(0) + '°';
+}
+[el.probeSpeed, el.probeAz, el.probeEl].forEach((n) => {
+  n.addEventListener('input', syncProbeLaunch);
+});
+syncProbeLaunch();
+
+el.resetProbeBtn.addEventListener('click', () => {
+  sim.resetProbe({
+    speed: clampNum(el.probeSpeed.value, 0, 60, 30),
+    az: (clampNum(el.probeAz.value, -180, 180, 0) * Math.PI) / 180,
+    el: (clampNum(el.probeEl.value, -80, 80, 0) * Math.PI) / 180,
+  });
+});
+
+el.resetParamsBtn.addEventListener('click', () => {
+  el.gravG.value = String(GRAV_DEFAULTS.gravityG);
+  el.massScale.value = String(GRAV_DEFAULTS.bodyMassScale);
+  el.radiusScale.value = String(GRAV_DEFAULTS.bodyRadiusScale);
+  el.trailLen.value = String(GRAV_DEFAULTS.trailLength);
+  el.camZoom.value = String(GRAV_DEFAULTS.camZoom);
+  el.camPanX.value = String(GRAV_DEFAULTS.camPanX);
+  el.camPanY.value = String(GRAV_DEFAULTS.camPanY);
+  syncGravConfig();
+});
+
 // FPS 看门狗：EMA 帧率连续偏低则升档降级（0→1→2），恢复良好再缓慢降档。
 // 档位只在 <40 判低、>50 判好，40~50 为稳持带，避免临界帧率来回跳。
 // tier 含义（sim._manageDetails 消费）：
@@ -295,6 +385,15 @@ function updateHud() {
   const pr = sim.probe;
   const speed = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
   el.hudProbe.textContent = `第 ${pr.generation} 代 · 速度 ${speed.toFixed(1)}`;
+  // 引力状态：加速度大小、速率/逃逸速度之比 κ、以及由此判定的状态
+  const gi = pr.gravInfo;
+  if (gi) {
+    el.hudGrav.textContent =
+      `a=${gi.accel.toFixed(2)} · κ=${gi.kappa.toFixed(2)} · ${gi.state}`;
+    el.hudOrbit.textContent = Number.isFinite(gi.nearDist)
+      ? `距 ${gi.nearDist.toFixed(1)} · v_esc ${gi.vEsc.toFixed(1)}`
+      : '—';
+  }
   el.hudCam.textContent = renderer.state.follow
     ? (CAM_LABELS[renderer.state.mode] || renderer.state.mode)
     : '自由观察';

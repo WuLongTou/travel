@@ -4,9 +4,16 @@
 // 阶段 3：从小到大依次形成行星 → 恒星 → 星团 → 星系 → 超星系团 → 超大质量黑洞。
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+// Line2 用于绘制有真实线宽的运动轨迹（普通 LineBasicMaterial 的 linewidth
+// 在绝大多数 WebGL 平台上被忽略，只能画 1px）
+import { Line2 } from 'three/examples/jsm/lines/Line2.js';
+import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 
 // ---------- 模拟参数 ----------
-const G = 16;
+// 引力常数已改为运行时可调（sim.config.gravityG，UI 滑杆直通），
+// 默认值 16 与原来的常量一致，保证行为不变。可调范围见 main.js 的滑杆钳制。
+// const G = 16;（已废弃，勿再引用）
 // 集合系统动力学（§9.7）微扰强度：恒星间相互引力的等效常数。
 // 偏小刻意为之——微扰只让相对运动"活起来"，不破坏分析轨道的形态。
 const DYN_G = 1.4;
@@ -160,6 +167,14 @@ export class CosmicSimulation {
       wormholeDist: 480, wormholeDuration: 1.4, wormholeWindow: 8,
       maxDetailSystems: 3, maxDetailBodies: 500,
       qualityTier: 0, autoQuality: true,
+      // 引力与天体（UI 滑杆实时可调，范围在 main.js 侧钳制以防数值发散）
+      gravityG: 16,        // 引力常数（原模块常量 G）
+      bodyMassScale: 1,    // 天体质量全局倍率
+      bodyRadiusScale: 1,  // 天体半径全局倍率（影响碰撞判定与视觉大小）
+      trailLength: 750,    // 轨迹保留点数
+      camZoom: 34,         // 第三人称镜头距离（缩放）
+      camPanX: 0,          // 镜头平移偏移（世界单位，受限）
+      camPanY: 0,
       filamentStrength: 1, velocityDispersion: 1, massBias: 0,
       // 集合系统动力学（§9.7）：恒星间相互引力微扰，叠加在分析轨道上
       systemDynamics: true,
@@ -194,6 +209,12 @@ export class CosmicSimulation {
       // 智能镜头聚焦：对小球施加强引力、需要与小球同框的天体系统
       influencer: -1,
       influenceStrength: 0,
+      // 当前所受的总引力加速度向量（最近一个积分子步），HUD 与状态判定用
+      gravAccel: [0, 0, 0],
+      // 引力状态（每物理步重算）：
+      //   speed 速率 / nearDist 与最近天体距离 / accel 引力加速度大小
+      //   vEsc 逃逸速度 / kappa = speed / vEsc  / state 文字状态
+      gravInfo: { speed: 0, nearDist: Infinity, accel: 0, vEsc: 0, kappa: 0, state: '自由航行' },
       // 重生宽限期：重生后数秒内不会被再次捕获，保证能飞出系统继续航行
       respawnGrace: 0,
       // 持续捕获检测：上次重生所在的系统 id 与时间；用于触发虫洞跃迁
@@ -424,9 +445,11 @@ export class CosmicSimulation {
   // 捕获半径：只有"单天体"（星尘云/行星/恒星）才有捕获范围
   // 星团/星系/超星系团/黑洞都是多体集合，捕获由其内部成员负责
   _captureRadius(s) {
+    // 半径倍率（UI 可调）直接缩放捕获范围：调大更容易撞上天体
+    const rs = this.config.bodyRadiusScale || 1;
     if (s.level === 'void' || s.level === 'dust') return 0;
-    if (s.level === 'star') return 0.20 + s.mass * 0.06;
-    if (s.level === 'planet') return 0.09 + s.mass * 0.04;
+    if (s.level === 'star') return (0.20 + s.mass * 0.06) * rs;
+    if (s.level === 'planet') return (0.09 + s.mass * 0.04) * rs;
     // cluster / galaxy / supercluster / blackhole: 集合，由内部成员捕获
     return 0;
   }
@@ -1098,6 +1121,45 @@ export class CosmicSimulation {
     this._generateFrontierSeed();
   }
 
+  // 手动重置小球（引力实验用）：给定速率与方向（方位角 az / 仰角 el，弧度），
+  // 重新放置小球并赋予速度矢量，便于反复观察同一初始条件下的引力作用。
+  // 位置会自动退到最近天体的安全距离外，避免一重置就撞上去。
+  resetProbe({ speed = PROBE_RESPAWN_SPEED, az = 0, el = 0 } = {}) {
+    const pr = this.probe;
+    const sp = Math.max(0, speed);
+    const ce = Math.cos(el);
+    const se = Math.sin(el);
+    const dir = [Math.sin(az) * ce, se, Math.cos(az) * ce];
+    // 位置：沿"远离最近天体"的方向退到 2.5R 外（R = 系统半径）
+    let px = pr.pos[0], py = pr.pos[1], pz = pr.pos[2];
+    if (pr.influencer >= 0) {
+      const s = this.seeds[pr.influencer];
+      const dx = px - s.pos[0], dy = py - s.pos[1], dz = pz - s.pos[2];
+      const dl = Math.max(1e-4, Math.hypot(dx, dy, dz));
+      const k = (this._systemRadius(s) * 2.5) / dl;
+      px = s.pos[0] + dx * k; py = s.pos[1] + dy * k; pz = s.pos[2] + dz * k;
+    }
+    pr.pos = [px, py, pz];
+    // 瞬移：prevPos 同步，避免插值从旧位置拉出一条拖影
+    pr.prevPos = pr.pos.slice();
+    pr.vel = [dir[0] * sp, dir[1] * sp, dir[2] * sp];
+    // 清掉死亡 / 绕行 / 捕获状态
+    pr.dying = false;
+    pr.dyingT = 0;
+    this._deathPending = null;
+    pr.orbitAngleAcc = 0;
+    pr.straightTime = 0;
+    pr.respawnFlash = 1;
+    pr.respawnGrace = 3;
+    // generation 变化会让渲染层清空轨迹
+    pr.generation += 1;
+    pr.label = '引力实验 · 手动重置';
+    this.events.push({
+      time: this.time,
+      text: `↺ 手动重置：速率 ${sp.toFixed(1)}，方向 az=${((az * 180) / Math.PI).toFixed(0)}° el=${((el * 180) / Math.PI).toFixed(0)}°`,
+    });
+  }
+
   _respawnFrom(center, launchR, label, captureSeedIdx = -1, deathType = 'generic') {
     const pr = this.probe;
     // ---- 持续捕获检测：若短时间内反复被同一系统捕获，改用虫洞跃迁逃逸 ----
@@ -1198,6 +1260,9 @@ export class CosmicSimulation {
     pr.respawnGrace = Math.max(0, pr.respawnGrace - dt);
     pr.wormholeTimer = Math.max(0, pr.wormholeTimer - dt);
     const gs = this.gravityStrength;
+    // 引力常数与天体质量倍率运行时可调（UI 滑杆），取值已在 UI 侧钳制
+    const gG = this.config.gravityG;
+    const mS = this.config.bodyMassScale;
 
     // 用子步长积分，近距离强引力下也保持稳定。
     const steps = Math.max(1, Math.ceil(dt / 0.008));
@@ -1211,7 +1276,7 @@ export class CosmicSimulation {
           const dz = s.pos[2] - pr.pos[2];
           const r2 = dx * dx + dy * dy + dz * dz;
           if (r2 < 1e-6) continue;
-          const f = G * PROBE_GRAVITY_MULT * s.mass / Math.pow(r2 + EPS2, 0.95) * gs;
+          const f = gG * PROBE_GRAVITY_MULT * (s.mass * mS) / Math.pow(r2 + EPS2, 0.95) * gs;
           ax += f * dx; ay += f * dy; az += f * dz;
         }
       }
@@ -1222,7 +1287,7 @@ export class CosmicSimulation {
           const dz = b.pos[2] - pr.pos[2];
           const r2 = dx * dx + dy * dy + dz * dz;
           if (r2 < 1e-6) continue;
-          const f = G * PROBE_GRAVITY_MULT * b.mass / Math.pow(r2 + 0.12, 0.95);
+          const f = gG * PROBE_GRAVITY_MULT * (b.mass * mS) / Math.pow(r2 + 0.12, 0.95);
           ax += f * dx; ay += f * dy; az += f * dz;
           // 二级系统的行星/卫星质量小，但贴近时仍有可感知的引力
           if (b.children) {
@@ -1232,12 +1297,14 @@ export class CosmicSimulation {
               const cz = ch.pos[2] - pr.pos[2];
               const cr2 = cx * cx + cy * cy + cz * cz;
               if (cr2 < 1e-6) continue;
-              const cf = G * PROBE_GRAVITY_MULT * ch.mass / Math.pow(cr2 + 0.12, 0.95);
+              const cf = gG * PROBE_GRAVITY_MULT * (ch.mass * mS) / Math.pow(cr2 + 0.12, 0.95);
               ax += cf * cx; ay += cf * cy; az += cf * cz;
             }
           }
         }
       }
+      // 记录本子步的总引力加速度（供 HUD 显示"当前所受引力大小"与状态判定）
+      pr.gravAccel[0] = ax; pr.gravAccel[1] = ay; pr.gravAccel[2] = az;
       pr.vel[0] += ax * h; pr.vel[1] += ay * h; pr.vel[2] += az * h;
 
       // 进入系统内部后，星际气体造成轻微阻尼；黑洞附近阻尼随距离增强。
@@ -1287,13 +1354,45 @@ export class CosmicSimulation {
         const r2 = dx * dx + dy * dy + dz * dz;
         if (r2 < 1e-6) continue;
         const d = Math.sqrt(r2);
-        const f = G * PROBE_GRAVITY_MULT * s.mass / Math.pow(r2 + EPS2, 0.95) * gs;
+        const f = gG * PROBE_GRAVITY_MULT * (s.mass * mS) / Math.pow(r2 + EPS2, 0.95) * gs;
         const strength = f * d;
         if (strength > bestStr) { bestStr = strength; bestInf = s.idx; }
       }
     }
     pr.influencer = bestInf;
     pr.influenceStrength = bestStr;
+
+    // ---- 引力状态（要求 5：速率 / 最近天体距离 / 引力大小 + 临界状态）----
+    // 用"当前速率 vs 逃逸速度"的比值 kappa 判定被捕获还是被甩出：
+    //   逃逸速度 vEsc = sqrt(2·a·r)，a 是当前引力加速度、r 是到天体的距离
+    //   （点质量下 a·r = μ/r，于是 vEsc = sqrt(2μ/r)，与解析式一致）。
+    //   kappa < 0.85 束缚、0.85~1.0 临界、≥1.0 逃逸。
+    // 再结合切向占比区分"环绕轨道"与"径向坠落"。
+    {
+      const gi = pr.gravInfo;
+      const sp = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
+      const acc = Math.hypot(pr.gravAccel[0], pr.gravAccel[1], pr.gravAccel[2]);
+      let nd = Infinity;
+      if (pr.influencer >= 0) {
+        const s = this.seeds[pr.influencer];
+        nd = Math.hypot(pr.pos[0] - s.pos[0], pr.pos[1] - s.pos[1], pr.pos[2] - s.pos[2]);
+      }
+      const vEsc = acc > 1e-6 && nd < Infinity ? Math.sqrt(2 * acc * Math.max(nd, 1e-3)) : 0;
+      const kappa = vEsc > 1e-6 ? sp / vEsc : 0;
+      let st = '自由航行';
+      if (pr.influencer >= 0 && acc > 0.02) {
+        if (kappa >= 1.0) st = '逃逸甩出';
+        else if (kappa >= 0.85) st = '临界';
+        else if ((pr.orbitTangent || 0) > 0.5) st = '环绕轨道';
+        else st = '坠落接近';
+      }
+      gi.speed = sp;
+      gi.nearDist = nd;
+      gi.accel = acc;
+      gi.vEsc = vEsc;
+      gi.kappa = kappa;
+      gi.state = st;
+    }
 
     // ---- 绕行检测：自由航行 = 没有绕任何一个天体运动 ----
     // 每步累计"相对 influencer 连线方向转过的角度"（指数衰减窗），
@@ -1357,6 +1456,16 @@ export class CosmicSimulation {
       if (mature && pr.respawnGrace <= 0 && d < cap && (s.level === 'dust' || s.level === 'void' || s.level === 'planet' || s.level === 'star')) {
         // 进入死亡序列：恒星整体捕获 = 汽化；星尘/行星 = 大气烧蚀
         this._beginDeath(s, LEVEL_LABELS[s.level] || '天体', s.idx, s.level === 'star' ? 'vaporize' : 'atmosphere', Math.max(this._systemRadius(s) * 1.1, cap * 4));
+        return;
+      }
+      // 核心半径兜底：集合类（星团/星系/超星系团/黑洞）没有整体捕获判定，
+      // 只靠内部成员。若小球恰好从核心穿过却没碰到任何成员，就会"穿透"天体
+      // 正中心（实测出现距离/系统半径 ≈ 0 的情况）。这里给一个核心半径，
+      // 保证小球不可能从天体中间穿过去；半径倍率滑杆同样作用于此。
+      const coreR = this._systemRadius(s) * 0.10 * (this.config.bodyRadiusScale || 1);
+      if (mature && pr.respawnGrace <= 0 && d < coreR) {
+        this._beginDeath(s, LEVEL_LABELS[s.level] || '天体', s.idx, 'tidal',
+          Math.max(this._systemRadius(s) * 1.1, coreR * 4));
         return;
       }
     }
@@ -1462,6 +1571,9 @@ export class CosmicSimulation {
     this._tryAwakenSeed();
 
     // 更新普通物质
+    // 引力常数与天体质量倍率（UI 可调，取值已在 UI 侧钳制）
+    const pGG = this.config.gravityG;
+    const pMS = this.config.bodyMassScale;
     for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
       const oldPos = p.pos.slice();
@@ -1476,7 +1588,7 @@ export class CosmicSimulation {
           const dz = s.pos[2] - p.pos[2];
           const r2 = dx * dx + dy * dy + dz * dz;
           if (r2 < 1e-6) continue;
-          const f = G * s.mass / Math.pow(r2 + EPS2, 1.5) * gs;
+          const f = pGG * (s.mass * pMS) / Math.pow(r2 + EPS2, 1.5) * gs;
           ax += f * dx; ay += f * dy; az += f * dz;
         }
       }
@@ -2386,15 +2498,25 @@ export function createCosmosRenderer(canvas, sim) {
     }
   }
 
-  const TRAIL_N = 750;
-  const trailPos = new Float32Array(TRAIL_N * 3);
-  const trailCol = new Float32Array(TRAIL_N * 4);
-  const trailGeo = new THREE.BufferGeometry();
-  trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPos, 3));
-  trailGeo.setAttribute('color', new THREE.BufferAttribute(trailCol, 4));
-  const trailMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false });
-  const trail = new THREE.Line(trailGeo, trailMat);
+  // ---- 运动轨迹 ----
+  // 预分配上限，实际保留长度由 sim.config.trailLength 控制（只显示最后 N 点）。
+  const TRAIL_MAX = 3000;
+  const trailPos = new Float32Array(TRAIL_MAX * 3);
+  const trailCol = new Float32Array(TRAIL_MAX * 3); // Line2 用 RGB（透明度走 material.opacity）
+  const trailGeo = new LineGeometry();
+  trailGeo.setPositions(trailPos);
+  trailGeo.setColors(trailCol);
+  const trailMat = new LineMaterial({
+    vertexColors: true,
+    linewidth: 3.0,          // 像素单位（worldUnits=false）
+    transparent: true,
+    opacity: 0.9,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const trail = new Line2(trailGeo, trailMat);
   trail.frustumCulled = false;
+  trail.computeLineDistances();
   scene.add(trail);
   let trailCount = 0;
 
@@ -2422,6 +2544,8 @@ export function createCosmosRenderer(canvas, sim) {
     _focusInit: false,
     // 绕行强度的时间平滑值（避免视点在小球↔轨道中心之间抖动）
     orbitFactor: 0,
+    // 实际生效的镜头平移量 [x, y]（已含钳制与高速收回）
+    camPanApplied: [0, 0],
     orbitLock: false, // 绕行滞回锁存，避免卡在"半跟随"中间态
     orbitRaw: 0,      // 去噪后的绕行信号
     orbitHold: 0,     // 锁存最短保持时间（秒）
@@ -2451,26 +2575,61 @@ export function createCosmosRenderer(canvas, sim) {
     camera.updateProjectionMatrix();
   }
 
-  function pushTrail(x, y, z) {
-    if (trailCount === TRAIL_N) {
+  // 轨迹采样节流：不必每帧一个点（60fps 下 750 点只有 12 秒），
+  // 固定按时间采样，保留时长 = trailLength × TRAIL_SAMPLE 秒。
+  const TRAIL_SAMPLE = 0.045;
+  let trailClock = 0;
+
+  // 速率 → 颜色：慢=冷青蓝，快=暖橙红。配合 AdditiveBlending，
+  // 越暗的部分越透明，于是"淡出"直接靠把颜色乘向黑色实现。
+  function speedColor(speed, out) {
+    const v = Math.min(1, Math.max(0, speed / 45));
+    // 冷端 (0.35,0.65,1.0) → 暖端 (1.0,0.55,0.25)
+    out[0] = 0.35 + 0.65 * v;
+    out[1] = 0.65 - 0.10 * v;
+    out[2] = 1.00 - 0.75 * v;
+  }
+
+  const _sc = [0, 0, 0];
+  function pushTrail(x, y, z, speed) {
+    if (trailCount >= TRAIL_MAX) {
       trailPos.copyWithin(0, 3);
-      trailCol.copyWithin(0, 4);
-      trailCount--;
+      trailCol.copyWithin(0, 3);
+      trailCount = TRAIL_MAX - 1;
     }
     const i3 = trailCount * 3;
     trailPos[i3] = x; trailPos[i3 + 1] = y; trailPos[i3 + 2] = z;
-    trailCol[trailCount * 4] = 0.9;
-    trailCol[trailCount * 4 + 1] = 0.9;
-    trailCol[trailCount * 4 + 2] = 1;
-    trailCol[trailCount * 4 + 3] = 0.85;
+    speedColor(speed, _sc);
+    trailCol[i3] = _sc[0]; trailCol[i3 + 1] = _sc[1]; trailCol[i3 + 2] = _sc[2];
     trailCount++;
-    for (let i = 0; i < trailCount; i++) {
-      const t = trailCount > 1 ? i / (trailCount - 1) : 1;
-      trailCol[i * 4 + 3] = t * t * 0.8;
+
+    // 只显示最后 N 点（N 运行时可调），并让尾部淡出
+    const N = Math.max(8, Math.min(TRAIL_MAX, Math.round(sim.config.trailLength || 750)));
+    const start = Math.max(0, trailCount - N);
+    const show = trailCount - start;
+    const dispPos = new Float32Array(show * 3);
+    const dispCol = new Float32Array(show * 3);
+    for (let i = 0; i < show; i++) {
+      const s3 = (start + i) * 3;
+      const d3 = i * 3;
+      dispPos[d3] = trailPos[s3];
+      dispPos[d3 + 1] = trailPos[s3 + 1];
+      dispPos[d3 + 2] = trailPos[s3 + 2];
+      const t = show > 1 ? i / (show - 1) : 1;
+      const fade = t * t; // 尾部 → 0（加法混合下即淡出）
+      dispCol[d3] = trailCol[s3] * fade;
+      dispCol[d3 + 1] = trailCol[s3 + 1] * fade;
+      dispCol[d3 + 2] = trailCol[s3 + 2] * fade;
     }
-    trailGeo.attributes.position.needsUpdate = true;
-    trailGeo.attributes.color.needsUpdate = true;
-    trailGeo.setDrawRange(0, trailCount);
+    trailGeo.setPositions(dispPos);
+    trailGeo.setColors(dispCol);
+    trail.computeLineDistances();
+    trail.visible = show > 1;
+  }
+
+  function clearTrail() {
+    trailCount = 0;
+    trail.visible = false;
   }
 
   const zeroAudio = () => ({ bass: 0, mid: 0, treble: 0, beat: 0, energy: 0 });
@@ -2740,8 +2899,7 @@ export function createCosmosRenderer(canvas, sim) {
     state._prevDying = pr.dying;
     if (pr.generation !== lastProbeGeneration) {
       lastProbeGeneration = pr.generation;
-      trailCount = 0;
-      trailGeo.setDrawRange(0, 0);
+      clearTrail();
       // 重生后速度方向突变，但**方位角不跟着转**（用户要求任何时候都不得
       // 跟随小球旋转）。dirSmooth 仅保留供其它逻辑读取，不再驱动镜头。
       const pv0 = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
@@ -2801,7 +2959,14 @@ export function createCosmosRenderer(canvas, sim) {
       respawnSprite.visible = false;
     }
     updateDeathFx(dtReal);
-    pushTrail(px, py, pz);
+    // 轨迹按固定时间采样（不是每帧），并在采样点记录当时的速率用于着色。
+    // 注意 pv 定义在镜头分支块内、此处不可见，所以现算一次
+    trailClock += dtReal;
+    if (trailClock >= TRAIL_SAMPLE) {
+      trailClock = 0;
+      const pvNow = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
+      pushTrail(px, py, pz, pvNow);
+    }
 
     // 虫洞特效：probe.wormholeTimer > 0 时驱动全屏叠加层
     if (pr.wormholeTimer > 0) {
@@ -3041,15 +3206,16 @@ export function createCosmosRenderer(canvas, sim) {
         const fY = py + (cY - py) * orbitPull;
         const fZ = pz + (cZ - pz) * orbitPull;
 
-        // ---- 距离：绕行时按轨道半径算，保证整条轨迹入画 ----
+        // ---- 距离：基准 = 缩放滑杆；绕行时按轨道半径拉远保证整条轨迹入画 ----
         const fovRad = (camera.fov * Math.PI) / 180;
-        let wantDist = CAM_CRUISE_DIST;
+        const zoomBase = Math.max(6, sim.config.camZoom || CAM_CRUISE_DIST);
+        let wantDist = zoomBase;
         if (seedDist > 0) {
           // 轨道半径 ≈ 小球到天体的距离；×2.4 覆盖直径并留边距
           const orbitDist = seedDist * 2.4 + sysR * 0.8;
           wantDist = Math.max(
-            CAM_CRUISE_DIST,
-            orbitDist * orbitFactor + CAM_CRUISE_DIST * (1 - orbitFactor),
+            zoomBase,
+            orbitDist * orbitFactor + zoomBase * (1 - orbitFactor),
           );
         }
         // 绝对上限：主导天体切换等异常时刻 seedDist 可能瞬时失真，
@@ -3065,11 +3231,6 @@ export function createCosmosRenderer(canvas, sim) {
         // 全局方位角：初始化后恒定不变（不跟随小球旋转，见上文）
         const az = state.camAzimuth;
 
-        // ---- 视点 target：恒为 f ----
-        // mode 完全退出镜头控制（用户要求：任何时候都不跟随小球旋转，保持上帝视角）。
-        // interact 的 (probe+anchor)/2 会随小球移动而拖动朝向，故不再使用。
-        _v3.set(fX, fY, fZ);
-
         // ---- 相机位置：三种模式统一用球坐标 (方位角, 俯角, 距离) ----
         // 旧实现里 interact/detail 走的是"视点反 anchor 方向的水平单位向量"：
         //   rightLen = hypot(dx,dz); nx = dx/rightLen
@@ -3082,6 +3243,33 @@ export function createCosmosRenderer(canvas, sim) {
         const dist = Math.max(state.camDist, distForFrame);
         const pitch = CAM_PITCH;
         const horizM = dist * Math.cos(pitch);
+
+        // ---- 视点 = f + 屏幕空间平移偏移 ----
+        // 视点基准恒为 f（mode 完全退出镜头控制：interact 的 (probe+anchor)/2
+        // 会随小球移动而拖动朝向，故不再使用）。
+        // 平移沿相机右方向 / 上方向，小球随之偏离画面中心。两重保护确保
+        // 高速运动时不丢失小球：
+        //   ① 偏移上限与距离成比例（≤35% dist），物理上推不出画面；
+        //   ② 速率 >25 后按速率线性收回，>65 时完全回到跟踪中心。
+        const pvNow = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
+        const recover = 1 - Math.min(1, Math.max(0, (pvNow - 25) / 40));
+        const panLim = dist * 0.35;
+        const panX = Math.max(-panLim, Math.min(panLim, (sim.config.camPanX || 0) * recover));
+        const panY = Math.max(-panLim, Math.min(panLim, (sim.config.camPanY || 0) * recover));
+        // 暴露实际生效的平移量（含钳制与高速收回），便于验证与调试
+        state.camPanApplied[0] = panX;
+        state.camPanApplied[1] = panY;
+        // right = (-cos az, 0, sin az) ；up = right × forward
+        const rx = -Math.cos(az);
+        const rz = Math.sin(az);
+        const ux = Math.sin(az) * Math.sin(pitch);
+        const uy = Math.cos(pitch);
+        const uz = Math.cos(az) * Math.sin(pitch);
+        _v3.set(
+          fX + rx * panX + ux * panY,
+          fY + uy * panY,
+          fZ + rz * panX + uz * panY,
+        );
 
         // 先平滑视点，再由"视点 + 球坐标偏移"推出相机位置。
         // 关键：不能让相机位置与视点各自独立 lerp —— 视点快速移动时（主导天体
