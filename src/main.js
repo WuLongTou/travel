@@ -333,11 +333,11 @@ function watchPerformance(dt) {
   }
 }
 
-// 智能镜头：先全局见证结构形成，黑洞时代自动跟拍；关闭后自由观察
+// 轨迹跟拍开关：开 = 固定广角自动跟拍；关 = 自由观察
 el.followBtn.addEventListener('click', () => {
   const next = !renderer.state.follow;
   renderer.setFollowEnabled(next);
-  el.followBtn.textContent = next ? '🎥 智能镜头：开' : '🎥 智能镜头：关';
+  el.followBtn.textContent = next ? '🎥 轨迹跟拍：开' : '🎥 轨迹跟拍：关';
 });
 
 // ---------- 主循环 ----------
@@ -378,8 +378,10 @@ function showEvent(text) {
 }
 
 // ---------- 航行信息面板 ----------
-// 低频刷新（4Hz）：面板是给人读的，无需每帧重排 DOM
+// 镜头模式 → 中文标签。合并时 main 侧的「镜头简化」把这段定义删了，但 updateHud
+// 仍在使用（HUD 要显示当前处于哪种镜头模式），故补回。
 const CAM_LABELS = { cruise: '跟拍', interact: '交互框选', detail: '细节框选' };
+// 低频刷新（4Hz）：面板是给人读的，无需每帧重排 DOM
 let hudTimer = 0;
 function updateHud() {
   const pr = sim.probe;
