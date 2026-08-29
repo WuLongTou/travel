@@ -29,8 +29,8 @@
       <input type="file" id="file-input" accept="audio/*" hidden />
     </div>
     <div class="slider-row">
-      <label title="物理与宇宙演化的推进速度倍率（0.05×～3×）。调小看细节，调大快速跳过演化。只影响时间流逝，不影响音乐播放速度。">时间流速 <span id="time-scale-val"></span></label>
-      <input type="range" id="time-scale" min="0.05" max="3" step="0.05" value="1" />
+      <label title="★仅用于显示★ 屏幕位移缩放系数：物理时间增量 = 真实帧时间 × 本系数，只决定物体在屏幕上走得快慢（调小=慢放，调大=快进）。它不参与引力与任何受力计算 —— 物理子步长(0.02)、加速度、轨道形状与轨道结果都不随它改变，改变的只是沿轨道推进的快慢。观感速度 ≈ 33 × 本系数 单位/秒。">观感速度（显示缩放）<span id="time-scale-val"></span></label>
+      <input type="range" id="time-scale" min="0.02" max="2" step="0.01" value="0.08" />
     </div>
     <div class="slider-row">
       <label title="音乐驱动幅度（0～2.5×）：缩放节拍与能量对画面（粒子尺寸、发光、涟漪）的影响强度。0 = 完全不受音乐影响。">音乐强度 <span id="intensity-val"></span></label>
@@ -99,7 +99,7 @@
         <input type="range" id="cam-pany" min="-30" max="30" step="1" value="0" />
       </div>
       <div class="slider-row">
-        <label title="重置小球的初速大小（0～60）：配合下面两个方向角构成速度矢量。点「↺ 重置小球」后按这个速度重新发射。">初速大小 <span id="probe-speed-val"></span></label>
+        <label title="重置小球的初速大小（0～60，默认 30）：配合下面两个方向角构成速度矢量。点「↺ 重置小球」后按这个速度重新发射。这是**物理量**，屏幕上的快慢由上面的「观感速度」系数决定。">初速大小 <span id="probe-speed-val"></span></label>
         <input type="range" id="probe-speed" min="0" max="60" step="0.5" value="30" />
       </div>
       <div class="slider-row">

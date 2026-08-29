@@ -66,7 +66,9 @@ const CLASS_DEFS = [
 // 主角小球是一艘没有预定航线的自由探测器：只受引力和气体阻尼影响。
 const PROBE_DRAG = 0.4;           // 进入天体系统后的星际气体阻尼（越接近系统越慢，像“抵达”）
 const PROBE_IGM_DRAG = 0.004;     // 星系际介质极微弱阻尼，防止无限加速后飞离可视宇宙
-const PROBE_RESPAWN_SPEED = 30.0; // 重生时从系统边缘获得的初始速度（足够逃出大系统的引力场）
+// 重生 / 手动重置时从系统边缘获得的初始速度（物理量，不改）。
+// 屏幕上的快慢由显示层的 state.timeScale 决定，与这里无关。
+const PROBE_RESPAWN_SPEED = 30.0;
 const PROBE_MAX_SPEED = 34;       // 速度上限：引力弹弓加速有界，保证形成节奏与跟拍节奏不被甩开
 
 function randomUnit(scale = 1) {
@@ -172,6 +174,10 @@ export class CosmicSimulation {
       bodyMassScale: 1,    // 天体质量全局倍率
       bodyRadiusScale: 1,  // 天体半径全局倍率（影响碰撞判定与视觉大小）
       trailLength: 750,    // 轨迹保留点数
+      // 启动快进（显示层）：开局 bootFastForwardWall 真实秒内用 bootFastForwardScale
+      // 推进，避免宇宙演化被观赏倍率一起拖慢。置 0 可关闭。
+      bootFastForwardWall: 22,
+      bootFastForwardScale: 1.5,
       camZoom: 34,         // 第三人称镜头距离（缩放）
       camPanX: 0,          // 镜头平移偏移（世界单位，受限）
       camPanY: 0,
@@ -1343,6 +1349,10 @@ export class CosmicSimulation {
       // 记录本子步的总引力加速度（供 HUD 显示"当前所受引力大小"与状态判定）
       pr.gravAccel[0] = ax; pr.gravAccel[1] = ay; pr.gravAccel[2] = az;
       pr.vel[0] += ax * h; pr.vel[1] += ay * h; pr.vel[2] += az * h;
+      // 注意：这里**不做**任何"限速 / 巡航速度"处理。
+      // 速度大小由引力与介质阻尼自然决定（终端速度约 33 单位/秒）。
+      // 想让屏幕上走得慢，请在显示层调 state.timeScale（见 render() 中的
+      // state.physAcc 累积），不要动这里的物理量 —— 改动会破坏轨道结果。
 
       // 进入系统内部后，星际气体造成轻微阻尼；黑洞附近阻尼随距离增强。
       let drag = 0;
@@ -2558,6 +2568,9 @@ export function createCosmosRenderer(canvas, sim) {
   let lastWormhole = 0; // 记录已处理的虫洞触发次数
 
   // 巡航镜头（cruise）常量：轨道视角，远远看轨迹 + 镜头稳定
+  // 启动快进（显示层）：开局这段真实秒数内用高倍率把宇宙推进到已成形。
+  // 参数放在 sim.config 里，便于调参与测试（测试可置 0 排除干扰）。
+
   // 上帝视角：镜头拉远、俯角抬高，且方位角恒定（不跟随小球旋转）
   const CAM_PITCH = 0.55;          // 固定俯角 ≈31°，俯视看得清轨迹走向（不随 mode 变）
   const CAM_CRUISE_DIST = 34;      // 自由航行时的基准距离（远一点，上帝视角）
@@ -2565,7 +2578,12 @@ export function createCosmosRenderer(canvas, sim) {
   const CAM_DIST_RATE = 0.35;      // 距离最大相对变化率 /s，消除"呼吸"
 
   const state = {
-    time: 0, timeScale: 0.8, musicIntensity: 1, follow: true,
+    // timeScale **只是显示层的缩放系数**（详见 render() 中的物理量/显示量说明），
+    // 不参与引力与任何受力计算，物理子步长与轨道结果都不随之改变。
+    // 默认 0.08：物理终端速度约 33 单位/秒 → 观感约 2.7 单位/秒，
+    // 穿过直径 60 的星系约 22 秒，能看清旋臂与成员（原先 1.0 时只要 2 秒）。
+    // 注意 main.js 的滑杆会在启动时再次同步，HTML 里的 value 才是真正生效值。
+    time: 0, timeScale: 0.08, musicIntensity: 1, follow: true,
     physAcc: 0,
     // 巡航镜头的方位角（弧度）与距离：独立维护成标量，
     // 镜头不再跟随速度方向向量（那样绕行会转圈、反向时还会翻面）
@@ -2891,8 +2909,34 @@ export function createCosmosRenderer(canvas, sim) {
   }
 
   function render(dtReal, audio) {
+    // ==================================================================
+    // 物理量 vs 显示量 —— 两者的换算**只发生在下面这一行**
+    //
+    //   显示量（真实秒）：dtReal、state.time、镜头插值、HUD 刷新
+    //   物理量（物理秒）：pr.pos / pr.vel / pr.gravAccel、sim.time、
+    //                    sim.step(PHYS_DT) 内部的引力与积分
+    //
+    //   state.timeScale 是**仅用于显示的缩放系数**：
+    //     物理时间增量 = 真实帧时间 × timeScale
+    //   它决定"每过去 1 真实秒，screen 上的物体走多少物理距离"，
+    //   也就是屏幕上的移动快慢。调小 = 慢放，调大 = 快进。
+    //
+    //   它**不参与**任何受力计算：sim.step() 里的引力、加速度、积分
+    //   一律使用物理子步长 PHYS_DT（恒定 0.02），与 timeScale 无关，
+    //   因此轨道形状、加速度、轨道结果都不随该系数改变 —— 改变的只是
+    //   沿轨道推进的快慢。
+    // ==================================================================
     state.time += dtReal;
-    state.physAcc += dtReal * state.timeScale;
+    // 启动快进：开局用高倍率把宇宙推进到"结构已成形"，再回落到观赏倍率慢速航行。
+    // 若全程都用观赏倍率(0.08)，宇宙演化也会被拖慢 12.5 倍 —— 光是等引力拉满
+    // (GRAVITY_FULL=5.6 物理秒) 就要 70 秒真实时间，开场会很无聊。
+    // 两个阶段用的都是**同一个显示层系数机制**（只换算物理时间增量），
+    // 不触碰任何物理公式与子步长。
+    const bootWall = sim.config.bootFastForwardWall;
+    const bootScale = sim.config.bootFastForwardScale;
+    const booting = state.time < bootWall && bootScale > state.timeScale;
+    const scale = booting ? bootScale : state.timeScale;
+    state.physAcc += dtReal * scale;
     const PHYS_DT = 0.02;
     let guard = 0;
     while (state.physAcc >= PHYS_DT && guard < 8) {
