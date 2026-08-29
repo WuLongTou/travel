@@ -42,11 +42,32 @@ const FORMATION_SPACING = 1.5;
 const FRONTIER_INTERVAL = 5.5;
 const FRONTIER_DIST_MIN = 220;
 const FRONTIER_DIST_MAX = 420;
-// 多级 LOD：随距离阶梯式把大系统的内部细节真实化
-const LOD_FAR = 1.0;        // 远景（光晕/盘面）
-const LOD_MID = 0.7;        // 进入 R*0.7 出现旋臂亮点
-const LOD_NEAR = 0.4;       // 进入 R*0.4 出现大量恒星 / 中心核
-const LOD_INNER = 0.18;     // 进入 R*0.18 出现行星 / 尘埃
+// ---- 渐进发现（§5.2）----
+// 集合系统（星团/星系/超星系团/黑洞系统）的成员从远景阶段就以"成员点云"
+// 的形式存在：远处看到的就已经是"一群天体"，而不是一个渲染成星系的单个天体。
+// 小球真正靠近某个成员到下面这个距离内，该成员才升级为真实天体
+// （有引力 / 可碰撞 / 能长出二级系统 / 由真实点云接管渲染）。
+// 基准阈值是绝对世界距离——"看清一颗恒星"不随宿主系统的尺度变化；
+// 越亮越大的天体越早被注意到。
+const REVEAL_RADIUS = {
+  blackhole: 24,  // 中心黑洞：吸积盘极亮且引力异常，最早被"看见"
+  galaxy: 20,     // 超星系团内的星系核
+  star: 10,
+  planet: 5,
+  gas: 4,
+};
+// 再按系统尺度放大一次：各档布局的成员只分布到 detailRadius 的 0.35~0.55
+// （超星系团 R=42，成员最远才 ~19；黑洞 R=30，成员最远 ~11）。
+// 只用固定绝对值的话，小球在 0.5R 外其实还在成员云之外，
+// "先看到边缘成员"根本不会发生——实测 0.5R 以外的访问发现率一律是 0。
+const REVEAL_SCALE = (detailR) => 0.6 + 0.9 * (detailR / 30);
+// 每个物理步（50Hz）最多揭示的成员数：高速穿越时也不会一帧全开，
+// 保证"由近及远、逐个显形"的节奏
+const DISCOVERY_PER_STEP = 2;
+// 多天体集合档位：这些系统才走"成员陆续显形"的完整表达
+// （远景成员点云 + 逐个发现 + 显形事件）。恒星/行星系统成员只有几个，
+// 贴身即显形，不需要点云与事件播报。
+const COLLECTION_LEVELS = new Set(['cluster', 'galaxy', 'supercluster', 'dust', 'void', 'blackhole']);
 // 虫洞参数已实例化为 sim.config（可经 UI 滑杆实时调整），默认值见构造函数
 
 const CLASS_DEFS = [
@@ -189,9 +210,6 @@ export class CosmicSimulation {
       respawns: 0,
       respawnFlash: 0,
       label: '随大爆炸喷出',
-      // 智能镜头聚焦：对小球施加强引力、需要与小球同框的天体系统
-      influencer: -1,
-      influenceStrength: 0,
       // 重生宽限期：重生后数秒内不会被再次捕获，保证能飞出系统继续航行
       respawnGrace: 0,
       // 持续捕获检测：上次重生所在的系统 id 与时间；用于触发虫洞跃迁
@@ -542,6 +560,8 @@ export class CosmicSimulation {
     s.awakened = false;
     s.growth = 0;
     s.level = 'void';
+    s._layout = null;      // 布局随新身份重新生成
+    s.budgetNotified = false;
     // 引力影响范围要够大：这样即使系统离得很远也会把小球拉过去
     s.influenceRadius = 6.0 + s.mass * 1.6;
     s.captureRate = 0.20 + s.mass * 0.10;
@@ -582,26 +602,29 @@ export class CosmicSimulation {
     };
   }
 
-  _ensureDetailSystem(s) {
+  // ---- 确定性成员布局（§5.2 渐进发现）----
+  // 一个系统的全部成员（类型/轨道/相位）由 seed.idx 决定，与发现过程无关：
+  // 远景成员点云与真实 detail body 共用同一份布局，接管时位置天然连续。
+  // tier = 结构层（0 外圈 / 1 中圈 / 2 内圈），只影响远景点云的尺寸与亮度
+  // 层次——成员何时"被看清"完全由小球的行进决定，与 tier 无关。
+  _memberLayout(s) {
+    if (s._layout) return s._layout;
     const r = this._detailRadius(s);
-    if (r <= 0 || s.detail) return;
-    // 把系统里所有可能用到的"多级 LOD" 都生成，但用各 body 上的 lod 字段标记出现等级
+    if (r <= 0) return null;
+    s._layoutId = (this._layoutSeq = (this._layoutSeq || 0) + 1);
     const rng = this._seededRandom(s.idx * 7919 + 17);
-    const bodies = [];
+    const layout = [];
     const TAU = Math.PI * 2;
-    const addOrbitBody = (type, mass, radius, orbitRadius, orbitHeight, orbitSpeed, angle, colorSeed, lod) => {
-      bodies.push({
-        type, mass, radius, colorSeed, lod, // 出现 LOD：0=mid, 1=near, 2=inner
-        pos: [0, 0, 0],
+    const addOrbitBody = (type, mass, radius, orbitRadius, orbitHeight, orbitSpeed, angle, colorSeed, tier) => {
+      layout.push({
+        type, mass, radius, colorSeed, tier,
         orbit: { radius: orbitRadius, height: orbitHeight, speed: orbitSpeed, angle },
-        prevAngle: angle,
-        parent: s.idx,
       });
     };
     const baseSpeed = 0.25 + s.mass * 0.12;
 
     if (s.level === 'void' || s.level === 'dust') {
-      // 星云：远景就能看到大量气体尘埃，进入内圈才出现少量亮星
+      // 星云：绝大多数是气体尘埃（tier 0），少量亮星埋在内圈（tier 1）
       const count = 90 + Math.floor(rng() * 60);
       for (let i = 0; i < count; i++) {
         const isStar = rng() < 0.12;
@@ -618,7 +641,7 @@ export class CosmicSimulation {
         );
       }
     } else if (s.level === 'cluster') {
-      // 星团：先有 30 颗进入 mid；再补 60 颗进入 near
+      // 星团：tier 0 三十余颗外圈恒星 + tier 1 四五十颗内圈恒星，球状分布
       const count = 30 + Math.floor(rng() * 15);
       for (let i = 0; i < count; i++) {
         const orbitR = 0.8 + rng() * r * 0.42;
@@ -642,7 +665,7 @@ export class CosmicSimulation {
         );
       }
     } else if (s.level === 'star') {
-      // 恒星系统：mid 出现 1~2 颗内行星；near 出现更多行星与卫星
+      // 恒星系统：tier 0 一两颗内行星 + tier 1 两三颗外圈行星/原行星盘气体
       const count = 2 + Math.floor(rng() * 2);
       for (let i = 0; i < count; i++) {
         const orbitR = 1.4 + rng() * r * 0.45;
@@ -678,13 +701,14 @@ export class CosmicSimulation {
         );
       }
     } else if (s.level === 'galaxy') {
-      // ---- 多级 LOD：星系是体现「逐步真实化」的关键 ----
-      // LOD=0 (mid): 3 条旋臂上的 35 个亮点 + 中心黑洞（构成第一眼印象）
-      // LOD=1 (near): 再补 80 颗恒星
-      // LOD=2 (inner): 35 颗行星 + 尘埃云 / 卫星
-      bodies.push({
+      // ---- 星系：多天体集合的典型形态 ----
+      // tier 0：3 条旋臂上的 30~42 个亮点 + 中心黑洞（远处读到的旋涡轮廓）
+      // tier 1：再补 80~110 颗恒星/行星，填充旋臂
+      // tier 2：40~65 颗行星与尘埃云，构成核球附近的内圈
+      // 三层不是"到达某距离才出现"，而是小球靠近谁、谁才升级为真实天体
+      layout.push({
         type: 'blackhole', mass: 0.45 + s.mass * 0.25, radius: 0.32 + s.mass * 0.06,
-        colorSeed: 0, pos: s.pos.slice(), orbit: null, parent: s.idx, lod: 0,
+        colorSeed: 0, orbit: null, tier: 0,
       });
       // mid
       const midCount = 30 + Math.floor(rng() * 12);
@@ -736,7 +760,8 @@ export class CosmicSimulation {
         );
       }
     } else if (s.level === 'supercluster') {
-      // ---- 超星系团：mid 出现 6 个星系核；near 给每个星系补恒星；inner 给尘埃 ----
+      // ---- 超星系团：6 个星系核，每个核自带一圈恒星与尘埃 ----
+      // 层次最丰富的一档：先看清某个星系核，再逐个看清它带的成员
       const nodes = [];
       for (let n = 0; n < 6; n++) {
         const nodeR = 2.6 + rng() * r * 0.40;
@@ -744,11 +769,11 @@ export class CosmicSimulation {
         const nodeHeight = (rng() - 0.5) * nodeR * 0.3;
         const nodeMass = 0.20 + rng() * 0.45;
         nodes.push({ radius: nodeR, angle: nodeAngle, height: nodeHeight, mass: nodeMass });
-        bodies.push({
+        layout.push({
           type: 'galaxy', mass: nodeMass, radius: 0.30 + rng() * 0.18,
-          colorSeed: rng(), pos: [0, 0, 0],
+          colorSeed: rng(),
           orbit: { radius: nodeR, height: nodeHeight, speed: (0.15 + rng() * 0.15) * baseSpeed, angle: nodeAngle },
-          parent: s.idx, lod: 0,
+          tier: 0,
         });
       }
       // 给每个星系节点 20 颗近景恒星
@@ -783,7 +808,7 @@ export class CosmicSimulation {
         }
       }
     } else if (s.level === 'blackhole') {
-      // 黑洞：mid 16 颗近距恒星；near 30 颗；inner 18 颗行星尘埃
+      // 黑洞系统：tier 0 十六颗近距恒星、tier 1 三十颗、tier 2 十八颗行星尘埃
       const midCount = 16 + Math.floor(rng() * 8);
       for (let i = 0; i < midCount; i++) {
         const orbitR = 2.0 + Math.pow(rng(), 0.7) * r * 0.3;
@@ -823,26 +848,84 @@ export class CosmicSimulation {
         );
       }
     }
-    s.detail = { bodies, radius: r, lodReached: 0, lodLerp: 0 };
+    s._layout = layout;
+    return layout;
   }
 
-  // 根据小球到系统的距离决定当前已「真实化」到的 LOD 等级
-  // LOD=0: 远景光晕, LOD=1: mid, LOD=2: near, LOD=3: inner
-  _detailLODFor(s) {
-    if (!s.detail) return -1;
-    const pr = this.probe;
-    const d = Math.hypot(pr.pos[0] - s.pos[0], pr.pos[1] - s.pos[1], pr.pos[2] - s.pos[2]);
-    const r = s.detail.radius;
-    if (d > r * LOD_FAR * 1.4) return 0;       // 太远不算 LOD
-    if (d > r * LOD_MID) return 0;            // 远景
-    if (d > r * LOD_NEAR) return 1;           // mid
-    if (d > r * LOD_INNER) return 2;          // near
-    return 3;                                  // inner
+  // 从确定性布局构建真实 detail body：初始全部"未发现"（隐藏、无引力、不可捕获），
+  // 由 _manageDetails 按小球与每个成员的接近程度逐个揭示
+  _ensureDetailSystem(s) {
+    const r = this._detailRadius(s);
+    if (r <= 0 || s.detail) return;
+    const layout = this._memberLayout(s);
+    if (!layout) return;
+    // 轨道相位与远景成员点云连续：点云从布局起就按 _layoutSpin 自转，
+    // detail 激活时接着同一相位继续走，交接瞬间不会跳变
+    const spin = s._layoutSpin || 0;
+    const bodies = layout.map((m) => {
+      const a0 = m.orbit ? m.orbit.angle + spin * m.orbit.speed : 0;
+      return {
+        type: m.type, mass: m.mass, radius: m.radius, colorSeed: m.colorSeed,
+        pos: m.orbit ? [0, 0, 0] : s.pos.slice(),
+        orbit: m.orbit ? { ...m.orbit, angle: a0 } : null,
+        prevAngle: a0,
+        parent: s.idx,
+        // 渐进发现状态：初始全部"未发现"——由 _revealMembers 逐个揭示
+        revealed: false,
+        revealT: 0,
+        _hidden: true,
+      };
+    });
+    s.detail = {
+      bodies,
+      radius: r,
+      discovered: false,
+      foundCount: 0,
+      revealScale: REVEAL_SCALE(r),
+    };
   }
 
+  // ---- 渐进发现（§5.2）----
+  // 决定哪些成员从"远景光点"升级为真实天体：只有小球真正靠近到
+  // REVEAL_RADIUS 内才被发现，且每个物理步最多揭示 DISCOVERY_PER_STEP
+  // 个（由近及远）。观感即是——掠过系统时只看见满天远景光点，
+  // 越往里走越多成员变成有引力、可碰撞、能长出二级系统的真实天体。
+  _revealMembers(s, pr) {
+    const cand = this._revealBuf || (this._revealBuf = []);
+    cand.length = 0;
+    const scale = s.detail.revealScale || 1;
+    for (const b of s.detail.bodies) {
+      if (b.revealed) continue;
+      const rr = (REVEAL_RADIUS[b.type] || 5) * scale;
+      const dx = b.pos[0] - pr.pos[0], dy = b.pos[1] - pr.pos[1], dz = b.pos[2] - pr.pos[2];
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 < rr * rr) cand.push([d2, b]);
+    }
+    if (!cand.length) return;
+    cand.sort((a, b) => a[0] - b[0]); // 最近的先被看清
+    const n = Math.min(cand.length, DISCOVERY_PER_STEP);
+    for (let i = 0; i < n; i++) {
+      const b = cand[i][1];
+      b.revealed = true;
+      b.revealT = 0;
+    }
+    s.detail.foundCount += n;
+    // 事件只对真正的多天体集合播报：恒星/行星系统成员太少，逐个播报是噪音
+    if (!COLLECTION_LEVELS.has(s.level)) return;
+    const label = LEVEL_LABELS[s.level] || '天体';
+    if (!s.detail.discovered) {
+      s.detail.discovered = true;
+      this.events.push({ time: this.time, text: `🔍 靠近【${label}】，最近的成员率先显形` });
+    }
+    if (s.detail.foundCount >= s.detail.bodies.length) {
+      this.events.push({ time: this.time, text: `✨ 【${label}】${s.detail.bodies.length} 个成员已全部显形` });
+    }
+  }
+
+  // 推进集合系统全体成员的轨道与动力学。
+  // 注意：可见性由渐进发现（§5.2）决定，与小球到系统的距离无关——
+  // 未发现的成员照样在轨道上运动，远景成员点云据此把它们画在真实位置。
   _updateDetailBodies(s, dt) {
-    const lod = s.detail.lodReached;
-    const lerp = s.detail.lodLerp;
     const dynOn = this.config.systemDynamics && this.config.qualityTier < 1;
     // ---- 集合系统动力学（§9.7）：恒星间相互引力的软化微扰 ----
     // 力以 20Hz 互算（O(n²) 只对恒星），积分为有界速度漂移 bv，
@@ -850,16 +933,10 @@ export class CosmicSimulation {
     // 但相对运动是真实的 N-body 力（星团互绕、旋臂扰动、核球响应）。
     const dynBodies = dynOn ? [] : null;
     for (const b of s.detail.bodies) {
-      // LOD 控制：b.lod 越大越靠后；当 lerp < b.lod+1 时该 body 还没"出现"
-      if (lerp + 0.001 < b.lod) {
-        // 还没到该 LOD：用大尺度噪声放在中心隐藏，避免粒子被一次性看到
-        b.pos[0] = s.pos[0] + (Math.random() - 0.5) * 0.001;
-        b.pos[1] = s.pos[1] + (Math.random() - 0.5) * 0.001;
-        b.pos[2] = s.pos[2] + (Math.random() - 0.5) * 0.001;
-        b._hidden = true;
-        continue;
-      }
-      b._hidden = false;
+      // 渐进发现（§5）：未发现的天体保持隐藏（无引力/不可捕获），
+      // 但轨道照常推进——远景预览与揭示动画基于真实位置
+      b._hidden = !b.revealed;
+      if (b.revealed && b.revealT < 1) b.revealT = Math.min(1, b.revealT + dt * 1.6);
       if (!b.orbit) {
         b.pos[0] = s.pos[0]; b.pos[1] = s.pos[1]; b.pos[2] = s.pos[2];
         continue;
@@ -955,7 +1032,6 @@ export class CosmicSimulation {
         mass: isGas ? 0.0006 + rng() * 0.002 : 0.002 + rng() * 0.007,
         radius: isGas ? 0.010 + rng() * 0.010 : 0.018 + rng() * 0.016,
         colorSeed: rng(),
-        lod: 0,
         pos: [b.pos[0], b.pos[1], b.pos[2]],
         orbit: {
           radius: orbitR,
@@ -966,6 +1042,10 @@ export class CosmicSimulation {
         prevAngle: 0,
         parent: s.idx,
         parentBody: b, // 渲染层需要母星显示位置
+        // 二级行星只在已发现的恒星上生成，直接就是显形状态
+        revealed: true,
+        revealT: 1,
+        _hidden: false,
       });
     }
     b.children = children;
@@ -1043,8 +1123,11 @@ export class CosmicSimulation {
     for (const s of this.seeds) {
       const r = this._detailRadius(s);
       if (r <= 0) continue;
+      // 远景成员点云的自转相位：与 detail 成员共用
+      // "布局起始角 + spin × speed" 的公式，交接瞬间位置不跳变
+      s._layoutSpin = (s._layoutSpin || 0) + dt;
       const d = Math.hypot(pr.pos[0] - s.pos[0], pr.pos[1] - s.pos[1], pr.pos[2] - s.pos[2]);
-      // 远到一定程度不加载；接近到 1.4R 时一次创建多级 LOD 内部天体
+      // 接近到 1.4R 才创建真实 detail 天体；更远处由远景成员点云表达
       if (!s.detail && d < r * 1.4) {
         const overBudget = cfg.qualityTier >= 1
           || systemsWithDetail >= cfg.maxDetailSystems
@@ -1060,20 +1143,16 @@ export class CosmicSimulation {
         this._ensureDetailSystem(s);
       }
       if (s.detail) {
-        // 离开太远就释放；卸载后下次再次接近会重新创建并按 LOD 渐进显示
+        // 离开太远就释放；下次接近重新创建（已发现记忆随之重置，
+        // 远景成员点云接管"它依然是一群天体"的表达）
         if (d > r * 2.4) {
           s.detail = null;
           s.budgetNotified = false;
           continue;
         }
-        // 渐进 LOD：当前距离对应的 LOD 等级 >= lodReached 时立即升级（一次性），
-        // 否则 lodLerp 平滑插值（让"凝聚过程"在视觉上能感受到）
-        const target = this._detailLODFor(s);
-        // tier>=1：冻结 LOD 升级（不再增加天体数量），已有的继续展示
-        if (cfg.qualityTier < 1 && target > s.detail.lodReached) s.detail.lodReached = target;
-        const lerpRate = Math.min(1, dt * 1.6);
-        s.detail.lodLerp += (s.detail.lodReached - s.detail.lodLerp) * lerpRate;
         this._updateDetailBodies(s, dt);
+        // 渐进发现：小球靠近哪个成员，哪个成员才从远景光点升级为真实天体
+        this._revealMembers(s, pr);
         this._updateSubSystems(s);
         this.activeDetails.push(s);
         systemsWithDetail += 1;
@@ -1203,6 +1282,8 @@ export class CosmicSimulation {
       }
       for (const s of this.activeDetails) {
         for (const b of s.detail.bodies) {
+          // 未发现的天体不产生引力——它们还没"进入小球的宇宙"
+          if (b._hidden) continue;
           const dx = b.pos[0] - pr.pos[0];
           const dy = b.pos[1] - pr.pos[1];
           const dz = b.pos[2] - pr.pos[2];
@@ -1262,25 +1343,6 @@ export class CosmicSimulation {
       pr.pos[2] += pr.vel[2] * h;
     }
 
-    // 找出对小球施加最强引力的天体系统，供智能镜头聚焦（同时显示小球与它）。
-    // 影响力 = 该源对小球造成的加速度大小，越近/质量越大越强。
-    let bestInf = -1, bestStr = 0;
-    if (gs > 0.001) {
-      for (const s of this.seeds) {
-        const dx = s.pos[0] - pr.pos[0];
-        const dy = s.pos[1] - pr.pos[1];
-        const dz = s.pos[2] - pr.pos[2];
-        const r2 = dx * dx + dy * dy + dz * dz;
-        if (r2 < 1e-6) continue;
-        const d = Math.sqrt(r2);
-        const f = G * PROBE_GRAVITY_MULT * s.mass / Math.pow(r2 + EPS2, 0.95) * gs;
-        const strength = f * d;
-        if (strength > bestStr) { bestStr = strength; bestInf = s.idx; }
-      }
-    }
-    pr.influencer = bestInf;
-    pr.influenceStrength = bestStr;
-
     // 捕获检测：落到天体核心/事件视界就重生，不做任何预定弹射。
     // 注意：星团/星系/超星系团本身是"集合"，不会作为整体捕获小球；
     // 小球只会被这些集合中的单个成员（恒星/行星/黑洞）持久捕获。
@@ -1304,6 +1366,8 @@ export class CosmicSimulation {
     }
     for (const s of this.activeDetails) {
       for (const b of s.detail.bodies) {
+        // 未发现的天体不可捕获——发现（接近）本身就是交互的前提
+        if (b._hidden) continue;
         const bodiesToCheck = b.children ? [b, ...b.children] : [b];
         for (const body of bodiesToCheck) {
           const dx = body.pos[0] - pr.pos[0];
@@ -2068,6 +2132,134 @@ export function createCosmosRenderer(canvas, sim) {
 
   // ---------- 流式细节：只有小球接近大系统时才创建内部星体 ----------
   const detailVisuals = new Map();
+
+  // ---- 远景成员点云（§5.2 渐进发现的远景表达）----
+  // 集合系统成熟后不再被渲染成"一个发光天体"：把确定性成员布局画成一团
+  // 小光点，远处看到的就是"很多个天体"组成的星系 / 星团形状。
+  // 小球靠近后成员被逐个发现：发现完成的成员由 detail 点云接管渲染，
+  // 预览点随 revealT 淡出。两者共用同一位置，所以是无缝升级，不是重影。
+  const PREVIEW_CULL = 900; // 超出这个距离直接不画（远景已不可辨）
+  const previewVisuals = new Map(); // s.idx -> { points, geo, mat, pos, size, base, layoutId }
+  function updatePreviewClouds() {
+    for (const s of sim.seeds) {
+      let v = previewVisuals.get(s.idx);
+      const eligible = COLLECTION_LEVELS.has(s.level) && s.growth > 0.55;
+      const layout = eligible ? sim._memberLayout(s) : null;
+      if (!layout) {
+        if (v) v.points.visible = false;
+        continue;
+      }
+      if (!v || v.layoutId !== s._layoutId) {
+        if (v) { scene.remove(v.points); v.geo.dispose(); v.mat.dispose(); }
+        const n = layout.length;
+        const pos = new Float32Array(n * 3);
+        const col = new Float32Array(n * 3);
+        const base = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+          const m = layout[i];
+          const tint = m.colorSeed;
+          // 结构层越靠内越小越暗：远处也能读出"旋臂 / 核球"的层次
+          const layer = 1 - (m.tier || 0) * 0.22;
+          if (m.type === 'star') {
+            col[i * 3] = 0.85 + tint * 0.15; col[i * 3 + 1] = 0.72 + tint * 0.16; col[i * 3 + 2] = 0.55 + tint * 0.2;
+            base[i] = (0.10 + tint * 0.10) * layer;
+          } else if (m.type === 'blackhole' || m.type === 'galaxy') {
+            col[i * 3] = 0.62; col[i * 3 + 1] = 0.70; col[i * 3 + 2] = 1.0;
+            base[i] = 0.16 * layer;
+          } else {
+            col[i * 3] = 0.50 + tint * 0.25; col[i * 3 + 1] = 0.35 + tint * 0.25; col[i * 3 + 2] = 0.85 + tint * 0.15;
+            base[i] = (0.05 + tint * 0.04) * layer;
+          }
+        }
+        const size = new Float32Array(base);
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        geo.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
+        // 与细节点云同款着色器，但带最小像素钳制与远距离补偿：
+        // 极远处每个成员仍是可感知的光点，上百个成员融成"星系光雾"
+        const mat = new THREE.ShaderMaterial({
+          transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, vertexColors: true,
+          uniforms: { uFade: { value: 1 }, uMinPx: { value: 1.15 }, uBoost: { value: 0 } },
+          vertexShader: `
+            attribute float aSize;
+            uniform float uMinPx;
+            uniform float uBoost;
+            varying vec3 vColor;
+            void main() {
+              vColor = color;
+              vec4 mv = modelViewMatrix * vec4(position, 1.0);
+              float px = aSize * (620.0 / max(1.0, -mv.z));
+              gl_PointSize = max(uMinPx * (1.0 + uBoost * 1.8), px * (1.0 + uBoost * 2.2));
+              gl_Position = projectionMatrix * mv;
+            }
+          `,
+          fragmentShader: `
+            uniform float uFade;
+            uniform float uBoost;
+            varying vec3 vColor;
+            void main() {
+              float d = length(gl_PointCoord - 0.5) * 2.0;
+              float a = (1.0 - smoothstep(0.08, 1.0, d)) * (0.55 + 0.45 * uBoost) * uFade;
+              if (a < 0.01) discard;
+              gl_FragColor = vec4(vColor * 0.85, a);
+            }
+          `,
+        });
+        const points = new THREE.Points(geo, mat);
+        points.frustumCulled = false;
+        points.renderOrder = 4;
+        scene.add(points);
+        v = { points, geo, mat, pos, size, base, layoutId: s._layoutId };
+        previewVisuals.set(s.idx, v);
+      }
+      // ---- 每帧写入世界坐标（points 本体留在原点）----
+      const n = Math.min(layout.length, v.size.length);
+      const pos = v.pos, size = v.size, base = v.base;
+      const det = s.detail;
+      if (det) {
+        // detail 已激活：直接取真实 body 的位置（同步轨道 / 动力学偏移），
+        // 已发现的成员随 revealT 淡出，把画面交给 detail 点云
+        const nb = Math.min(n, det.bodies.length);
+        for (let i = 0; i < nb; i++) {
+          const b = det.bodies[i];
+          pos[i * 3] = b.pos[0]; pos[i * 3 + 1] = b.pos[1]; pos[i * 3 + 2] = b.pos[2];
+          size[i] = b.revealed ? base[i] * (1 - clamp01(b.revealT)) : base[i];
+        }
+      } else {
+        // 无 detail：静态布局 + 与 detail 同公式的自转
+        //（angle = 布局起始角 + layoutSpin × speed），交接瞬间不跳变
+        const spin = s._layoutSpin || 0;
+        for (let i = 0; i < n; i++) {
+          const m = layout[i];
+          if (m.orbit) {
+            const ang = m.orbit.angle + spin * m.orbit.speed;
+            const c = Math.cos(ang), sn = Math.sin(ang);
+            pos[i * 3] = s.pos[0] + s.u[0] * c * m.orbit.radius + s.v[0] * sn * m.orbit.radius + s.axis[0] * m.orbit.height;
+            pos[i * 3 + 1] = s.pos[1] + s.u[1] * c * m.orbit.radius + s.v[1] * sn * m.orbit.radius + s.axis[1] * m.orbit.height;
+            pos[i * 3 + 2] = s.pos[2] + s.u[2] * c * m.orbit.radius + s.v[2] * sn * m.orbit.radius + s.axis[2] * m.orbit.height;
+          } else {
+            pos[i * 3] = s.pos[0]; pos[i * 3 + 1] = s.pos[1]; pos[i * 3 + 2] = s.pos[2];
+          }
+          size[i] = base[i];
+        }
+      }
+      v.geo.attributes.position.needsUpdate = true;
+      v.geo.attributes.aSize.needsUpdate = true;
+      // 距离越远越亮越大：整团融成可辨识的星系光雾；
+      // 近处收敛到成员真实尺寸，把画面让给 detail 点云
+      const dr = sim._detailRadius(s) || sim._systemRadius(s);
+      const cd = Math.hypot(
+        camera.position.x - s.pos[0],
+        camera.position.y - s.pos[1],
+        camera.position.z - s.pos[2],
+      );
+      v.mat.uniforms.uBoost.value = clamp01((cd - dr * 2) / (dr * 14));
+      v.mat.uniforms.uFade.value = smoothstep(0.5, 0.7, s.growth);
+      v.points.visible = v.mat.uniforms.uFade.value > 0.01 && cd < PREVIEW_CULL;
+    }
+  }
+
   function updateDetailVisuals(alpha) {
     for (const s of sim.seeds) {
       let v = detailVisuals.get(s.idx);
@@ -2114,23 +2306,21 @@ export function createCosmosRenderer(canvas, sim) {
           detailVisuals.set(s.idx, v);
         }
         const pos = v.pos, col = v.col, size = v.size;
-        const lerpLod = s.detail.lodLerp;
         for (let i = 0; i < bodies.length; i++) {
           const b = bodies[i];
-          // LOD 未解锁的天体真正不可见（此前会被渲染在静止轨道位置上，
-          // 破坏"靠近才展开"的节奏）
+          // 未发现的天体真正不可见：发现是逐个、由小球行进驱动的
           if (b._hidden) {
             size[i] = 0;
             continue;
           }
-          // LOD 出场动画：每层天体随 lodLerp 从系统核心沿轨道旋出并淡入，
-          // 靠近时的观感是"星系在眼前展开成无数独立天体"
-          const fadeIn = b.lod === 0 ? clamp01(lerpLod * 2.5) : clamp01(lerpLod - b.lod);
+          // 发现出场：天体停在它真实的轨道位置上原地淡入——
+          // 远景成员点云早已把它画在那里，所以"发现"是看清，不是凭空出现
+          // （revealT 由 sim 侧按天体推进，与全系统距离无关）
+          const fadeIn = clamp01(b.revealT ?? 1);
           const ease = easeInOut(fadeIn);
           if (b.orbit) {
-            // 在相邻两个物理步之间插值轨道角，让绕行天体也平滑运动；
-            // 轨道半径乘展开系数——出场时从内圈旋到最终轨道
-            const rEff = b.orbit.radius * (0.3 + 0.7 * ease);
+            // 在相邻两个物理步之间插值轨道角，让绕行天体也平滑运动
+            const rEff = b.orbit.radius;
             const ang = b.prevAngle + (b.orbit.angle - b.prevAngle) * alpha;
             const c = Math.cos(ang), sn = Math.sin(ang);
             // 动力学微扰偏移（§9.7）与 sim 侧保持一致；叠加出场半径系数
@@ -2169,7 +2359,8 @@ export function createCosmosRenderer(canvas, sim) {
             col[i * 3] = 1.0; col[i * 3 + 1] = 0.55; col[i * 3 + 2] = 0.22;
             size[i] = 0.26;
           }
-          // 加色混合下颜色乘 fadeIn 即为透明度：出场时从核心亮起
+          // 加色混合下颜色乘 fadeIn 即为透明度：出场时在原位亮起、尺寸放大，
+          // 与远景预览点的淡出交叉，合起来是"从模糊光点聚焦成真实天体"
           col[i * 3] *= fadeIn;
           col[i * 3 + 1] *= fadeIn;
           col[i * 3 + 2] *= fadeIn;
@@ -2187,8 +2378,8 @@ export function createCosmosRenderer(canvas, sim) {
           const pa = pb.prevAngle + (pb.orbit.angle - pb.prevAngle) * alpha;
           const pcd = Math.cos(pa), psn = Math.sin(pa);
           // 母星显示位置：与主循环一致（出场半径系数 rEff + 动力学偏移 boff）
-          const pEase = easeInOut(clamp01(pb.lod === 0 ? lerpLod * 2.5 : clamp01(lerpLod - pb.lod)));
-          const prEff = pb.orbit.radius * (0.3 + 0.7 * pEase);
+          // 母星必已发现（子行星只在发现的恒星上生成），直接用最终轨道半径
+          const prEff = pb.orbit.radius;
           const pbx = (pb.boff ? pb.boff[0] : 0), pby = (pb.boff ? pb.boff[1] : 0), pbz = (pb.boff ? pb.boff[2] : 0);
           const sx = s.pos[0] + s.u[0] * pcd * prEff + s.v[0] * psn * prEff + s.axis[0] * pb.orbit.height + pbx;
           const sy = s.pos[1] + s.u[1] * pcd * prEff + s.v[1] * psn * prEff + s.axis[1] * pb.orbit.height + pby;
@@ -2505,9 +2696,10 @@ export function createCosmosRenderer(canvas, sim) {
       const g = seedGroups[i];
       const lv = s.level;
       g.group.position.set(s.pos[0], s.pos[1], s.pos[2]);
-      // 小球贴近后，集合类系统（星团/星系/超星系团/尘埃云）的远景表示
-      // 让位于内部点云：视觉从"一个发光天体"切换成"无数天体组成的星系"。
-      // 淡出区间与 LOD0 出现阈值（detailR*0.7）衔接，避免视觉空窗。
+      // 集合类系统（星团/星系/超星系团/尘埃云）成形后，远景的"单个发光天体"
+      // 表达让位于成员点云：视觉从"一个天体"切换成"一群天体"。
+      // 盘面/光晕仍随小球接近（detailR*1.15 → detailR*0.7）淡出，
+      // 那是星系轮廓的底雾，只在贴身时散去。
       const pd = Math.hypot(
         sim.probe.pos[0] - s.pos[0],
         sim.probe.pos[1] - s.pos[1],
@@ -2516,12 +2708,19 @@ export function createCosmosRenderer(canvas, sim) {
       const detailR = sim._detailRadius(s) || sim._systemRadius(s);
       const isCollection = lv === 'cluster' || lv === 'galaxy' || lv === 'supercluster'
         || lv === 'dust' || lv === 'void';
-      // 核心光斑/实心球在 detail 点云创建（1.4R）前后就让位，
-      // "一个发光天体"的观感随点云出场平滑交接给"无数天体"
-      const coreFade = isCollection ? smoothstep(detailR * 1.0, detailR * 1.5, pd) : 1;
+      // 集合系统成形后（成员点云接管）分三档让位：
+      //  - 实心球彻底退出——它最像"一个天体"
+      //  - 中心亮斑只留一点核球辉光，免得点云中心显得空
+      //  - 盘面/光晕/伴星系核是弥散结构，保留为星系轮廓的底雾（压暗 45%）
+      // 让位随 growth 平滑推进（0.6→0.85），与成员点云的淡入区间
+      // （growth 0.5→0.7）错开，中间不会出现"两边都不可见"的空窗。
+      const cloudMix = isCollection ? smoothstep(0.6, 0.85, s.growth) : 0;
+      const solidFade = 1 - cloudMix;
+      const coreFade = isCollection ? 1 - cloudMix * 0.85 : 1;
       const nearFade = isCollection
         ? smoothstep(detailR * 0.7, detailR * 1.15, pd)
         : 1;
+      const mistFade = (1 - cloudMix * 0.45) * nearFade;
       const m4 = new THREE.Matrix4().makeBasis(
         new THREE.Vector3(s.u[0], s.u[1], s.u[2]),
         new THREE.Vector3(s.v[0], s.v[1], s.v[2]),
@@ -2543,8 +2742,8 @@ export function createCosmosRenderer(canvas, sim) {
 
       const targetSolid = levelSolidScale(lv, s);
       g.solid.scale.setScalar(targetSolid * pulse);
-      // 集合类系统的远景实心球近距隐藏（点云接管）；黑洞视界黑球保留
-      g.solid.visible = lv !== 'void' && targetSolid > 0.01 && coreFade > 0.05;
+      // 集合类系统成形后远景实心球退出（成员点云接管）；黑洞视界黑球保留
+      g.solid.visible = lv !== 'void' && targetSolid > 0.01 && solidFade > 0.05;
       if (lv === 'blackhole') {
         g.solid.material.color.setRGB(0, 0, 0);
       } else {
@@ -2562,9 +2761,9 @@ export function createCosmosRenderer(canvas, sim) {
       // 旋涡星系盘（越晚期的大结构越大，保证在全局视角也清晰可见）
       const diskBase = lv === 'supercluster' ? 3.8 + s.mass * 1.1 : 2.6 + s.mass * 0.85;
       g.disk.scale.setScalar(Math.max(0.001, diskBase * (0.22 + 0.78 * g.diskAmt) * pulse));
-      g.disk.material.opacity = (0.14 + 0.46 * g.diskAmt * (0.8 + audioLevels.bass * 0.3)) * nearFade;
+      g.disk.material.opacity = (0.14 + 0.46 * g.diskAmt * (0.8 + audioLevels.bass * 0.3)) * mistFade;
       g.disk.material.color.copy(levelColor(lv));
-      g.disk.visible = g.diskAmt > 0.01 && nearFade > 0.02;
+      g.disk.visible = g.diskAmt > 0.01 && mistFade > 0.02;
 
       // 黑洞内盘 / 光子环 / 喷流
       const bhScale = 1.65 + s.mass * 0.34;
@@ -2595,14 +2794,14 @@ export function createCosmosRenderer(canvas, sim) {
       else { haloTarget = 2.0 + s.mass * 0.55; haloFade = 0.9; } // void / dust
       g.halo.scale.setScalar(Math.max(0.001, haloTarget * pulse * (0.5 + 0.5 * Math.max(g.diskAmt, g.bhAmt))));
       g.halo.material.color.copy(levelColor(lv));
-      g.halo.material.opacity = 0.30 * haloFade * nearFade;
+      g.halo.material.opacity = 0.30 * haloFade * mistFade;
       g.halo.visible = g.halo.material.opacity > 0.01;
 
-      // 超星系团伴星系（近看由点云的 6 个星系核接管）
+      // 超星系团伴星系（成形后由点云里的 6 个星系核成员接管）
       for (let n = 0; n < g.nodes.length; n++) {
         g.nodes[n].scale.setScalar((0.28 + (n % 3) * 0.12) * g.nodeAmt * pulse);
-        g.nodes[n].material.opacity = 0.7 * g.nodeAmt * nearFade;
-        g.nodes[n].visible = g.nodeAmt > 0.01 && nearFade > 0.02;
+        g.nodes[n].material.opacity = 0.7 * g.nodeAmt * mistFade;
+        g.nodes[n].visible = g.nodeAmt > 0.01 && mistFade > 0.02;
       }
 
       // 旋转动画：星系盘与黑洞吸积盘持续旋转
@@ -2642,6 +2841,8 @@ export function createCosmosRenderer(canvas, sim) {
     updateParticles(dtReal, audioLevels);
     updateExplosion();
     updateStructures(dtReal, audioLevels, pulse);
+    // 先画远景成员点云（未发现的成员），再由 detail 点云叠加已发现的成员
+    updatePreviewClouds();
     updateDetailVisuals(alpha);
 
     // 死亡序列起点：立即播死亡特效，并标记本次死亡已播（重生时不再重复）
