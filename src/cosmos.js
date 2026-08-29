@@ -1882,35 +1882,73 @@ function createCosmicSky() {
   return mesh;
 }
 
+// 银河带法线（星空里那条恒星密集的带）：给个倾角，别正对坐标轴
+const GALAXY_NORMAL = (() => {
+  const n = [0.34, 0.88, -0.32];
+  const l = Math.hypot(n[0], n[1], n[2]);
+  return [n[0] / l, n[1] / l, n[2] / l];
+})();
+
+// 沿银河带盘面采样：把随机方向压向垂直于 GALAXY_NORMAL 的平面，
+// 再在法向加一点厚度。纯均匀球面分布是"没有银河"的，看起来很假。
+function sampleGalaxyDirection() {
+  const d = randomUnit(1);
+  const dot = d[0] * GALAXY_NORMAL[0] + d[1] * GALAXY_NORMAL[1] + d[2] * GALAXY_NORMAL[2];
+  let vx = d[0] - GALAXY_NORMAL[0] * dot;
+  let vy = d[1] - GALAXY_NORMAL[1] * dot;
+  let vz = d[2] - GALAXY_NORMAL[2] * dot;
+  const l = Math.hypot(vx, vy, vz) || 1;
+  vx /= l; vy /= l; vz /= l;
+  // 盘的厚度：越靠近银盘越密（用 |·|^3 让厚度方向快速衰减）
+  const h = (Math.random() - 0.5);
+  const th = Math.sign(h) * Math.pow(Math.abs(h), 1.7) * 0.30;
+  return [vx + GALAXY_NORMAL[0] * th, vy + GALAXY_NORMAL[1] * th, vz + GALAXY_NORMAL[2] * th];
+}
+
 function createStarfield() {
-  const N = 3800;
-  const pos = new Float32Array(N * 3);
-  const col = new Float32Array(N * 3);
-  for (let i = 0; i < N; i++) {
-    const p = randomUnit(900 + Math.random() * 3600);
-    pos[i * 3] = p[0]; pos[i * 3 + 1] = p[1]; pos[i * 3 + 2] = p[2];
-    const b = 0.28 + Math.random() * 0.72;
-    const tint = Math.random();
-    if (tint < 0.12) {
-      col[i * 3] = 1.0; col[i * 3 + 1] = 0.72; col[i * 3 + 2] = 0.52;
-    } else if (tint < 0.24) {
-      col[i * 3] = 0.55; col[i * 3 + 1] = 0.72; col[i * 3 + 2] = 1.0;
-    } else {
-      col[i * 3] = b;
-      col[i * 3 + 1] = b * (0.86 + Math.random() * 0.14);
-      col[i * 3 + 2] = b;
+  // 真实夜空的星等分布是幂律：暗星压倒性多数，亮星极少。原先的"均匀亮度"
+  // 会让整片天都一样亮，既假也压过了前景天体。这里分两层：
+  //   faint：绝大多数，暗、小； bright：少数，亮、稍大（形成视觉层次）
+  const group = new THREE.Group();
+  const layers = [
+    { n: 3400, size: 0.85, lo: 0.05, hi: 0.42, pow: 2.4, op: 0.85 },
+    { n: 240, size: 2.10, lo: 0.45, hi: 1.00, pow: 2.8, op: 0.95 },
+  ];
+  for (const L of layers) {
+    const pos = new Float32Array(L.n * 3);
+    const col = new Float32Array(L.n * 3);
+    for (let i = 0; i < L.n; i++) {
+      // 约 45% 的恒星聚在银河带上，其余全天均匀
+      const dir = Math.random() < 0.45 ? sampleGalaxyDirection() : randomUnit(1);
+      const r = 900 + Math.random() * 3600;
+      pos[i * 3] = dir[0] * r;
+      pos[i * 3 + 1] = dir[1] * r;
+      pos[i * 3 + 2] = dir[2] * r;
+      // 幂律星等：pow>1 让亮度集中在暗端
+      const b = L.lo + Math.pow(Math.random(), L.pow) * (L.hi - L.lo);
+      const tint = Math.random();
+      if (tint < 0.06) {            // 少数偏红（低温星）
+        col[i * 3] = b; col[i * 3 + 1] = b * 0.72; col[i * 3 + 2] = b * 0.52;
+      } else if (tint < 0.12) {     // 少数偏蓝（高温星）
+        col[i * 3] = b * 0.62; col[i * 3 + 1] = b * 0.78; col[i * 3 + 2] = b;
+      } else {                      // 其余接近白，只带极轻的色偏
+        col[i * 3] = b;
+        col[i * 3 + 1] = b * (0.93 + Math.random() * 0.07);
+        col[i * 3 + 2] = b * (0.97 + Math.random() * 0.03);
+      }
     }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    const mat = new THREE.PointsMaterial({
+      size: L.size, sizeAttenuation: true, vertexColors: true,
+      transparent: true, opacity: L.op, depthWrite: false,
+    });
+    const pts = new THREE.Points(geo, mat);
+    pts.frustumCulled = false;
+    group.add(pts);
   }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  const mat = new THREE.PointsMaterial({
-    size: 1.15, sizeAttenuation: true, vertexColors: true,
-    transparent: true, opacity: 0.9, depthWrite: false,
-  });
-  const points = new THREE.Points(geo, mat);
-  points.frustumCulled = false;
-  return points;
+  return group;
 }
 
 // 全屏爆炸闪光 / 冲击波 / 径向射线叠加层
@@ -2576,6 +2614,13 @@ export function createCosmosRenderer(canvas, sim) {
   const CAM_CRUISE_DIST = 34;      // 自由航行时的基准距离（远一点，上帝视角）
   const CAM_MAX_DIST = 90;         // 距离绝对上限（防异常失真把镜头甩飞）
   const CAM_DIST_RATE = 0.35;      // 距离最大相对变化率 /s，消除"呼吸"
+  // 极缓慢的镜头漂移（观赏性）：方位角恒定会让画面像张静止的照片，
+  // 叠加一个幅度极小、周期很长的正弦，让画面"活着"但不干扰观察。
+  // 幅度 1.7° / 周期约 5 分钟，远小于跟随速度方向造成的旋转，不会晕。
+  const CAM_DRIFT_AZ = 0.030;      // 方位角漂移幅度（弧度，≈1.7°）
+  const CAM_DRIFT_AZ_W = 0.021;    // 方位角漂移角频率（周期 ≈300s）
+  const CAM_DRIFT_EL = 0.012;      // 俯角漂移幅度（弧度，≈0.7°）
+  const CAM_DRIFT_EL_W = 0.013;    // 俯角漂移角频率（周期 ≈480s）
 
   const state = {
     // timeScale **只是显示层的缩放系数**（详见 render() 中的物理量/显示量说明），
@@ -3305,7 +3350,9 @@ export function createCosmosRenderer(canvas, sim) {
         const distForFrame = (aabbRadius * 1.65) / Math.max(0.05, Math.sin(fovRad * 0.5));
 
         // 全局方位角：初始化后恒定不变（不跟随小球旋转，见上文）
-        const az = state.camAzimuth;
+        // 方位角 = 恒定基准 + 极缓慢漂移（漂移只影响显示，与物理无关）
+        const az = state.camAzimuth + CAM_DRIFT_AZ * Math.sin(state.time * CAM_DRIFT_AZ_W);
+        const pitch = CAM_PITCH + CAM_DRIFT_EL * Math.sin(state.time * CAM_DRIFT_EL_W);
 
         // ---- 相机位置：三种模式统一用球坐标 (方位角, 俯角, 距离) ----
         // 旧实现里 interact/detail 走的是"视点反 anchor 方向的水平单位向量"：
@@ -3317,7 +3364,6 @@ export function createCosmosRenderer(canvas, sim) {
         // interact 仍可通过"最小距离"把镜头拉远到框下交互对象，但方位角与俯角
         // 恒定不变 —— 距离变化只改变远近，不改变朝向，所以镜头依旧纹丝不动。
         const dist = Math.max(state.camDist, distForFrame);
-        const pitch = CAM_PITCH;
         const horizM = dist * Math.cos(pitch);
 
         // ---- 视点 = f + 屏幕空间平移偏移 ----
