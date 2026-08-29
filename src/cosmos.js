@@ -860,7 +860,27 @@ export class CosmicSimulation {
         );
       }
     }
-    s.detail = { bodies, radius: r, lodReached: 0, lodLerp: 0 };
+    // ---- 质量守恒：成员质量归一化到系统质量 ----
+    // 星团/星系/超星系团**不是单个天体**，其引力场应由成员分布产生。
+    // 但成员质量原本是按各自范围独立生成的，与 s.mass 并不守恒
+    // （实测 cluster 的成员总和可达 s.mass 的 10.9 倍，galaxy 约 0.7 倍）。
+    // 若不处理，展开 detail 的瞬间引力会成倍跳变。
+    // 这里把成员质量整体缩放到 Σ = s.mass，使"远场质点"与"近场成员"
+    // 描述同一个总质量，再在 probe 引力计算里按距离平滑交接。
+    let massSum = 0;
+    for (const b of bodies) {
+      massSum += b.mass || 0;
+      if (b.children) for (const ch of b.children) massSum += ch.mass || 0;
+    }
+    if (massSum > 1e-6 && s.mass > 1e-6) {
+      const k = s.mass / massSum;
+      for (const b of bodies) {
+        b.mass = (b.mass || 0) * k;
+        if (b.children) for (const ch of b.children) ch.mass = (ch.mass || 0) * k;
+      }
+      massSum = s.mass;
+    }
+    s.detail = { bodies, radius: r, lodReached: 0, lodLerp: 0, massSum };
   }
 
   // 根据小球到系统的距离决定当前已「真实化」到的 LOD 等级
@@ -1276,18 +1296,35 @@ export class CosmicSimulation {
           const dz = s.pos[2] - pr.pos[2];
           const r2 = dx * dx + dy * dy + dz * dz;
           if (r2 < 1e-6) continue;
-          const f = gG * PROBE_GRAVITY_MULT * (s.mass * mS) / Math.pow(r2 + EPS2, 0.95) * gs;
+          // 星团/星系/超星系团不是单个天体：展开成成员后，引力应逐步交给
+          // 成员承担，这里的中心质点按进入深度平滑退场，避免与成员重复计入
+          // （成员质量已归一化到 s.mass，两边互补，总质量守恒）。
+          let seedMass = s.mass;
+          if (s.detail && s.detail.radius > 0) {
+            seedMass = s.mass * smoothstep(s.detail.radius * 0.6, s.detail.radius * 1.4, Math.sqrt(r2));
+          }
+          if (seedMass < 1e-6) continue;
+          const f = gG * PROBE_GRAVITY_MULT * (seedMass * mS) / Math.pow(r2 + EPS2, 0.95) * gs;
           ax += f * dx; ay += f * dy; az += f * dz;
         }
       }
       for (const s of this.activeDetails) {
+        // 成员的引力按"进入深度"平滑登场，与上面中心质点的退场互补：
+        // 远处全靠质点（等价多极展开的单极项），靠近后完全交给成员分布。
+        // 这样展开 detail 不会造成引力跳变。
+        let memberW = 1;
+        if (s.detail && s.detail.radius > 0) {
+          const dd = Math.hypot(s.pos[0] - pr.pos[0], s.pos[1] - pr.pos[1], s.pos[2] - pr.pos[2]);
+          memberW = 1 - smoothstep(s.detail.radius * 0.6, s.detail.radius * 1.4, dd);
+        }
+        if (memberW <= 0.001) continue;
         for (const b of s.detail.bodies) {
           const dx = b.pos[0] - pr.pos[0];
           const dy = b.pos[1] - pr.pos[1];
           const dz = b.pos[2] - pr.pos[2];
           const r2 = dx * dx + dy * dy + dz * dz;
           if (r2 < 1e-6) continue;
-          const f = gG * PROBE_GRAVITY_MULT * (b.mass * mS) / Math.pow(r2 + 0.12, 0.95);
+          const f = gG * PROBE_GRAVITY_MULT * (b.mass * mS) * memberW / Math.pow(r2 + 0.12, 0.95);
           ax += f * dx; ay += f * dy; az += f * dz;
           // 二级系统的行星/卫星质量小，但贴近时仍有可感知的引力
           if (b.children) {
@@ -1297,7 +1334,7 @@ export class CosmicSimulation {
               const cz = ch.pos[2] - pr.pos[2];
               const cr2 = cx * cx + cy * cy + cz * cz;
               if (cr2 < 1e-6) continue;
-              const cf = gG * PROBE_GRAVITY_MULT * (ch.mass * mS) / Math.pow(cr2 + 0.12, 0.95);
+              const cf = gG * PROBE_GRAVITY_MULT * (ch.mass * mS) * memberW / Math.pow(cr2 + 0.12, 0.95);
               ax += cf * cx; ay += cf * cy; az += cf * cz;
             }
           }
@@ -1458,16 +1495,11 @@ export class CosmicSimulation {
         this._beginDeath(s, LEVEL_LABELS[s.level] || '天体', s.idx, s.level === 'star' ? 'vaporize' : 'atmosphere', Math.max(this._systemRadius(s) * 1.1, cap * 4));
         return;
       }
-      // 核心半径兜底：集合类（星团/星系/超星系团/黑洞）没有整体捕获判定，
-      // 只靠内部成员。若小球恰好从核心穿过却没碰到任何成员，就会"穿透"天体
-      // 正中心（实测出现距离/系统半径 ≈ 0 的情况）。这里给一个核心半径，
-      // 保证小球不可能从天体中间穿过去；半径倍率滑杆同样作用于此。
-      const coreR = this._systemRadius(s) * 0.10 * (this.config.bodyRadiusScale || 1);
-      if (mature && pr.respawnGrace <= 0 && d < coreR) {
-        this._beginDeath(s, LEVEL_LABELS[s.level] || '天体', s.idx, 'tidal',
-          Math.max(this._systemRadius(s) * 1.1, coreR * 4));
-        return;
-      }
+      // 集合类（星团 / 星系 / 超星系团 / 黑洞）**没有**整体碰撞体：
+      // 它们不是单个天体，内部绝大部分是空的，小球从旋臂之间穿过去是物理
+      // 上正确的行为，只有撞上具体成员（恒星 / 行星 / 黑洞）才应判定捕获。
+      // （曾经加过"核心半径兜底"来防视觉穿透，那等于把星系当成实心球，
+      //  属于建模错误，已移除。）
     }
     for (const s of this.activeDetails) {
       for (const b of s.detail.bodies) {
