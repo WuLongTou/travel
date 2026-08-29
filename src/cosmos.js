@@ -2404,12 +2404,11 @@ export function createCosmosRenderer(canvas, sim) {
   let lastWormhole = 0; // 记录已处理的虫洞触发次数
 
   // 巡航镜头（cruise）常量：轨道视角，远远看轨迹 + 镜头稳定
-  const CAM_PITCH = 0.38;        // 巡航俯角 ≈22°（高度随距离自然缩放，不单独跳动）
-  const CAM_PITCH_INTERACT = 0.62; // interact/detail 俯角 ≈35°，更俯视看系统结构
-  const CAM_CRUISE_DIST = 18;    // 自由航行时的基准距离
-  const CAM_MAX_DIST = 60;       // 距离绝对上限（防异常失真把镜头甩飞）
-  const CAM_YAW_RATE = 0.30;     // 方位角最大转速 rad/s（≈17°/s），杜绝瞬甩
-  const CAM_DIST_RATE = 0.35;    // 距离最大相对变化率 /s，消除"呼吸"
+  // 上帝视角：镜头拉远、俯角抬高，且方位角恒定（不跟随小球旋转）
+  const CAM_PITCH = 0.55;          // 固定俯角 ≈31°，俯视看得清轨迹走向（不随 mode 变）
+  const CAM_CRUISE_DIST = 34;      // 自由航行时的基准距离（远一点，上帝视角）
+  const CAM_MAX_DIST = 90;         // 距离绝对上限（防异常失真把镜头甩飞）
+  const CAM_DIST_RATE = 0.35;      // 距离最大相对变化率 /s，消除"呼吸"
 
   const state = {
     time: 0, timeScale: 0.8, musicIntensity: 1, follow: true,
@@ -2743,15 +2742,11 @@ export function createCosmosRenderer(canvas, sim) {
       lastProbeGeneration = pr.generation;
       trailCount = 0;
       trailGeo.setDrawRange(0, 0);
-      // 重生后速度方向突变：方位角直接对准新航向（重生瞬间有特效掩盖，
-      // 比让镜头花几秒慢慢转过去更合理）；平时方位角由速率限幅平滑跟随。
+      // 重生后速度方向突变，但**方位角不跟着转**（用户要求任何时候都不得
+      // 跟随小球旋转）。dirSmooth 仅保留供其它逻辑读取，不再驱动镜头。
       const pv0 = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
       if (pv0 > 0.02) {
         state.dirSmooth.set(pr.vel[0] / pv0, pr.vel[1] / pv0, pr.vel[2] / pv0);
-        // 水平分量太小时（近乎垂直运动）保留原方位角，避免 atan2 退化乱转
-        if (Math.hypot(pr.vel[0], pr.vel[2]) > 1e-3) {
-          state.camAzimuth = Math.atan2(pr.vel[0], pr.vel[2]);
-        }
       }
       // 死亡方式驱动的特效与配色（虫洞逃逸不播死亡特效）；
       // 死亡序列起点已播过则不重复
@@ -3019,27 +3014,13 @@ export function createCosmosRenderer(canvas, sim) {
         state.orbitFactor += (orbitTarget - state.orbitFactor) * Math.min(1, dtReal / 2.5);
         const orbitFactor = state.orbitFactor;
 
-        // --- 方位角：最短弧 + 死区 + 速率限幅 + 跟随权重 ---
-        if (mode === 'cruise') {
-          // 非绕行时跟随速度方向（保持"向前飞"的观感）；绕行时冻结。
-          // 冻结必须是**连续衰减**而不是硬阈值：orbitFactor 会随绕行强度起伏，
-          // 用 "orbitFactor < 0.45" 之类的阈值会让"跟随/冻结"来回切换，
-          // 实测反而转得更碎（累计转角不降反升）。
-          const speedXZ = Math.hypot(pr.vel[0], pr.vel[2]);
-          if (speedXZ > 1e-4) {
-            let d = Math.atan2(pr.vel[0], pr.vel[2]) - state.camAzimuth;
-            // 归一到 [-π, π]：走最短弧，绝不绕长边
-            while (d > Math.PI) d -= Math.PI * 2;
-            while (d < -Math.PI) d += Math.PI * 2;
-            const followW = 1 - smoothstep(0.20, 0.60, orbitFactor); // 绕行越强越不跟
-            const DEAD = 0.20;                                  // 死区 ≈11°，小幅抖动不追
-            if (Math.abs(d) > DEAD && followW > 0.001) {
-              const need = (Math.abs(d) - DEAD) * followW;
-              const step = Math.min(need, CAM_YAW_RATE * dtReal); // 速率限幅，杜绝瞬甩
-              state.camAzimuth += Math.sign(d) * step;
-            }
-          }
-        }
+        // --- 方位角：恒定，永不跟随小球旋转 ---
+        // 这是用户明确要求：**任何时候都不跟随小球旋转**。
+        // 若让方位角追速度方向，镜头会一直待在小球正后方，画面里小球永远
+        // "朝前飞"，观感上就成了直线运行，反而看不出它在转弯、被引力拉偏。
+        // 方位角固定后，小球转向时是背景星空与天体在画面里滑动，
+        // 轨迹的弯曲、绕圈的走向都一目了然。
+        // （camAzimuth 因此只在初始化时定一次，之后不再改动）
         // 记录上一物理步速度，下一帧用于判断加速度
         pr.prevVel = [pr.vel[0], pr.vel[1], pr.vel[2]];
         _v1.set(px, py, pz);
@@ -3081,24 +3062,13 @@ export function createCosmosRenderer(canvas, sim) {
         // interact/detail 另外需要"框下 AABB"的距离
         const distForFrame = (aabbRadius * 1.65) / Math.max(0.05, Math.sin(fovRad * 0.5));
 
-        // 全局方位角（唯一来源，见上文"最短弧 + 死区 + 速率限幅"）
+        // 全局方位角：初始化后恒定不变（不跟随小球旋转，见上文）
         const az = state.camAzimuth;
 
-        // mode 对镜头的介入权重：绕行时归零 —— 不只是视点，俯角/距离也不受
-        // interact↔cruise 切换影响（注入的轨道常在 interact 阈值 0.9R 附近，
-        // 切换很频繁，若仍介入则每次切换都会让相机位置动一下 → 朝向动）
-        const modeMixAll = ml * (1 - orbitFactor);
-
-        // ---- 视点 target：cruise 用 f；interact/detail 用 (probe + anchor) / 2 ----
-        const tgtInterX = (px + anchorX) * 0.5;
-        const tgtInterY = (py + anchorY) * 0.5;
-        const tgtInterZ = (pz + anchorZ) * 0.5;
-        // 绕行时视点钉死在轨道中心 f，与 mode 无关：
-        // interact 的 (probe+anchor)/2 本身随小球绕圈而移动，会让镜头跟着转圈。
-        const finalTgtX = fX + (tgtInterX - fX) * modeMixAll;
-        const finalTgtY = fY + (tgtInterY - fY) * modeMixAll;
-        const finalTgtZ = fZ + (tgtInterZ - fZ) * modeMixAll;
-        _v3.set(finalTgtX, finalTgtY, finalTgtZ);
+        // ---- 视点 target：恒为 f ----
+        // mode 完全退出镜头控制（用户要求：任何时候都不跟随小球旋转，保持上帝视角）。
+        // interact 的 (probe+anchor)/2 会随小球移动而拖动朝向，故不再使用。
+        _v3.set(fX, fY, fZ);
 
         // ---- 相机位置：三种模式统一用球坐标 (方位角, 俯角, 距离) ----
         // 旧实现里 interact/detail 走的是"视点反 anchor 方向的水平单位向量"：
@@ -3107,9 +3077,10 @@ export function createCosmosRenderer(canvas, sim) {
         // 镜头疯狂旋转（用户在绕行时看到的剧烈反转主要来自这里）。
         // 改为统一球坐标后，除法消失，方位角由全局 camAzimuth 提供，
         // 模式切换时只剩俯角/距离/视点的连续混合，不可能再翻转。
-        const interDist = Math.max(state.camDist, distForFrame);
-        const pitch = CAM_PITCH * (1 - modeMixAll) + CAM_PITCH_INTERACT * modeMixAll;
-        const dist = state.camDist * (1 - modeMixAll) + interDist * modeMixAll;
+        // interact 仍可通过"最小距离"把镜头拉远到框下交互对象，但方位角与俯角
+        // 恒定不变 —— 距离变化只改变远近，不改变朝向，所以镜头依旧纹丝不动。
+        const dist = Math.max(state.camDist, distForFrame);
+        const pitch = CAM_PITCH;
         const horizM = dist * Math.cos(pitch);
 
         // 先平滑视点，再由"视点 + 球坐标偏移"推出相机位置。
