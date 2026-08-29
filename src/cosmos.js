@@ -2419,6 +2419,32 @@ export function createCosmosRenderer(canvas, sim) {
             col[i * 3] = 1.0; col[i * 3 + 1] = 0.55; col[i * 3 + 2] = 0.22;
             size[i] = 0.26;
           }
+          // ---- 月相光照（真实感）----
+          // 行星 / 星云自身不发光，靠系统中心的恒星照亮。点云 Sprite 无法表现
+          // 球面明暗，但可以用**相位**调制整体亮度：被照亮的一面朝向观察者时
+          // 亮（满相）、背向时暗（新相）—— 这正是我们看月球时看到的真实效果。
+          // 恒星 / 星系核 / 黑洞是自发光体，不参与。
+          if (b.type === 'planet' || b.type === 'gas') {
+            // 行星是实心不发光体，相位明暗很明显（像看月亮）；星云气体是漫射
+            // 发光的尘埃云，方向性弱得多 —— 所以用更浅的调制，避免整片星云
+            // 忽明忽暗显得假。
+            const shallow = b.type === 'gas';
+            const bxp = pos[i * 3], byp = pos[i * 3 + 1], bzp = pos[i * 3 + 2];
+            // 指向光源（系统中心的恒星）
+            let lx = s.pos[0] - bxp, ly = s.pos[1] - byp, lz = s.pos[2] - bzp;
+            const ll = Math.hypot(lx, ly, lz) || 1;
+            lx /= ll; ly /= ll; lz /= ll;
+            // 指向观察者
+            let vx = camera.position.x - bxp, vy = camera.position.y - byp, vz = camera.position.z - bzp;
+            const vl = Math.hypot(vx, vy, vz) || 1;
+            vx /= vl; vy /= vl; vz /= vl;
+            const phase = 0.5 + 0.5 * (lx * vx + ly * vy + lz * vz); // 1=满相 0=新相
+            // 行星：0.16~1.0（明暗对比强）；星云：0.62~1.0（只轻轻起伏）
+            const lit = shallow ? 0.62 + 0.38 * phase : 0.16 + 0.84 * phase;
+            col[i * 3] *= lit;
+            col[i * 3 + 1] *= lit;
+            col[i * 3 + 2] *= lit;
+          }
           // 加色混合下颜色乘 fadeIn 即为透明度：出场时从核心亮起
           col[i * 3] *= fadeIn;
           col[i * 3 + 1] *= fadeIn;
