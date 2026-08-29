@@ -2403,9 +2403,29 @@ export function createCosmosRenderer(canvas, sim) {
   const wormholeOverlay = createWormholeOverlay();
   let lastWormhole = 0; // 记录已处理的虫洞触发次数
 
+  // 巡航镜头（cruise）常量：轨道视角，远远看轨迹 + 镜头稳定
+  const CAM_PITCH = 0.38;        // 巡航俯角 ≈22°（高度随距离自然缩放，不单独跳动）
+  const CAM_PITCH_INTERACT = 0.62; // interact/detail 俯角 ≈35°，更俯视看系统结构
+  const CAM_CRUISE_DIST = 18;    // 自由航行时的基准距离
+  const CAM_MAX_DIST = 60;       // 距离绝对上限（防异常失真把镜头甩飞）
+  const CAM_YAW_RATE = 0.30;     // 方位角最大转速 rad/s（≈17°/s），杜绝瞬甩
+  const CAM_DIST_RATE = 0.35;    // 距离最大相对变化率 /s，消除"呼吸"
+
   const state = {
     time: 0, timeScale: 0.8, musicIntensity: 1, follow: true,
     physAcc: 0,
+    // 巡航镜头的方位角（弧度）与距离：独立维护成标量，
+    // 镜头不再跟随速度方向向量（那样绕行会转圈、反向时还会翻面）
+    camAzimuth: -Math.PI / 2,
+    camDist: CAM_CRUISE_DIST,
+    // 轨道中心（平滑后的视点基准）：influencer 切换时不能瞬移
+    orbitCenter: new THREE.Vector3(),
+    _focusInit: false,
+    // 绕行强度的时间平滑值（避免视点在小球↔轨道中心之间抖动）
+    orbitFactor: 0,
+    orbitLock: false, // 绕行滞回锁存，避免卡在"半跟随"中间态
+    orbitRaw: 0,      // 去噪后的绕行信号
+    orbitHold: 0,     // 锁存最短保持时间（秒）
     dirSmooth: new THREE.Vector3(-1, 0, 0).normalize(),
     // 智能镜头三种模式：
     //   'cruise'  跟拍小球（自由航行）
@@ -2723,9 +2743,16 @@ export function createCosmosRenderer(canvas, sim) {
       lastProbeGeneration = pr.generation;
       trailCount = 0;
       trailGeo.setDrawRange(0, 0);
-      // 重生后速度方向突变：立即把平滑方向对准新航向，避免镜头甩偏
+      // 重生后速度方向突变：方位角直接对准新航向（重生瞬间有特效掩盖，
+      // 比让镜头花几秒慢慢转过去更合理）；平时方位角由速率限幅平滑跟随。
       const pv0 = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
-      if (pv0 > 0.02) state.dirSmooth.set(pr.vel[0] / pv0, pr.vel[1] / pv0, pr.vel[2] / pv0);
+      if (pv0 > 0.02) {
+        state.dirSmooth.set(pr.vel[0] / pv0, pr.vel[1] / pv0, pr.vel[2] / pv0);
+        // 水平分量太小时（近乎垂直运动）保留原方位角，避免 atan2 退化乱转
+        if (Math.hypot(pr.vel[0], pr.vel[2]) > 1e-3) {
+          state.camAzimuth = Math.atan2(pr.vel[0], pr.vel[2]);
+        }
+      }
       // 死亡方式驱动的特效与配色（虫洞逃逸不播死亡特效）；
       // 死亡序列起点已播过则不重复
       state._deathFx = DEATH_FX[pr.deathType] || DEATH_FX.generic;
@@ -2905,40 +2932,112 @@ export function createCosmosRenderer(canvas, sim) {
         const ml = state.modeLerp;
         const mlVisible = ml; // 视觉过渡用的混合量
 
-        // ---- dirSmooth 只在 cruise 模式下更新 ----
-        // 关键修复：引力拉扯下速度方向会一帧大角度反转，让镜头甩来甩去。
-        // 这里采用三重防护：
-        //   1) lerp 上限 0.06/帧（极慢收敛），让 dirSmooth 反映"惯性航向"而非"瞬时速度"
-        //   2) xz 平面优先：保证 cruise 模式镜头不出现 y 轴急剧旋转
-        //   3) 若小球加速度大于阈值（被引力急拉），暂停更新 dirSmooth，让镜头保持当前角度
-        // ---- 绕行广角（用户反馈）：小球绕天体运动时，镜头不再贴着追速度方向
-        // （绕圈时方向持续旋转，跟拍视角会一直打转、又近又晃）。改为：
-        //   检测到绕行（orbitAngleAcc 升高）→ 镜头拉远抬高、航向跟随近乎冻结，
-        // 让小球带着轨迹在画面里转圈；恢复直线飞行后平滑回到正常跟拍。
-        // smoothstep 窗口按信号量纲校准：orbitAngleAcc 是 ~1.4s 指数窗内
-        // 累计的方向角（弧度），稳定绕行时 ≈ 角速率 × 1.4——
-        // 慢速大圈(~0.5 rad/s)≈0.7，快速小圈(≥1 rad/s)≥1.4，直线飞掠≈0
-        const orbitFactor = smoothstep(0.3, 1.5, pr.orbitAngleAcc);
-        if (mode === 'cruise' && pv > 0.02) {
-          // 计算小球加速度大小：影响剧烈时（dv/帧 > 0.5）就锁住 dirSmooth
-          const ax = pr.vel[0] - pr.prevVel[0];
-          const ay = pr.vel[1] - pr.prevVel[1];
-          const az = pr.vel[2] - pr.prevVel[2];
-          const accelMag = Math.hypot(ax, ay, az) / Math.max(dtReal, 1e-4);
-          if (accelMag < 0.6) {
-            const txv = pr.vel[0] / pv;
-            const tyv = pr.vel[1] / pv;
-            const tzv = pr.vel[2] / pv;
-            // 角度偏差大时缓慢收敛（避免重生/急转后甩）
-            const dot = Math.min(1, Math.max(-1, state.dirSmooth.x * txv + state.dirSmooth.y * tyv + state.dirSmooth.z * tzv));
-            // 绕行时把收敛率压到 ~15%：镜头方位角近乎固定，轨迹完整入画
-            const k = Math.min(0.06, dtReal * (0.6 + (1 - dot) * 1.2)) * (1 - 0.85 * orbitFactor);
-            state.dirSmooth.x += (txv - state.dirSmooth.x) * k;
-            state.dirSmooth.y += (tyv - state.dirSmooth.y) * k;
-            state.dirSmooth.z += (tzv - state.dirSmooth.z) * k;
-            // 归一化；若 xz 投影过小，强制 y 分量为 0 避免垂直翻转
-            const dl = Math.hypot(state.dirSmooth.x, state.dirSmooth.y, state.dirSmooth.z) || 1;
-            state.dirSmooth.x /= dl; state.dirSmooth.y /= dl; state.dirSmooth.z /= dl;
+        // ==============================================================
+        // 巡航镜头（cruise）：轨道视角
+        //
+        // 旧实现把镜头方位角绑在速度方向 dirSmooth 上，并用"向量 lerp + 归一化"
+        // 插值方向，有两个结构性缺陷：
+        //   ① 绕行时速度方向持续旋转 → 镜头跟着转一整圈；
+        //   ② 目标方向接近反向时，lerp 结果长度趋近 0，归一化把数值误差放大，
+        //      方向突然翻面 —— 绕行每半圈就甩一次镜（注释里声称的 xz 保护
+        //      实际并没有实现）。
+        //
+        // 新实现（要求：远远看到小球运行轨迹，镜头保持稳定）：
+        //   ① 方位角独立维护成标量：最短弧角度插值 + 死区 + 速率限幅，
+        //      结构上不可能翻面，也不会跟着绕圈转；
+        //   ② 绕行时视点移到轨道中心（天体）、距离按轨道半径算 → 轨迹完整入画；
+        //   ③ 俯角固定，高度随距离自然缩放，不再单独跳动；
+        //   ④ 距离变化速率限幅，杜绝绕行强度起伏带来的"呼吸"。
+        // ==============================================================
+        // --- 绕行天体（轨道中心）与轨道尺度 ---
+        // 注意区分两个用途：
+        //   · 轨道尺度（seedDist / sysR）必须用**真实天体距离**——用平滑中心算会在
+        //     主导天体切换期间失真成"两天体间距"，把镜头拉到 100+（实测 107）。
+        //   · 视点基准才用**平滑后的中心**，避免 influencer 切换那一帧视点瞬移
+        //     （瞬移会让 lookAt 方向剧变，实测正是 500+°/s 甩镜的来源）。
+        let sdX = px, sdY = py, sdZ = pz, seedDist = 0, sysR = 0;
+        if (pr.influencer >= 0) {
+          const s = sim.seeds[pr.influencer];
+          sdX = s.pos[0]; sdY = s.pos[1]; sdZ = s.pos[2];
+          seedDist = Math.hypot(px - sdX, py - sdY, pz - sdZ);
+          sysR = sim._systemRadius(s);
+        }
+        _v4.set(sdX, sdY, sdZ);
+        if (!state._focusInit) {
+          state.orbitCenter.copy(_v4);
+          state._focusInit = true;
+        } else {
+          // 限速逼近：速度与镜头距离成比例 → 朝向角速度有界
+          const maxSpeed = Math.max(6, state.camDist * 0.5) * dtReal;
+          const ddx = _v4.x - state.orbitCenter.x;
+          const ddy = _v4.y - state.orbitCenter.y;
+          const ddz = _v4.z - state.orbitCenter.z;
+          const ddl = Math.hypot(ddx, ddy, ddz);
+          if (ddl > 1e-6) {
+            const kk = Math.min(1, maxSpeed / ddl);
+            state.orbitCenter.x += ddx * kk;
+            state.orbitCenter.y += ddy * kk;
+            state.orbitCenter.z += ddz * kk;
+          }
+        }
+        const cX = state.orbitCenter.x;
+        const cY = state.orbitCenter.y;
+        const cZ = state.orbitCenter.z;
+
+        // ---- 绕行强度 orbitFactor ----
+        // 不能只看 orbitAngleAcc：它是 ~1.4s 指数窗内累计的方向角，稳态约等于
+        // "角速率 × 1.4"，于是 23 秒一圈的慢速大圈 acc 仅 0.37 —— 用
+        // smoothstep(0.3, 1.5) 的话这种最常见的绕行几乎触发不了轨道视角，
+        // 镜头仍在跟速度方向转圈。改用三者组合：
+        //   ① orbitTangent（切向速度占比）：圆轨道 ≈1，对慢速大圈同样灵敏；
+        //   ② orbitAngleAcc：对快速小圈灵敏；
+        //   ③ 距离约束：只有靠近该系统才算，避免远处直线飞行被切向夹角误判。
+        // 距离窗口放宽到 1.8R~3.6R：1.2R~2.6R 太紧，2.2R 的大圈只剩 0.21，
+        // 轨道视角触发不了，镜头仍在跟着速度方向转。
+        const nearFactor = sysR > 0 ? 1 - smoothstep(sysR * 1.8, sysR * 3.6, seedDist) : 0;
+        // 切向占比阈值也放宽：真实轨道很少是正圆，tangent 常在 0.5~0.9
+        const tangentFactor = smoothstep(0.35, 0.70, pr.orbitTangent || 0);
+        const angleFactor = smoothstep(0.25, 1.20, pr.orbitAngleAcc || 0);
+        // 绕行强度还要再做一次时间平滑：orbitFactor 直接抖动会让视点在
+        // "小球 ↔ 轨道中心"之间来回，镜头随之持续小幅转向（实测累计转角明显偏高）
+        const orbitRaw = pr.influencer >= 0 ? Math.max(tangentFactor, angleFactor) * nearFactor : 0;
+        // 绕行判定三级处理，缺一不可（都是实测踩出来的）：
+        //   ① 轻度去噪：紧轨道受扰动时 orbitRaw 噪声大，直接判阈会被抖动带穿；
+        //   ② 滞回锁存：绕行本质是二元的，连续值停在 0.5 附近会形成"半跟随"
+        //      ——既不是跟拍也不是冻结，镜头持续小幅转向；
+        //   ③ 最短保持 6s：杜绝信号在滞回窗口里来回穿越导致的快速开关
+        //      （实测紧轨道下 60s 内开关数十次，每次都甩一次镜）。
+        state.orbitRaw += (orbitRaw - state.orbitRaw) * Math.min(1, dtReal / 0.8);
+        if (state.orbitLock) {
+          if (state.orbitRaw < 0.30 && state.orbitHold <= 0) state.orbitLock = false;
+        } else if (state.orbitRaw > 0.60) {
+          state.orbitLock = true;
+          state.orbitHold = 6.0;
+        }
+        state.orbitHold = Math.max(0, state.orbitHold - dtReal);
+        const orbitTarget = state.orbitLock ? 1 : 0;
+        state.orbitFactor += (orbitTarget - state.orbitFactor) * Math.min(1, dtReal / 2.5);
+        const orbitFactor = state.orbitFactor;
+
+        // --- 方位角：最短弧 + 死区 + 速率限幅 + 跟随权重 ---
+        if (mode === 'cruise') {
+          // 非绕行时跟随速度方向（保持"向前飞"的观感）；绕行时冻结。
+          // 冻结必须是**连续衰减**而不是硬阈值：orbitFactor 会随绕行强度起伏，
+          // 用 "orbitFactor < 0.45" 之类的阈值会让"跟随/冻结"来回切换，
+          // 实测反而转得更碎（累计转角不降反升）。
+          const speedXZ = Math.hypot(pr.vel[0], pr.vel[2]);
+          if (speedXZ > 1e-4) {
+            let d = Math.atan2(pr.vel[0], pr.vel[2]) - state.camAzimuth;
+            // 归一到 [-π, π]：走最短弧，绝不绕长边
+            while (d > Math.PI) d -= Math.PI * 2;
+            while (d < -Math.PI) d += Math.PI * 2;
+            const followW = 1 - smoothstep(0.20, 0.60, orbitFactor); // 绕行越强越不跟
+            const DEAD = 0.20;                                  // 死区 ≈11°，小幅抖动不追
+            if (Math.abs(d) > DEAD && followW > 0.001) {
+              const need = (Math.abs(d) - DEAD) * followW;
+              const step = Math.min(need, CAM_YAW_RATE * dtReal); // 速率限幅，杜绝瞬甩
+              state.camAzimuth += Math.sign(d) * step;
+            }
           }
         }
         // 记录上一物理步速度，下一帧用于判断加速度
@@ -2951,84 +3050,84 @@ export function createCosmosRenderer(canvas, sim) {
         // 之前用 ml<0.01 切换 cruise/interact 公式，导致 mode 切回 cruise 但 ml 还是
         // 高位时，target 已被 lerp 拉回 probe，但 camera 还停在 (probe+anchor)/2 视点
         // 的"上帝视角"位置，造成 probe 偏离屏幕中央。
-        // 视点：cruise = probe；interact/detail = (probe + anchor) / 2
-        let targetX, targetY, targetZ;
-        if (mode === 'cruise') {
-          targetX = px; targetY = py; targetZ = pz;
-        } else {
-          targetX = (px + anchorX) * 0.5;
-          targetY = (py + anchorY) * 0.5;
-          targetZ = (pz + anchorZ) * 0.5;
+        // ---- 视点：绕行越强越偏向轨道中心，让小球在画面里画圈 ----
+        // 直线飞行时 orbitFactor≈0 → 视点就是 probe（跟拍观感）；
+        // 绕行时 → 视点移到天体，镜头不动，整条轨迹留在画面里。
+        // 0.95 而非 0.85：残留的 5% 只为避免硬切换，视点几乎完全钉在轨道中心。
+        // 这里用的是**平滑后的中心** cX/cY/cZ（不是天体真值 sdX/...）
+        const orbitPull = orbitFactor * 0.95;
+        const fX = px + (cX - px) * orbitPull;
+        const fY = py + (cY - py) * orbitPull;
+        const fZ = pz + (cZ - pz) * orbitPull;
+
+        // ---- 距离：绕行时按轨道半径算，保证整条轨迹入画 ----
+        const fovRad = (camera.fov * Math.PI) / 180;
+        let wantDist = CAM_CRUISE_DIST;
+        if (seedDist > 0) {
+          // 轨道半径 ≈ 小球到天体的距离；×2.4 覆盖直径并留边距
+          const orbitDist = seedDist * 2.4 + sysR * 0.8;
+          wantDist = Math.max(
+            CAM_CRUISE_DIST,
+            orbitDist * orbitFactor + CAM_CRUISE_DIST * (1 - orbitFactor),
+          );
         }
-        // ml 用来平滑 target 的过渡（避免 mode 切换时 target 跳变）
-        const finalTgtX = px + (targetX - px) * ml;
-        const finalTgtY = py + (targetY - py) * ml;
-        const finalTgtZ = pz + (targetZ - pz) * ml;
+        // 绝对上限：主导天体切换等异常时刻 seedDist 可能瞬时失真，
+        // 不封顶会把镜头拉到 100+，位置剧变 → 朝向剧变
+        wantDist = Math.min(wantDist, CAM_MAX_DIST);
+        // 速率限幅：距离每秒相对变化不超过 CAM_DIST_RATE，消除"呼吸"
+        const maxDDelta = Math.max(state.camDist, 1) * CAM_DIST_RATE * dtReal;
+        state.camDist += Math.max(-maxDDelta, Math.min(maxDDelta, wantDist - state.camDist));
+
+        // interact/detail 另外需要"框下 AABB"的距离
+        const distForFrame = (aabbRadius * 1.65) / Math.max(0.05, Math.sin(fovRad * 0.5));
+
+        // 全局方位角（唯一来源，见上文"最短弧 + 死区 + 速率限幅"）
+        const az = state.camAzimuth;
+
+        // mode 对镜头的介入权重：绕行时归零 —— 不只是视点，俯角/距离也不受
+        // interact↔cruise 切换影响（注入的轨道常在 interact 阈值 0.9R 附近，
+        // 切换很频繁，若仍介入则每次切换都会让相机位置动一下 → 朝向动）
+        const modeMixAll = ml * (1 - orbitFactor);
+
+        // ---- 视点 target：cruise 用 f；interact/detail 用 (probe + anchor) / 2 ----
+        const tgtInterX = (px + anchorX) * 0.5;
+        const tgtInterY = (py + anchorY) * 0.5;
+        const tgtInterZ = (pz + anchorZ) * 0.5;
+        // 绕行时视点钉死在轨道中心 f，与 mode 无关：
+        // interact 的 (probe+anchor)/2 本身随小球绕圈而移动，会让镜头跟着转圈。
+        const finalTgtX = fX + (tgtInterX - fX) * modeMixAll;
+        const finalTgtY = fY + (tgtInterY - fY) * modeMixAll;
+        const finalTgtZ = fZ + (tgtInterZ - fZ) * modeMixAll;
         _v3.set(finalTgtX, finalTgtY, finalTgtZ);
 
-        // 镜头距离：根据 AABB 半径自动算出能框下所有对象的距离
-        const fovRad = (camera.fov * Math.PI) / 180;
-        const distForFrame = (aabbRadius * 1.65) / Math.max(0.05, Math.sin(fovRad * 0.5));
-        // cruise 基础 16；绕行时按 orbitFactor 拉远到最高 40，让轨迹入画
-        const cruiseDist = 16 + 24 * orbitFactor;
-        const targetDist = Math.max(
-          cruiseDist * (1 - ml) + (distForFrame > cruiseDist ? distForFrame : cruiseDist) * ml,
-          12,
-        );
+        // ---- 相机位置：三种模式统一用球坐标 (方位角, 俯角, 距离) ----
+        // 旧实现里 interact/detail 走的是"视点反 anchor 方向的水平单位向量"：
+        //   rightLen = hypot(dx,dz); nx = dx/rightLen
+        // 当视点与 anchor 的连线接近垂直时 rightLen→0，除法爆炸 → 相机瞬移、
+        // 镜头疯狂旋转（用户在绕行时看到的剧烈反转主要来自这里）。
+        // 改为统一球坐标后，除法消失，方位角由全局 camAzimuth 提供，
+        // 模式切换时只剩俯角/距离/视点的连续混合，不可能再翻转。
+        const interDist = Math.max(state.camDist, distForFrame);
+        const pitch = CAM_PITCH * (1 - modeMixAll) + CAM_PITCH_INTERACT * modeMixAll;
+        const dist = state.camDist * (1 - modeMixAll) + interDist * modeMixAll;
+        const horizM = dist * Math.cos(pitch);
 
-        // ---- 镜头位置（按 mode 计算） ----
-        let cruiseX, cruiseY, cruiseZ;
-        let interactX, interactY, interactZ;
-
-        // cruise 位置：沿 dirSmooth 反方向退 + 抬高。
-        // dirSmooth 的 xz 投影过小时（y 轴运动），保留当前 camera 相对 probe 的角度。
-        const dxs = state.dirSmooth.x;
-        const dzs = state.dirSmooth.z;
-        const dlen2 = dxs * dxs + dzs * dzs;
-        if (dlen2 > 1e-3) {
-          const ilen = 1 / Math.sqrt(dlen2);
-          cruiseX = px + dxs * ilen * (-targetDist);
-          cruiseZ = pz + dzs * ilen * (-targetDist);
-        } else {
-          const offX = camera.position.x - px;
-          const offZ = camera.position.z - pz;
-          const offLen = Math.hypot(offX, offZ) || 1;
-          cruiseX = px + (offX / offLen) * (-targetDist);
-          cruiseZ = pz + (offZ / offLen) * (-targetDist);
-        }
-        // 绕行时镜头抬高（最高 +9）：俯角看到轨迹圆；直线飞行回落到 +3
-        cruiseY = py + 3.0 + 9 * orbitFactor;
-
-        // interact/detail 位置：视点(target)反 anchor 方向拉远，俯视
-        let dx, dy, dz;
-        if (mode === 'interact' || mode === 'detail') {
-          dx = targetX - anchorX;
-          dy = targetY - anchorY;
-          dz = targetZ - anchorZ;
-        } else {
-          dx = targetX - px;
-          dy = targetY - py;
-          dz = targetZ - pz;
-        }
-        const dl = Math.hypot(dx, dy, dz) || 1;
-        dx /= dl; dy /= dl; dz /= dl;
-        const rightLen = Math.hypot(dx, dz) || 1;
-        const nx = dx / rightLen, nz = dz / rightLen;
-        interactX = targetX + nx * (-targetDist * 0.85);
-        interactY = targetY + targetDist * 0.35;
-        interactZ = targetZ + nz * (-targetDist * 0.85);
-
-        // 混合两个位置（用 ml 而不是 mlVisible 阈值，避免 ml=0 时跳变）
-        const camX = cruiseX * (1 - ml) + interactX * ml;
-        const camY = cruiseY * (1 - ml) + interactY * ml;
-        const camZ = cruiseZ * (1 - ml) + interactZ * ml;
-        _v2.set(camX, camY, camZ);
-
-        // 平滑插值（位置/视点都做 0.10/帧 上限；引力拉扯下保证镜头不甩）
-        const posK = Math.min(0.10, dtReal * (2.2 + pv * 0.10) * tsBoost);
+        // 先平滑视点，再由"视点 + 球坐标偏移"推出相机位置。
+        // 关键：不能让相机位置与视点各自独立 lerp —— 视点快速移动时（主导天体
+        // 切换、小球急转）相机追不上，两者会挤到一起（实测 camDist 缩到 4.1），
+        // 此时极小的位移就能让 lookAt 方向爆炸（实测 1036°/s）。
+        // 相机挂在视点上后，两者距离恒为 dist，结构上不可能贴脸。
         const tgtK = Math.min(0.12, dtReal * (3.2 + pv * 0.10) * tsBoost);
-        camera.position.lerp(_v2, posK);
         controls.target.lerp(_v3, tgtK);
+        // 相机位置直接由"视点 + 球面偏移"给出，不再对位置做 lerp：
+        // 位置 lerp 会滞后（视点移动越快滞后越大），实测距离一度失控到 139
+        // （而 dist 上限是 60），距离失控时 lookAt 对微小位移极度敏感。
+        // 这里距离恒等于 dist，视点/方位角/距离三者本身都已平滑，运动仍然连续。
+        camera.position.set(
+          controls.target.x - Math.sin(az) * horizM,
+          controls.target.y + dist * Math.sin(pitch),
+          controls.target.z - Math.cos(az) * horizM,
+        );
         camera.lookAt(controls.target);
       }
     } else {
