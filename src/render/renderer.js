@@ -26,7 +26,7 @@ export function createCosmosRenderer(canvas, sim) {
   renderer.toneMappingExposure = 1.25;
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x020409);
+  scene.background = new THREE.Color(0x000000); // 纯黑：宇宙环境无环境光
   const camera = new THREE.PerspectiveCamera(58, 1, 0.04, 10000);
   camera.position.set(0, 2.4, 9);
 

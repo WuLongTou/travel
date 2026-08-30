@@ -7,6 +7,7 @@
 //   - 速度感 FOV（跟拍时随速度放大视野）
 // update(pos, pr, alpha, dtReal, beat) 每帧调用；state.follow=false 时直接 return。
 import * as THREE from 'three';
+import { smoothstep } from '../core/utils.js';
 
 const CAM_PITCH = 0.60;          // 固定俯角 ≈34°，略抬高让轨迹走向更清晰
 const CAM_CRUISE_DIST = 55;      // 自由航行时的基准距离（更远，展现宇宙宏大与轨迹全貌）
