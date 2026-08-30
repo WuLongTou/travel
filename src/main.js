@@ -11,7 +11,7 @@ try { savedInitConfig = JSON.parse(localStorage.getItem(INIT_CFG_KEY) || '{}') |
 
 const canvas = document.getElementById('scene');
 const sim = new CosmicSimulation(savedInitConfig);
-const renderer = createCosmosRenderer(canvas, sim);
+const renderer = (() => { try { return createCosmosRenderer(canvas, sim); } catch (e) { document.body.insertAdjacentHTML('beforeend', '<pre style="position:fixed;top:0;left:0;z-index:99999;color:#fff;background:#a00;font-size:13px;padding:10px;max-height:80vh;overflow:auto">' + (e.stack || e.message) + '</pre>'); throw e; } })();
 const audio = new AudioEngine();
 
 // ---------- 控制面板 ----------
