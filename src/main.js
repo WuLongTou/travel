@@ -1,4 +1,5 @@
 // 入口：宇宙大爆炸叙事 + 渲染 + 音频引擎 + 控制面板
+import * as THREE from 'three';
 import { CosmicSimulation, createCosmosRenderer, LEVEL_LABELS } from './cosmos.js';
 import { AudioEngine } from './audio.js';
 import './style.css';
@@ -40,6 +41,13 @@ const el = {
 function setStatus(text) {
   el.status.textContent = text;
 }
+
+// 控制面板折叠：默认收起，只显示标题栏，点按展开/收起，避免遮挡宇宙
+const panelEl = document.getElementById('panel');
+const panelToggle = document.getElementById('panel-toggle');
+panelToggle.addEventListener('click', () => {
+  panelEl.classList.toggle('open');
+});
 
 el.playBtn.addEventListener('click', async () => {
   // 麦克风模式没有暂停恢复，点击直接重开
@@ -123,18 +131,23 @@ el.whDur = document.getElementById('wormhole-duration');
 el.whDurVal = document.getElementById('wormhole-duration-val');
 el.whWin = document.getElementById('wormhole-window');
 el.whWinVal = document.getElementById('wormhole-window-val');
+el.whSafe = document.getElementById('wormhole-safe');
+el.whSafeVal = document.getElementById('wormhole-safe-val');
 
 function syncWormholeConfig() {
   sim.config.wormholeDist = parseFloat(el.whDist.value);
   sim.config.wormholeDuration = parseFloat(el.whDur.value);
   sim.config.wormholeWindow = parseFloat(el.whWin.value);
+  sim.config.wormholeSafeMargin = parseFloat(el.whSafe.value);
   el.whDistVal.textContent = sim.config.wormholeDist.toFixed(0);
   el.whDurVal.textContent = sim.config.wormholeDuration.toFixed(1) + 's';
   el.whWinVal.textContent = sim.config.wormholeWindow.toFixed(0) + 's';
+  el.whSafeVal.textContent = sim.config.wormholeSafeMargin.toFixed(0);
 }
 el.whDist.addEventListener('input', syncWormholeConfig);
 el.whDur.addEventListener('input', syncWormholeConfig);
 el.whWin.addEventListener('input', syncWormholeConfig);
+el.whSafe.addEventListener('input', syncWormholeConfig);
 syncWormholeConfig();
 
 // ---------- 事件日志面板开关与导出 ----------
@@ -219,6 +232,8 @@ el.massScale = document.getElementById('mass-scale');
 el.massScaleVal = document.getElementById('mass-scale-val');
 el.radiusScale = document.getElementById('radius-scale');
 el.radiusScaleVal = document.getElementById('radius-scale-val');
+el.seedGrav = document.getElementById('seed-grav');
+el.seedGravVal = document.getElementById('seed-grav-val');
 el.trailLen = document.getElementById('trail-len');
 el.trailLenVal = document.getElementById('trail-len-val');
 el.camZoom = document.getElementById('cam-zoom');
@@ -239,7 +254,7 @@ el.resetParamsBtn = document.getElementById('btn-reset-params');
 // 取值范围已在 HTML 的 min/max 上钳制，这里只做一次兜底，防止极端值把积分打爆
 const GRAV_DEFAULTS = {
   gravityG: 16, bodyMassScale: 1, bodyRadiusScale: 1,
-  trailLength: 750, camZoom: 34, camPanX: 0, camPanY: 0,
+  trailLength: 750, camZoom: 55, camPanX: 0, camPanY: 0,
 };
 const clampNum = (v, lo, hi, dflt) => {
   const n = Number(v);
@@ -252,19 +267,21 @@ function syncGravConfig() {
   c.bodyMassScale = clampNum(el.massScale.value, 0.25, 3, GRAV_DEFAULTS.bodyMassScale);
   c.bodyRadiusScale = clampNum(el.radiusScale.value, 0.5, 2, GRAV_DEFAULTS.bodyRadiusScale);
   c.trailLength = Math.round(clampNum(el.trailLen.value, 100, 3000, GRAV_DEFAULTS.trailLength));
+  c.seedGravity = clampNum(el.seedGrav.value, 0, 4000, 400);
   c.camZoom = clampNum(el.camZoom.value, 10, 80, GRAV_DEFAULTS.camZoom);
   c.camPanX = clampNum(el.camPanX.value, -30, 30, GRAV_DEFAULTS.camPanX);
   c.camPanY = clampNum(el.camPanY.value, -30, 30, GRAV_DEFAULTS.camPanY);
   el.gravGVal.textContent = c.gravityG.toFixed(1);
   el.massScaleVal.textContent = c.bodyMassScale.toFixed(2) + '×';
   el.radiusScaleVal.textContent = c.bodyRadiusScale.toFixed(2) + '×';
+  el.seedGravVal.textContent = c.seedGravity.toFixed(0);
   const secs = (c.trailLength * 0.045).toFixed(1);
   el.trailLenVal.textContent = `${c.trailLength} 点 / ${secs}s`;
   el.camZoomVal.textContent = c.camZoom.toFixed(0);
   el.camPanXVal.textContent = c.camPanX.toFixed(0);
   el.camPanYVal.textContent = c.camPanY.toFixed(0);
 }
-[el.gravG, el.massScale, el.radiusScale, el.trailLen,
+[el.gravG, el.massScale, el.radiusScale, el.trailLen, el.seedGrav,
   el.camZoom, el.camPanX, el.camPanY].forEach((n) => {
   n.addEventListener('input', syncGravConfig);
 });
@@ -294,6 +311,7 @@ el.resetParamsBtn.addEventListener('click', () => {
   el.massScale.value = String(GRAV_DEFAULTS.bodyMassScale);
   el.radiusScale.value = String(GRAV_DEFAULTS.bodyRadiusScale);
   el.trailLen.value = String(GRAV_DEFAULTS.trailLength);
+  el.seedGrav.value = '400';
   el.camZoom.value = String(GRAV_DEFAULTS.camZoom);
   el.camPanX.value = String(GRAV_DEFAULTS.camPanX);
   el.camPanY.value = String(GRAV_DEFAULTS.camPanY);
@@ -340,6 +358,88 @@ el.followBtn.addEventListener('click', () => {
   el.followBtn.textContent = next ? '🎥 轨迹跟拍：开' : '🎥 轨迹跟拍：关';
 });
 
+// ---------- 推进器（玩家键盘操控） ----------
+// 键位 = WASD / QE（FPS 风格）+ 方向键 + Space/Shift 同义。键按下时
+// 维持在该集合里，window blur 时清空避免"卡键"。Space 默认会滚动页面，
+// 所以 keydown 里 preventDefault。
+el.thrustBtn = document.getElementById('btn-thrust');
+el.thrustMag = document.getElementById('thrust-mag');
+el.thrustMagVal = document.getElementById('thrust-mag-val');
+
+const thrustKeys = new Set();
+window.addEventListener('keydown', (e) => {
+  // 焦点在输入控件里时不响应
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  const k = e.key.toLowerCase();
+  if ([' ', 'w', 'a', 's', 'd', 'q', 'e', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift'].includes(k)) {
+    e.preventDefault();
+    thrustKeys.add(k);
+  }
+});
+window.addEventListener('keyup', (e) => {
+  thrustKeys.delete(e.key.toLowerCase());
+});
+window.addEventListener('blur', () => thrustKeys.clear());
+
+function syncThrustConfig() {
+  sim.config.thrustMag = parseFloat(el.thrustMag.value);
+  el.thrustMagVal.textContent = sim.config.thrustMag.toFixed(1);
+}
+el.thrustMag.addEventListener('input', syncThrustConfig);
+syncThrustConfig();
+
+el.thrustBtn.addEventListener('click', () => {
+  sim.config.thrustEnabled = !sim.config.thrustEnabled;
+  el.thrustBtn.textContent = sim.config.thrustEnabled ? '🚀 推进器：开' : '🚀 推进器：关';
+  if (!sim.config.thrustEnabled) {
+    // 关闭时立即清空推力，避免松手后还有余力
+    sim.thrust[0] = 0; sim.thrust[1] = 0; sim.thrust[2] = 0;
+    thrustKeys.clear();
+  }
+});
+
+// 把"键位 × 摄像机方向"转成世界坐标推力。摄像机方向通过 OrbitControls
+// 的 target/camera 反推：forward = (target - camera.position) 归一化，
+// right = up × forward（up 是世界 Y），up = forward × right。
+const _thrustFwd = new THREE.Vector3();
+const _thrustRight = new THREE.Vector3();
+const _thrustUp = new THREE.Vector3();
+const _WORLD_UP = new THREE.Vector3(0, 1, 0);
+function updateProbeThrust() {
+  if (!sim.config.thrustEnabled) {
+    if (sim.thrust[0] !== 0 || sim.thrust[1] !== 0 || sim.thrust[2] !== 0) {
+      sim.thrust[0] = 0; sim.thrust[1] = 0; sim.thrust[2] = 0;
+    }
+    return;
+  }
+  // 计算 fwd / right / up
+  _thrustFwd.copy(renderer.controls.target).sub(renderer.camera.position);
+  // target 与 camera 重合时（极少见，但避免除零）保持上一次方向
+  if (_thrustFwd.lengthSq() < 1e-6) return;
+  _thrustFwd.normalize();
+  _thrustRight.crossVectors(_WORLD_UP, _thrustFwd).normalize();
+  // 防退化：right 与 fwd 共线时（看正上/正下）退化为世界 X
+  if (_thrustRight.lengthSq() < 1e-6) _thrustRight.set(1, 0, 0);
+  _thrustUp.crossVectors(_thrustFwd, _thrustRight).normalize();
+
+  // 键位 → 输入向量（W/S=前后、A/D=左右、Q/E=下上、Space=上、Shift=下）
+  // 注意 Q/E 的语义：习惯上 Q=上、E=下，但本项目沿用 "QE=下上" 让 Q/A
+  // 都在左半区、D/E 在右半区，更符合左手 WASD + 右手 QE 的标准键位。
+  const w = sim.config.thrustMag;
+  let fx = 0, fy = 0, fz = 0;
+  const fwd = (thrustKeys.has('w') || thrustKeys.has('arrowup')) ? 1
+            : (thrustKeys.has('s') || thrustKeys.has('arrowdown')) ? -1 : 0;
+  const strafe = (thrustKeys.has('d') || thrustKeys.has('arrowright')) ? 1
+              : (thrustKeys.has('a') || thrustKeys.has('arrowleft')) ? -1 : 0;
+  const vert = (thrustKeys.has('q') || thrustKeys.has(' ')) ? 1
+            : (thrustKeys.has('e') || thrustKeys.has('shift')) ? -1 : 0;
+  if (fwd) { fx += _thrustFwd.x * fwd * w; fy += _thrustFwd.y * fwd * w; fz += _thrustFwd.z * fwd * w; }
+  if (strafe) { fx += _thrustRight.x * strafe * w; fy += _thrustRight.y * strafe * w; fz += _thrustRight.z * strafe * w; }
+  if (vert) { fx += _thrustUp.x * vert * w; fy += _thrustUp.y * vert * w; fz += _thrustUp.z * vert * w; }
+  sim.thrust[0] = fx; sim.thrust[1] = fy; sim.thrust[2] = fz;
+}
+
 // ---------- 主循环 ----------
 // 渲染循环必须与显示器刷新同步：用 setInterval 固定间隔驱动时，
 // 一旦单帧渲染耗时超过间隔，回调就会排队连发，帧与帧的间隔忽长忽短
@@ -378,27 +478,23 @@ function showEvent(text) {
 }
 
 // ---------- 航行信息面板 ----------
-// 镜头模式 → 中文标签。合并时 main 侧的「镜头简化」把这段定义删了，但 updateHud
-// 仍在使用（HUD 要显示当前处于哪种镜头模式），故补回。
-const CAM_LABELS = { cruise: '跟拍', interact: '交互框选', detail: '细节框选' };
-// 低频刷新（4Hz）：面板是给人读的，无需每帧重排 DOM
-let hudTimer = 0;
-function updateHud() {
-  const pr = sim.probe;
-  const speed = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
-  el.hudProbe.textContent = `第 ${pr.generation} 代 · 速度 ${speed.toFixed(1)}`;
-  // 引力状态：加速度大小、速率/逃逸速度之比 κ、以及由此判定的状态
-  const gi = pr.gravInfo;
-  if (gi) {
-    el.hudGrav.textContent =
-      `a=${gi.accel.toFixed(2)} · κ=${gi.kappa.toFixed(2)} · ${gi.state}`;
-    el.hudOrbit.textContent = Number.isFinite(gi.nearDist)
-      ? `距 ${gi.nearDist.toFixed(1)} · v_esc ${gi.vEsc.toFixed(1)}`
-      : '—';
-  }
-  el.hudCam.textContent = renderer.state.follow
-    ? (CAM_LABELS[renderer.state.mode] || renderer.state.mode)
-    : '自由观察';
+  // 低频刷新（4Hz）：面板是给人读的，无需每帧重排 DOM
+  let hudTimer = 0;
+  function updateHud() {
+    const pr = sim.probe;
+    const speed = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
+    el.hudProbe.textContent = `第 ${pr.generation} 代 · 速度 ${speed.toFixed(1)}`;
+    // 引力状态：加速度大小、速率/逃逸速度之比 κ、以及由此判定的状态
+    const gi = pr.gravInfo;
+    if (gi) {
+      el.hudGrav.textContent =
+        `a=${gi.accel.toFixed(2)} · κ=${gi.kappa.toFixed(2)} · ${gi.state}`;
+      el.hudOrbit.textContent = Number.isFinite(gi.nearDist)
+        ? `距 ${gi.nearDist.toFixed(1)} · v_esc ${gi.vEsc.toFixed(1)}`
+        : '—';
+    }
+    // 镜头只有一种自动模式（轨迹跟拍），不再有模式细分
+    el.hudCam.textContent = renderer.state.follow ? '轨迹跟拍' : '自由观察';
   const ns = pr.nearestSystem >= 0 ? sim.seeds[pr.nearestSystem] : null;
   if (ns) {
     const stage = !ns.awakened ? '休眠'
@@ -456,6 +552,9 @@ function exportLog() {
 function renderFrame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
+  // 推进器：把"键位 × 摄像机方向"转成世界坐标推力写入 sim.thrust，
+  // 物理积分会在每个子步里把它当加速度叠加到 probe.vel。
+  updateProbeThrust();
   renderer.render(dt, audio);
   watchPerformance(dt);
   const label = `${sim.time.toFixed(1)}s · ${sim.era} · ${sim.probe.label}`;

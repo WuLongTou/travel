@@ -64,9 +64,6 @@ html, body {
   bottom: 22px;
   width: 320px;
   max-height: min(72vh, 640px);
-  overflow-y: auto;
-  scrollbar-width: thin;
-  padding: 16px 18px;
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
   border-radius: 14px;
@@ -74,6 +71,7 @@ html, body {
   -webkit-backdrop-filter: blur(14px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
   z-index: 10;
+  overflow: hidden;
 }
 .panel-title {
   font-size: 13px;
@@ -81,6 +79,46 @@ html, body {
   color: var(--accent);
   letter-spacing: 3px;
   margin-bottom: 12px;
+}
+/* 折叠标题栏：默认只显示这一条，点击展开/收起，避免菜单遮挡宇宙 */
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 18px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+}
+.panel-head:hover {
+  background: rgba(110, 168, 255, 0.12);
+}
+.panel-head .panel-title {
+  margin-bottom: 0;
+}
+.chevron {
+  font-size: 11px;
+  color: var(--text-dim);
+  transition: transform 0.18s ease;
+}
+.panel.open .chevron {
+  transform: rotate(90deg);
+}
+/* 面板主体：默认收起，展开后限高可滚动 */
+.panel-body {
+  display: none;
+  padding: 0 18px 16px;
+  max-height: min(66vh, 560px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.panel.open .panel-body {
+  display: block;
 }
 .btn-row {
   display: flex;
@@ -93,19 +131,23 @@ button {
   min-width: 92px;
   padding: 8px 10px;
   font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
   color: var(--text);
-  background: rgba(110, 168, 255, 0.12);
-  border: 1px solid rgba(110, 168, 255, 0.3);
+  background: linear-gradient(180deg, rgba(110, 168, 255, 0.16), rgba(110, 168, 255, 0.08));
+  border: 1px solid rgba(110, 168, 255, 0.32);
   border-radius: 8px;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, transform 0.05s;
+  transition: background 0.15s, border-color 0.15s, transform 0.05s, box-shadow 0.15s;
 }
 button:hover {
-  background: rgba(110, 168, 255, 0.24);
-  border-color: rgba(110, 168, 255, 0.55);
+  background: rgba(110, 168, 255, 0.26);
+  border-color: rgba(140, 190, 255, 0.7);
+  box-shadow: 0 0 12px rgba(110, 168, 255, 0.35);
 }
 button:active {
-  transform: scale(0.97);
+  transform: scale(0.96);
+  box-shadow: 0 0 6px rgba(110, 168, 255, 0.5);
 }
 .slider-row {
   margin-bottom: 10px;
@@ -254,30 +296,31 @@ button:active {
 }
 
 /* 大事件提示 */
+/* 大事件提示：左下角小字，低调不喧宾夺主 */
 .event-toast {
   position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, calc(-50% + 120px));
-  padding: 10px 22px;
-  font-size: 15px;
-  letter-spacing: 2px;
-  color: #fff;
-  background: rgba(10, 14, 28, 0.55);
-  border: 1px solid rgba(255, 190, 110, 0.45);
-  border-radius: 999px;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  box-shadow: 0 0 24px rgba(255, 170, 80, 0.25);
+  left: 26px;
+  bottom: 76px;
+  max-width: min(340px, calc(100vw - 52px));
+  padding: 6px 14px;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  background: rgba(10, 14, 28, 0.5);
+  border: 1px solid rgba(255, 190, 110, 0.3);
+  border-radius: 8px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.35s ease, transform 0.35s ease;
+  transition: opacity 0.35s ease;
   z-index: 20;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .event-toast.show {
   opacity: 1;
-  transform: translate(-50%, calc(-50% + 90px));
 }
 
 /* 事件日志面板：默认折叠，左侧竖排时间线 */
@@ -328,5 +371,5 @@ button:active {
   .event-panel { display: none !important; }
   .title h1 { font-size: 20px; }
   .hint { display: none; }
-  .event-toast { font-size: 12.5px; white-space: normal; width: 82vw; text-align: center; }
+  .event-toast { font-size: 11.5px; white-space: normal; width: 82vw; max-width: none; text-align: left; }
 }

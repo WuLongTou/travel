@@ -15,14 +15,19 @@
     <p class="sub">暴胀 → 原子 → 宇宙网 → 行星 → 恒星 → 星系 → 黑洞 · 小球从空旷宇宙出发自由航行，靠近大系统时逐步真实化内部天体，被持续捕获时经虫洞跃迁逃逸</p>
   </div>
 
-  <!-- 控制面板 -->
-  <div class="panel">
-    <div class="panel-title">控制</div>
+  <!-- 控制面板（默认折叠，点标题栏展开，避免遮挡宇宙） -->
+  <div class="panel" id="panel">
+    <button type="button" class="panel-head" id="panel-toggle" title="展开 / 收起控制面板">
+      <span class="panel-title">控制</span>
+      <span class="chevron">▸</span>
+    </button>
+    <div class="panel-body">
     <div class="btn-row">
       <button id="btn-play" title="播放 / 暂停。首次点击启动内置合成示例音轨；播放中点击暂停，再次点击继续。若当前是麦克风模式，则重新开启麦克风。">▶ 播放示例音乐</button>
       <button id="btn-file" title="选择本地音频文件（mp3 / wav / flac 等）播放，用你自己的音乐驱动宇宙演化。">📁 上传音乐</button>
       <button id="btn-mic" title="改用麦克风输入：用环境声或外放音乐实时驱动可视化。需要浏览器麦克风授权。">🎤 麦克风</button>
-      <button id="btn-follow" title="智能镜头开关。开启：自动跟随小球，远景上帝视角固定朝向，靠近天体时切到轨道视角看运行轨迹。关闭：自由观察，可用左键旋转 / 右键平移 / 滚轮缩放。">🎥 智能镜头：开</button>
+      <button id="btn-follow" title="轨迹跟拍开关。开启：稳定上帝视角——方位/俯角恒定永不旋转翻转，自动框住最近一段航行轨迹，绕行天体时缓慢拉远看整圈轨迹。关闭：自由观察（第三人称自由驾驶），左键旋转 / 右键平移 / 滚轮沿视线自由推进与后退，全程无限移动。">🎥 轨迹跟拍：开</button>
+      <button id="btn-thrust" title="推进器开关。开启后用键盘控制小球：W/S = 沿摄像机前后向推进/后退，A/D = 左右平移，Q/E = 上下平移，方向键同义。推力方向始终基于当前摄像机视角。关闭时小球只受引力（默认：项目核心是被动力学观测）。">🚀 推进器：关</button>
       <button id="btn-event-log" title="展开 / 收起事件日志面板：按时间线回放宇宙里发生过的所有事件（诞生、捕获、死亡、跃迁、降级等），可导出为 JSON。">📜 事件日志</button>
       <button id="btn-auto-quality" title="帧率自适应降级。开启：帧率持续偏低时自动降低细节（冻结 LOD 升级、停止新建细节系统、卸载最远的系统）；帧率恢复后逐档还原。关闭：始终保持全质量，掉帧也不降。">⚙ 自动降级：开</button>
       <button id="btn-regen" title="用当前初始条件（纤维凝聚 / 速度弥散 / 质量偏置）重新生成一个宇宙。改动那三个初始条件滑杆后，需要点这里才会生效。">🎲 重开宇宙</button>
@@ -30,15 +35,19 @@
     </div>
     <div class="slider-row">
       <label title="★仅用于显示★ 屏幕位移缩放系数：物理时间增量 = 真实帧时间 × 本系数，只决定物体在屏幕上走得快慢（调小=慢放，调大=快进）。它不参与引力与任何受力计算 —— 物理子步长(0.02)、加速度、轨道形状与轨道结果都不随它改变，改变的只是沿轨道推进的快慢。观感速度 ≈ 33 × 本系数 单位/秒。">观感速度（显示缩放）<span id="time-scale-val"></span></label>
-      <input type="range" id="time-scale" min="0.02" max="2" step="0.01" value="0.08" />
+      <input type="range" id="time-scale" min="0.02" max="2" step="0.01" value="0.05" />
     </div>
     <div class="slider-row">
       <label title="音乐驱动幅度（0～2.5×）：缩放节拍与能量对画面（粒子尺寸、发光、涟漪）的影响强度。0 = 完全不受音乐影响。">音乐强度 <span id="intensity-val"></span></label>
       <input type="range" id="intensity" min="0" max="2.5" step="0.1" value="1" />
     </div>
     <div class="slider-row">
-      <label title="虫洞跃迁的距离（世界单位）。小球被同一系统持续捕获时会触发跃迁逃逸，这个值决定一次跳多远。">虫洞距离 <span id="wormhole-dist-val"></span></label>
-      <input type="range" id="wormhole-dist" min="120" max="1000" step="20" value="480" />
+      <label title="虫洞跃迁的距离（世界单位）。小球被同一系统持续捕获时会触发跃迁逃逸，这个值决定一次跳多远。数值越大，跳跃后越可能完全脱离所有天体的捕获范围（真正逃逸）。">虫洞距离 <span id="wormhole-dist-val"></span></label>
+      <input type="range" id="wormhole-dist" min="300" max="4000" step="50" value="800" />
+    </div>
+    <div class="slider-row">
+      <label title="虫洞跃迁后的安全余量（世界单位）：跃迁目标点必须距离任何天体系统至少这么远，否则自动改选更空旷的方向并拉长距离，直到满足——避免瞬移后依然落入附近天体捕获范围的死循环。">跃迁安全余量 <span id="wormhole-safe-val"></span></label>
+      <input type="range" id="wormhole-safe" min="100" max="600" step="20" value="200" />
     </div>
     <div class="slider-row">
       <label title="虫洞跃迁动画的时长（秒）。仅是过场动画的长短，不影响跃迁距离和触发条件。">虫洞动画 <span id="wormhole-duration-val"></span></label>
@@ -52,10 +61,10 @@
       <label title="同时拥有内部细节（可分辨的单个天体）的系统数量上限（1～6）。超出的系统保持远景表示。这是性能与观感的主要权衡点，配置差就调小。">细节系统上限 <span id="perf-systems-val"></span></label>
       <input type="range" id="perf-systems" min="1" max="6" step="1" value="3" />
     </div>
-    <div class="slider-row">
-      <label title="所有活跃系统的细节天体总数上限（100～800）。达到上限后不再为远处系统生成细节体。配合上一项共同控制渲染负载。">细节体上限 <span id="perf-bodies-val"></span></label>
-      <input type="range" id="perf-bodies" min="100" max="800" step="50" value="500" />
-    </div>
+      <div class="slider-row">
+        <label title="所有活跃系统的细节天体总数上限（100～1500）。达到上限后不再为远处系统生成细节体。一个星系约 400~500 个成员，配合上一项共同控制渲染负载。">细节体上限 <span id="perf-bodies-val"></span></label>
+        <input type="range" id="perf-bodies" min="100" max="1500" step="50" value="1000" />
+      </div>
     <div class="slider-row">
       <label title="初始条件 · 纤维凝聚强度（0～2）：影响暗物质晕沿「宇宙纤维」分布的集中度。0 = 完全均匀各向同性，1 = 自然，2 = 强纤维（天体明显成串成片）。改完需点「重开宇宙」生效。"><span>纤维凝聚<em>重开宇宙后生效</em></span><span id="init-filament-val"></span></label>
       <input type="range" id="init-filament" min="0" max="2" step="0.1" value="1" />
@@ -68,6 +77,13 @@
       <label title="初始条件 · 质量函数偏置（-1～+1）：在「多小质量」与「多大质量」之间搬运数量份额。0 = 自然分布，+1 = 偏多巨质量天体（黑洞/星系更容易出现），-1 = 偏多小天体。改完需点「重开宇宙」生效。"><span>质量偏置<em>重开宇宙后生效</em></span><span id="init-bias-val"></span></label>
       <input type="range" id="init-bias" min="-1" max="1" step="0.1" value="0" />
     </div>
+    <details class="group">
+      <summary>推进器（实时可调）</summary>
+      <div class="slider-row">
+        <label title="玩家推力大小（0～30，默认 8）：开启推进器时施加在小球上的加速度大小。方向由键盘按摄像机视角决定（W/S 前/后、A/D 左/右、Q/E 下/上、方向键同义）。0 几乎无法改变航向；与 G=16 同量级时能抵近系统或主动逃逸引力井；调大则像开着引擎直冲。">推力大小 <span id="thrust-mag-val"></span></label>
+        <input type="range" id="thrust-mag" min="0" max="30" step="0.5" value="8" />
+      </div>
+    </details>
     <details class="group" open>
       <summary>引力实验（实时可调）</summary>
       <div class="slider-row">
@@ -83,12 +99,16 @@
         <input type="range" id="radius-scale" min="0.5" max="2" step="0.05" value="1" />
       </div>
       <div class="slider-row">
+        <label title="天体间引力（0～4000，默认 400）：天体系统（星系/星团/黑洞等）之间的万有引力强度。0 = 关闭（彼此完全独立）；默认值下近距离（<100 单位）大系统开始互相偏转，远场仍以宇宙膨胀为主；调大（如 2000+）可观察到两个星系明显的相对接近与绕行。">天体间引力 <span id="seed-grav-val"></span></label>
+        <input type="range" id="seed-grav" min="0" max="4000" step="50" value="400" />
+      </div>
+      <div class="slider-row">
         <label title="轨迹保留点数（100～3000）：按 0.045 秒/点采样，保留时长 ≈ 点数 × 0.045 秒。轨迹按时间淡出，并用颜色区分速率（冷=慢、暖=快）。">轨迹保留长度 <span id="trail-len-val"></span></label>
         <input type="range" id="trail-len" min="100" max="3000" step="50" value="750" />
       </div>
       <div class="slider-row">
-        <label title="镜头缩放：第三人称镜头到小球的基准距离（10～80）。绕行时会自动按轨道半径拉远，保证整条轨迹入画。">镜头缩放 <span id="cam-zoom-val"></span></label>
-        <input type="range" id="cam-zoom" min="10" max="80" step="1" value="34" />
+      <label title="镜头缩放：第三人称镜头到视点的基准距离（10～80）。这是下限：镜头还会按最近的航行轨迹与绕行轨道半径自动缓慢拉远（严格限速），保证轨迹完整入画。默认 55——拉远让宇宙与轨迹更完整，而不是贴着小球。">镜头缩放 <span id="cam-zoom-val"></span></label>
+      <input type="range" id="cam-zoom" min="10" max="80" step="1" value="55" />
       </div>
       <div class="slider-row">
         <label title="镜头平移 · 左右（-30～30）：沿屏幕水平方向偏移视点，小球随之偏离画面中心。偏移量受限，且小球高速运动时会自动收回，保证不丢失。">镜头平移 X <span id="cam-panx-val"></span></label>
@@ -117,6 +137,7 @@
     </details>
 
     <div class="status" id="status">正在初始化…</div>
+    </div>
   </div>
 
   <!-- 图例：宇宙结构尺度 -->
@@ -131,7 +152,7 @@
     <div class="legend-item"><span class="dot" style="background:#fff"></span>主角小球</div>
   </div>
 
-  <div class="hint">🎥 轨迹跟拍：先见证奇点火球与超光速喷流，之后以固定广角视角稳定跟拍小球——始终能看清它的完整运动轨迹 · 持续捕获会触发虫洞跃迁逃逸 · 关闭后可自由观察（左键旋转 / 右键平移 / 滚轮缩放）</div>
+  <div class="hint">🎥 轨迹跟拍：先见证奇点火球与超光速喷流，之后以恒定方位的上帝视角稳定跟拍——自动框住航行轨迹，绕行时缓慢拉远看整圈轨道 · 靠近星系时天体逐个显形 · 持续捕获会触发虫洞跃迁逃逸 · 关闭后可自由观察（左键旋转 / 右键平移 / 滚轮沿视线推进，无限移动）</div>
 
   <!-- 航行信息面板：小球 / 镜头 / 最近系统实时状态 -->
   <div class="hud">
