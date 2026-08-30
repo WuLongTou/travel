@@ -14,6 +14,7 @@ import { createCosmicSky, createStarfield, createNebulae } from './sky.js';
 import { createWormholeOverlay } from './overlays.js';
 import { createExplosionFx } from './explosion.js';
 import { createParticles } from './particles.js';
+import { createTrail } from './trail.js';
 
 export function createCosmosRenderer(canvas, sim) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -890,32 +891,6 @@ export function createCosmosRenderer(canvas, sim) {
   // 用相机朝向的三角带(ribbon)替代 1px 细线：带宽随"旧→新"从尾到头渐宽、
   // 亮度渐亮，配合加色混合与 bloom 辉光，呈现"彗尾/光迹"的质感。
   // 缎带始终正对相机，轨迹的弯曲、绕圈走向一览无余。
-  const TRAIL_MAX = 3000;
-  const TRAIL_HALF_WIDTH = 0.13;   // 头部（最新点）半宽，世界单位（细、不高光）
-  const trailPos = new Float32Array(TRAIL_MAX * 3);
-  const trailCol = new Float32Array(TRAIL_MAX * 3); // 每个采样点的颜色（速度映射）
-  // 缎带几何：每个采样点展开为左右两个顶点（2×N），用三角形条带连接
-  const ribbonPos = new Float32Array(TRAIL_MAX * 2 * 3);
-  const ribbonCol = new Float32Array(TRAIL_MAX * 2 * 3);
-  const ribbonIdx = new Uint32Array((TRAIL_MAX - 1) * 6);
-  for (let i = 0, k = 0; i < TRAIL_MAX - 1; i++) {
-    const a = i * 2, b = i * 2 + 1, c = i * 2 + 2, d = i * 2 + 3;
-    ribbonIdx[k++] = a; ribbonIdx[k++] = b; ribbonIdx[k++] = c;
-    ribbonIdx[k++] = c; ribbonIdx[k++] = b; ribbonIdx[k++] = d;
-  }
-  const trailGeo = new THREE.BufferGeometry();
-  trailGeo.setAttribute('position', new THREE.BufferAttribute(ribbonPos, 3).setUsage(THREE.DynamicDrawUsage));
-  trailGeo.setAttribute('color', new THREE.BufferAttribute(ribbonCol, 3).setUsage(THREE.DynamicDrawUsage));
-  trailGeo.setIndex(new THREE.BufferAttribute(ribbonIdx, 1));
-  const trailMat = new THREE.MeshBasicMaterial({
-    vertexColors: true, transparent: true, depthWrite: false,
-    blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-  });
-  const trail = new THREE.Mesh(trailGeo, trailMat);
-  trail.frustumCulled = false;
-  trail.renderOrder = 4;
-  scene.add(trail);
-  let trailCount = 0;
 
   // 虫洞特效叠加层
   const wormholeOverlay = createWormholeOverlay();
@@ -967,6 +942,8 @@ export function createCosmosRenderer(canvas, sim) {
 
   // 粒子子系统（已提取到 render/particles.js，工厂返回 update）
   const particles = createParticles(scene, sim, state);
+  // 轨迹子系统（已提取到 render/trail.js，工厂返回 pushTrail/syncTrail/clearTrail）
+  const trail = createTrail(scene, sim, camera);
 
   const _v1 = new THREE.Vector3();
   const _v2 = new THREE.Vector3();
@@ -992,83 +969,6 @@ export function createCosmosRenderer(canvas, sim) {
 
   // 速率 → 颜色：慢=冷青蓝，快=暖橙金。配合加色混合，越暗越透明，
   // 于是"淡出"直接靠把颜色乘向黑色实现。
-  function speedColor(speed, out) {
-    const v = Math.min(1, Math.max(0, speed / 45));
-    // 冷端 (0.45,0.72,1.0) → 暖端 (1.0,0.62,0.30)，整体压暗 0.55 倍，
-    // 让轨迹是"细淡的指示线"而不是高光发光带（bloom 阈值 0.30 附近不爆）
-    out[0] = (0.45 + 0.55 * v) * 0.55;
-    out[1] = (0.72 - 0.10 * v) * 0.55;
-    out[2] = (1.00 - 0.70 * v) * 0.55;
-  }
-
-  const _sc = [0, 0, 0];
-  function pushTrail(x, y, z, speed) {
-    if (trailCount >= TRAIL_MAX) {
-      trailPos.copyWithin(0, 3);
-      trailCol.copyWithin(0, 3);
-      trailCount = TRAIL_MAX - 1;
-    }
-    const i3 = trailCount * 3;
-    trailPos[i3] = x; trailPos[i3 + 1] = y; trailPos[i3 + 2] = z;
-    speedColor(speed, _sc);
-    trailCol[i3] = _sc[0]; trailCol[i3 + 1] = _sc[1]; trailCol[i3 + 2] = _sc[2];
-    trailCount++;
-  }
-
-  // 把采样点展开成朝向相机的渐细缎带（每帧在镜头定位后调用）。
-  const _va = new THREE.Vector3();
-  const _vb = new THREE.Vector3();
-  const _side = new THREE.Vector3();
-  function syncTrailRibbon() {
-    const N = Math.max(8, Math.min(TRAIL_MAX, Math.round(sim.config.trailLength || 750)));
-    const start = Math.max(0, trailCount - N);
-    const show = trailCount - start;
-    if (show < 2) { trail.visible = false; return; }
-    trail.visible = true;
-
-    const eye = camera.position;
-    const lastIdx = (trailCount - 1) * 3;
-    for (let i = 0; i < show; i++) {
-      const s3 = (start + i) * 3;
-      const px = trailPos[s3], py = trailPos[s3 + 1], pz = trailPos[s3 + 2];
-      // 切线：中央差分，首尾退化为单边差分（避免头部/尾部切向为零）
-      const iPrev = (s3 - 3 >= start * 3) ? s3 - 3 : s3;
-      const iNext = (s3 + 3 <= lastIdx) ? s3 + 3 : s3;
-      _vb.set(
-        trailPos[iNext] - trailPos[iPrev],
-        trailPos[iNext + 1] - trailPos[iPrev + 1],
-        trailPos[iNext + 2] - trailPos[iPrev + 2],
-      );
-      // 侧向 = 视线方向 × 切线 → 始终朝向相机的宽度方向
-      _va.set(px - eye.x, py - eye.y, pz - eye.z);
-      _side.crossVectors(_va, _vb);
-      const sl = _side.length();
-      if (sl < 1e-6) _side.set(1, 0, 0);
-      else _side.multiplyScalar(1 / sl);
-
-      const t = show > 1 ? i / (show - 1) : 1;
-      const w = TRAIL_HALF_WIDTH;                      // 恒定宽度，近端不加粗
-      const fade = Math.pow(t, 1.5);                   // 消散只靠 alpha 淡出
-      const cr = trailCol[s3] * fade;
-      const cg = trailCol[s3 + 1] * fade;
-      const cb = trailCol[s3 + 2] * fade;
-      const sx = _side.x * w, sy = _side.y * w, sz = _side.z * w;
-      const d3 = i * 6; // 左顶点(2i)、右顶点(2i+1)
-      ribbonPos[d3] = px + sx; ribbonPos[d3 + 1] = py + sy; ribbonPos[d3 + 2] = pz + sz;
-      ribbonCol[d3] = cr; ribbonCol[d3 + 1] = cg; ribbonCol[d3 + 2] = cb;
-      ribbonPos[d3 + 3] = px - sx; ribbonPos[d3 + 4] = py - sy; ribbonPos[d3 + 5] = pz - sz;
-      ribbonCol[d3 + 3] = cr; ribbonCol[d3 + 4] = cg; ribbonCol[d3 + 5] = cb;
-    }
-    trailGeo.attributes.position.needsUpdate = true;
-    trailGeo.attributes.color.needsUpdate = true;
-    trailGeo.setDrawRange(0, (show - 1) * 6);
-  }
-
-  function clearTrail() {
-    trailCount = 0;
-    trail.visible = false;
-    trailGeo.setDrawRange(0, 0);
-  }
 
   const zeroAudio = () => ({ bass: 0, mid: 0, treble: 0, beat: 0, energy: 0 });
 
@@ -1277,7 +1177,7 @@ export function createCosmosRenderer(canvas, sim) {
           state.orbitCenter.x += jx;
           state.orbitCenter.y += jy;
           state.orbitCenter.z += jz;
-          clearTrail();
+          trail.clearTrail();
         }
       }
       state._lastProbePos.set(px, py, pz);
@@ -1306,7 +1206,7 @@ export function createCosmosRenderer(canvas, sim) {
     state._prevDying = pr.dying;
     if (pr.generation !== lastProbeGeneration) {
       lastProbeGeneration = pr.generation;
-      clearTrail();
+      trail.clearTrail();
       // 重生后速度方向突变：平滑速度直接重置为新方向（前向偏置不拖泥带水），
       // 但**方位角不跟着转**（用户要求任何时候都不得跟随小球旋转）。
       const pv0 = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
@@ -1405,7 +1305,7 @@ export function createCosmosRenderer(canvas, sim) {
     if (trailClock >= TRAIL_SAMPLE) {
       trailClock = 0;
       const pvNow = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
-      pushTrail(px, py, pz, pvNow);
+      trail.pushTrail(px, py, pz, pvNow);
     }
 
     // 虫洞特效：probe.wormholeTimer > 0 时驱动全屏叠加层
@@ -1662,7 +1562,7 @@ export function createCosmosRenderer(canvas, sim) {
     }
 
     // 轨迹缎带在镜头定位后重建（始终朝向相机）
-    syncTrailRibbon();
+    trail.syncTrailRibbon();
 
     // 先渲染主场景（含辉光后处理），再叠加全屏爆炸闪光层与虫洞特效。
     // 降级时**不硬关 bloom**（硬关会让亮星/小球瞬间变暗——环境光"时亮
