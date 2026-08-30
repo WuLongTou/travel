@@ -34,9 +34,11 @@ export function createCosmosRenderer(canvas, sim) {
   composer.addPass(new RenderPass(scene, camera));
   const bloomPass = new UnrealBloomPass(
     new THREE.Vector2(window.innerWidth, window.innerHeight),
-    0.85,   // strength 强度
+    0.55,   // strength 强度（之前 0.85 太强，把 820 粒子点云 + 1640 条流线的
+            //   additive 光晕扩散成白雾；0.55 保留恒星/黑洞/小球的发光质感）
     0.55,   // radius 半径
-    0.30,   // threshold 阈值（只让恒星/亮轨迹/小球发光，暗星海不糊）
+    0.55,   // threshold 阈值（之前 0.30 太低，粒子/流线的中亮度也触发 bloom
+            //   导致远景叠加成雾；0.55 只让恒星/黑洞/小球等真亮天体触发）
   );
   composer.addPass(bloomPass);
 
@@ -1668,7 +1670,7 @@ export function createCosmosRenderer(canvas, sim) {
     // tier2 0.28。背景（scene.background + cosmicSky）始终是恒定深黑，
     // 不随帧率/时间波动（FPS 自适应降级，见 §3.1）。
     bloomPass.enabled = true;
-    bloomPass.strength = sim.config.qualityTier >= 2 ? 0.28 : sim.config.qualityTier === 1 ? 0.5 : 0.85;
+    bloomPass.strength = sim.config.qualityTier >= 2 ? 0.20 : sim.config.qualityTier === 1 ? 0.35 : 0.55;
     renderer.autoClear = true;
     composer.render();
     if (explosion.flashOverlay.mat.uniforms.uAlpha.value > 0.002) {
