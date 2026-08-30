@@ -191,11 +191,11 @@ export const membersMethods = {
         type: 'blackhole', mass: 0.45 + s.mass * 0.25, radius: 0.32 + s.mass * 0.06,
         colorSeed: 0, orbit: null, tier: 0,
       });
-      const diskR = r * 0.55;
+      const diskR = r * 0.42;   // 盘半径（0.55→0.42：恒星更紧凑，避免"空旷大圆盘"）
       const galOmega = (orbitR) => (0.14 + rng() * 0.08) * baseSpeed / Math.pow(0.6 + orbitR, 0.85);
       if (isElliptical) {
         // 椭圆星系：无旋臂无盘，三维球状、向心集中，老年恒星为主
-        const count = scaleCount(300 + Math.floor(rng() * 70));
+        const count = scaleCount(420 + Math.floor(rng() * 80));
         for (let i = 0; i < count; i++) {
           const orbitR = 0.6 + Math.pow(rng(), 2.2) * diskR;
           const retro = rng() < 0.25 ? -1 : 1; // 慢速随机取向，含逆行
@@ -206,7 +206,7 @@ export const membersMethods = {
             rng() * TAU, 0.55 + rng() * 0.45, rng() < 0.3 ? 2 : 1, rng() * 0.08,
           );
         }
-        const gasN = scaleCount(22);
+        const gasN = scaleCount(30);
         for (let i = 0; i < gasN; i++) {
           const orbitR = 0.5 + Math.pow(rng(), 2) * diskR * 0.7;
           addOrbitBody(
@@ -219,7 +219,7 @@ export const membersMethods = {
       } else {
         // 核球：球状密集、老年暖色恒星（tint ≥ 0.68 → 橙红段）。
         // 核球是星系里唯一"密集"的区域——与旋臂的稀疏形成对比
-        const bulgeN = scaleCount(70 + Math.floor(rng() * 25));
+        const bulgeN = scaleCount(110 + Math.floor(rng() * 30));
         for (let i = 0; i < bulgeN; i++) {
           const orbitR = 0.5 + Math.pow(rng(), 1.8) * diskR * 0.28;
           addOrbitBody(
@@ -235,7 +235,7 @@ export const membersMethods = {
         const pitch = 0.30 + rng() * 0.10; // 对数螺距：r = rMin·e^(pitch·θ)
         if (isBarred) {
           // 中央直棒：恒星沿一条直线密集分布，旋臂从棒两端生长
-          const barN = scaleCount(40 + Math.floor(rng() * 16));
+          const barN = scaleCount(55 + Math.floor(rng() * 16));
           for (let i = 0; i < barN; i++) {
             const t = rng();
             const orbitR = rMin * (0.25 + t * 0.75);
@@ -252,7 +252,7 @@ export const membersMethods = {
         // 散布宽度按角度收窄（盘半径放大后若保持原角度，臂的绝对宽度会失真）。
         // 稀疏是主题：盘面恒星的平均间距是恒星尺寸的 ~15 倍，臂间是大片真空；
         // 臂的可读性靠气体云（更大更亮）撑起，而不是靠堆恒星
-        const armN = scaleCount(120 + Math.floor(rng() * 40));
+        const armN = scaleCount(200 + Math.floor(rng() * 50));
         for (let i = 0; i < armN; i++) {
           const arm = i % armCount;
           const t = Math.pow(rng(), 0.7);
@@ -277,7 +277,7 @@ export const membersMethods = {
           }
         }
         // 盘面场星：指数式径向分布，填充臂间空隙（刻意稀疏）
-        const fieldN = scaleCount(55 + Math.floor(rng() * 20));
+        const fieldN = scaleCount(90 + Math.floor(rng() * 25));
         for (let i = 0; i < fieldN; i++) {
           const orbitR = rMin * 0.6 + Math.pow(rng(), 1.4) * (diskR - rMin * 0.6);
           addOrbitBody(
@@ -287,7 +287,7 @@ export const membersMethods = {
           );
         }
         // 银晕：稀疏球状老年星，盘外一圈微光
-        const haloN = scaleCount(30 + Math.floor(rng() * 14));
+        const haloN = scaleCount(45 + Math.floor(rng() * 16));
         for (let i = 0; i < haloN; i++) {
           const orbitR = diskR * (0.5 + rng() * 0.9);
           addOrbitBody(

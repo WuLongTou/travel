@@ -214,7 +214,7 @@ export function createStructures(scene, sim, glowTex, ringTex, camera) {
             } else {
               col[i * 3] = 0.95; col[i * 3 + 1] = 0.55; col[i * 3 + 2] = 0.33;
             }
-            base[i] = (0.10 + tint * 0.10) * layer;
+            base[i] = (0.18 + tint * 0.14) * layer;
           } else if (m.type === 'blackhole' || m.type === 'galaxy') {
             col[i * 3] = 0.62; col[i * 3 + 1] = 0.70; col[i * 3 + 2] = 1.0;
             base[i] = 0.16 * layer;
@@ -224,7 +224,7 @@ export function createStructures(scene, sim, glowTex, ringTex, camera) {
             base[i] = 0.035 * layer;
           } else {
             col[i * 3] = 0.50 + tint * 0.25; col[i * 3 + 1] = 0.35 + tint * 0.25; col[i * 3 + 2] = 0.85 + tint * 0.15;
-            base[i] = (0.05 + tint * 0.04) * layer;
+            base[i] = (0.10 + tint * 0.08) * layer;
           }
         }
         const size = new Float32Array(base);
@@ -404,7 +404,7 @@ export function createStructures(scene, sim, glowTex, ringTex, camera) {
             col[i * 3] = 0.50 + tint * 0.25;
             col[i * 3 + 1] = 0.35 + tint * 0.25;
             col[i * 3 + 2] = 0.85 + tint * 0.15;
-            size[i] = 0.10 + tint * 0.08;
+            size[i] = 0.18 + tint * 0.12;
           } else if (b.type === 'star') {
             // 恒星光温分层：蓝白 → 黄白 → 橙红，"满天星"的层次感
             if (tint < 0.28) {
@@ -414,7 +414,7 @@ export function createStructures(scene, sim, glowTex, ringTex, camera) {
             } else {
               col[i * 3] = 1.0; col[i * 3 + 1] = 0.58; col[i * 3 + 2] = 0.34;
             }
-            size[i] = 0.24 + tint * 0.30;
+            size[i] = 0.55 + tint * 0.55;
           } else if (b.type === 'planet') {
             col[i * 3] = 0.55 + tint * 0.2;
             col[i * 3 + 1] = 0.72 + tint * 0.2;
@@ -597,8 +597,12 @@ export function createStructures(scene, sim, glowTex, ringTex, camera) {
       const cloudMix = isCollection ? smoothstep(0.6, 0.85, s.growth) : 0;
       const solidFade = 1 - cloudMix;
       const coreFade = isCollection ? 1 - cloudMix * 0.85 : 1;
+      // 星系/超星系团：halo 作为"星系轮廓光"保持到贴身（成员粒子已大幅
+      // 加密，但整体发光轮廓仍由 halo 提供——接近时不会"空荡荡"）；
+      // 其他集合类（星团/星云）维持原有的中距离散场
+      const haloHold = (lv === 'galaxy' || lv === 'supercluster') ? 0.22 : 0.7;
       const nearFade = isCollection
-        ? smoothstep(detailR * 0.7, detailR * 1.15, pd)
+        ? smoothstep(detailR * haloHold, detailR * (haloHold + 0.45), pd)
         : 1;
       const mistFade = (1 - cloudMix * 0.45) * nearFade;
       const diskFade = 1 - cloudMix;                 // 盘面贴图成形后彻底退场
@@ -673,7 +677,7 @@ export function createStructures(scene, sim, glowTex, ringTex, camera) {
       // 大结构（星系）的光晕随结构成形淡入。黑洞**没有**光晕——
       // 它本身是黑的，周围只有吸积盘与光子环的细光，不能加夸张辉光。
       let haloTarget, haloFade;
-      if (lv === 'galaxy') { haloTarget = 22 + s.mass * 4; haloFade = g.diskAmt; }
+      if (lv === 'galaxy') { haloTarget = 30 + s.mass * 5; haloFade = g.diskAmt; }
       else if (lv === 'supercluster') { haloTarget = 30 + s.mass * 5; haloFade = g.diskAmt; }
       else if (lv === 'blackhole') { haloTarget = 0; haloFade = 0; }
       else if (lv === 'cluster') { haloTarget = 3.2 + s.mass * 0.8; haloFade = 0.55; }
