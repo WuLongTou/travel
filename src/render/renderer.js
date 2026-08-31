@@ -276,7 +276,7 @@ export function createCosmosRenderer(canvas, sim) {
     probeFx.update(dtReal, state, alpha);
 
 
-    cameraFollow.update([px, py, pz], pr, alpha, dtReal, beat);
+    cameraFollow.update([px, py, pz], pr, alpha, dtReal, beat, trail);
     // 自由视角：OrbitControls 接管，双击聚焦（target 平滑飞向小球）
     if (!state.follow) {
       controls.enabled = true;

@@ -33,7 +33,7 @@ export function createCameraFollow(state, controls, camera, sim) {
   // 距 100 单位的瞬移阈值（一次性跨过这个距离才视为虫洞/重生）
   const TELEPORT_THRESHOLD_SQ = 100 * 100;
 
-  function update(pos, pr, alpha, dtReal, beat) {
+  function update(pos, pr, alpha, dtReal, beat, trail) {
     const px = pos[0], py = pos[1], pz = pos[2];
 
     {
