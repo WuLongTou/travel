@@ -6,7 +6,7 @@ import {
   SEED_R_MIN, SEED_R_MAX, EJECTA_SPEED_MIN, EJECTA_SPEED_MAX,
   PROBE_INITIAL_SPEED, PROBE_BIGBANG_SPEED, BIG_BANG_WALL, PROBE_GRAVITY_MULT,
   SEED_AWAKEN_RADIUS, FORMATION_SPACING,
-  FRONTIER_INTERVAL, FRONTIER_DIST_MIN, FRONTIER_DIST_MAX,
+  FRONTIER_INTERVAL,
   REVEAL_RADIUS, REVEAL_SCALE, DISCOVERY_PER_STEP, COLLECTION_LEVELS,
   CLASS_DEFS, PROBE_DRAG_LEGACY, PROBE_IGM_DRAG, PROBE_RESPAWN_SPEED, PROBE_MAX_SPEED,
 } from '../config.js';
@@ -118,6 +118,18 @@ export const probeMethods = {
     pr.respawnGrace = 10; // 重生后 10 秒内不再捕获（2026-09-02 6→10）：
     // frontier 近投 small 行星后航线更密，6 秒宽限不够飞出密集区，
     // 实测 600 物理秒重生 20 次（11 次大气烧蚀），频繁死亡打断航行节奏
+    // ---- 重生位置必须在捕获系统的 detail 区之外（2026-09-03）----
+    // 旧 launchR（systemRadius×1.1 或成员半径×7）仍在 detailRadius 内：
+    // 黑洞系统的中心黑洞在 2~3 单位处的引力足以在宽限期内把小球拉回
+    // 事件视界，形成"重生→再捕获→虫洞"的连环循环。统一抬到
+    // max(systemR, detailR)×1.15 之外并以系统中心为基准：黑洞 36×1.15
+    // ≈41 处引力加速度 ~0.02/s²，20/s 径向初速直接飞离，普通重生
+    // 不再喂给黑洞第二次捕获，虫洞沦为真正的兜底。
+    if (captureSeedIdx >= 0 && this.seeds[captureSeedIdx]) {
+      const s = this.seeds[captureSeedIdx];
+      center = s.pos;
+      launchR = Math.max(launchR, this._systemRadius(s), this._detailRadius(s) || 0) * 1.15;
+    }
     // 记录死亡方式与位置（渲染层在generation变化时播放对应特效）
     pr.deathType = deathType;
     pr.deathPos = [pr.pos[0], pr.pos[1], pr.pos[2]];
@@ -144,46 +156,70 @@ export const probeMethods = {
     this.events.push({ time: this.time, text: `${verb(label)}，已在边缘重生第${pr.generation}代并继续航行` });
   },
 
-  // 虫洞跃迁：被持续捕获时不再重生到系统边缘，而是动画跳跃到远方一个新位置继续航行
+  // 虫洞跃迁：被持续捕获时不再重生到系统边缘，而是动画跳跃到远方一个新位置继续航行。
+  // 落点安全性是构造性（2026-09-03 重做，100% 保证不再被捕获）：
+  //  ① 距所有种子 ≥ safe（safe ≥ 220 > 最大 detail 触发半径 161 与黑洞
+  //     影响半径 ~76——落点不在任何系统的引力腹地内）。种子有限（57 个）
+  //     而空间无界，距离逐档翻倍（×1,2,4,…,32，最远 ≈25600 单位），
+  //     数学上必然存在满足条件的档位：循环必然终止、必然安全，
+  //     不存在旧实现"4 次尝试失败后接受次优落点"的漏洞。
+  //  ② 出射方向 = 背离落点处最近种子的径向向外（+少量随机切向）——
+  //     出来后小球只会离最近的天体越来越远，不会被反向吸回。
+  //  ③ respawnGrace（10 物理秒 × 20/s ≈ 200 单位航程）内不可捕获，
+  //     宽限结束时距最近种子已 ≥ safe+200。
+  // 三者叠加：虫洞后的小球在物理上不可能立即再次被捕获；此后若再次
+  // 被捕获属于全新航段的正常事件（捕获记忆已重置，不构成循环）。
   _wormholeEscape(captureSeedIdx, label) {
     const pr = this.probe;
-    const seed = this.seeds[captureSeedIdx];
     const from = [pr.pos[0], pr.pos[1], pr.pos[2]];
-    // ---- 安全目标点选择（2026-08-30 重做）----
-    // 旧实现只沿"速度反方向+随机散射"跳固定 wormholeDist，可能落进
-    // 附近另一个天体的捕获范围 → "瞬移后依然被捕获"循环。现在：
-    //   1) 采样最多 8 个候选方向（含速度反方向，避免被吸回来）
-    //   2) 对每个方向评估"跳 dist 后距最近天体的距离"
-    //   3) 优先选"距最近天体 ≥ wormholeSafeMargin"的方向；都不满足则
-    //      沿当前最空旷方向把距离翻倍重试（×1~×4），直到安全或到上限
-    const sp = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
-    const candidates = [];
-    if (sp > 0.5) candidates.push([-pr.vel[0] / sp, -pr.vel[1] / sp, -pr.vel[2] / sp]);
-    while (candidates.length < 8) candidates.push(randomUnit(1));
     const baseDist = this.config.wormholeDist;
-    const safe = this.config.wormholeSafeMargin;
-    let bestDir = candidates[0];
-    let bestDist = baseDist;
-    let bestClear = -Infinity;
-    for (let attempt = 0; attempt < 4; attempt++) {
-      const dist = baseDist * (attempt + 1);
-      let ok = null;
-      for (const d of candidates) {
+    const safe = Math.max(this.config.wormholeSafeMargin, 220);
+    // 候选方向：速度反方向优先（远离来路），黄金角螺旋补齐 24 个近似
+    // 均匀覆盖全球的方向——总有方向指向空旷区。
+    const dirs = [];
+    const sp = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
+    if (sp > 0.5) dirs.push([-pr.vel[0] / sp, -pr.vel[1] / sp, -pr.vel[2] / sp]);
+    const N = 24;
+    const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+    for (let i = 0; dirs.length < N; i++) {
+      const y = 1 - (2 * (i + 0.5)) / N;
+      const rr = Math.sqrt(Math.max(0, 1 - y * y));
+      const a = i * GOLDEN;
+      dirs.push([Math.cos(a) * rr, y, Math.sin(a) * rr]);
+    }
+    // 距离翻倍扫描：每档取"距最近种子最远"的方向为该档最优；
+    // 任一方向满足 safe 即刻接受。全程记录全局 fallback（防御兜底，
+    // 数学上不可达——×32 档距最近种子必然 > safe）。
+    let to = null, toClear = 0;
+    let fallback = null, fallbackClear = -Infinity;
+    for (let k = 0; k < 6 && !to; k++) {
+      const dist = baseDist * Math.pow(2, k);
+      for (const d of dirs) {
         const tx = pr.pos[0] + d[0] * dist;
         const ty = pr.pos[1] + d[1] * dist;
         const tz = pr.pos[2] + d[2] * dist;
-        const nearest = this._distanceToNearestSeed(tx, ty, tz);
-        if (nearest >= safe) { ok = { d, dist, nearest }; break; }
-        if (nearest > bestClear) { bestClear = nearest; bestDir = d; bestDist = dist; }
+        const clear = this._distanceToNearestSeed(tx, ty, tz);
+        if (clear > fallbackClear) { fallbackClear = clear; fallback = [tx, ty, tz]; }
+        if (clear >= safe) { to = [tx, ty, tz]; toClear = clear; break; }
       }
-      if (ok) { bestDir = ok.d; bestDist = ok.dist; break; }
     }
-    const to = [
-      pr.pos[0] + bestDir[0] * bestDist,
-      pr.pos[1] + bestDir[1] * bestDist,
-      pr.pos[2] + bestDir[2] * bestDist,
-    ];
-    const nearestAtTo = this._distanceToNearestSeed(to[0], to[1], to[2]);
+    if (!to) { to = fallback; toClear = fallbackClear; }
+    const jumpDist = Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
+    // 出射方向：背离落点处最近的种子（径向向外），叠加少量随机切向
+    const near = this._nearestSeedInfo(to[0], to[1], to[2]);
+    let ax = 1, ay = 0, az = 0;
+    if (near.seed) {
+      ax = to[0] - near.seed.pos[0];
+      ay = to[1] - near.seed.pos[1];
+      az = to[2] - near.seed.pos[2];
+      const al = Math.max(1e-4, Math.hypot(ax, ay, az));
+      ax /= al; ay /= al; az /= al;
+    }
+    const tan = randomUnit(1);
+    let vx = ax + tan[0] * 0.25, vy = ay + tan[1] * 0.25, vz = az + tan[2] * 0.25;
+    const vl = Math.max(1e-4, Math.hypot(vx, vy, vz));
+    vx /= vl; vy /= vl; vz /= vl;
+
     pr.wormholeFrom = from;
     pr.wormholeTo = to;
     pr.wormholeTimer = this.config.wormholeDuration;
@@ -191,18 +227,13 @@ export const probeMethods = {
     // 物理上把小球瞬移到 to 处，避免在动画中继续被强引力拉回
     pr.pos = to.slice();
     pr.prevPos = to.slice();
-    // 给一个新航向
-    const tan = randomUnit(1);
-    let vx = bestDir[0] + tan[0] * 0.3, vy = bestDir[1] + tan[1] * 0.3, vz = bestDir[2] + tan[2] * 0.3;
-    const vl = Math.max(1e-4, Math.hypot(vx, vy, vz));
-    vx /= vl; vy /= vl; vz /= vl;
     pr.vel = [vx * PROBE_RESPAWN_SPEED, vy * PROBE_RESPAWN_SPEED, vz * PROBE_RESPAWN_SPEED];
     pr.respawnGrace = 10; // 与 _respawnFrom 一致（2026-09-02 6→10）
     pr.respawnFlash = 1;
     pr.label = `经虫洞跃迁逃出【${label}】`;
     pr.lastCaptureSeed = -1; // 成功逃逸，重置捕获记忆
     pr.lastCaptureTime = -Infinity;
-    this.events.push({ time: this.time, text: `🌀 小球被【${label}】持续捕获，经虫洞跃迁 ${bestDist.toFixed(0)} 单位（距最近天体 ${nearestAtTo.toFixed(0)}）真正逃逸` });
+    this.events.push({ time: this.time, text: `🌀 小球被【${label}】持续捕获，经虫洞跃迁 ${jumpDist.toFixed(0)} 单位（距最近天体 ${toClear.toFixed(0)}，出射方向背离该天体）真正逃逸` });
   },
 
   _updateProbe(dt) {
@@ -486,10 +517,10 @@ export const probeMethods = {
       const dz = s.pos[2] - pr.pos[2];
       const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
       if (d < nearestD) { nearestD = d; nearest = s.idx; }
-      // 只有"非集合"类（星尘 / 行星 / 恒星）作为整体才能捕获小球
-      // 星团 / 星系 / 超星系团 / 黑洞 都是集合 / 多体，靠内部成员捕获
+      // 只有"非集合"类（行星/恒星）作为整体才能捕获小球；
+      // 星尘云/星团/星系/超星系团/黑洞都是集合或多体，捕获由内部成员负责
       const cap = this._captureRadius(s);
-      if (mature && pr.respawnGrace <= 0 && d < cap && (s.level === 'dust' || s.level === 'void' || s.level === 'planet' || s.level === 'star')) {
+      if (mature && pr.respawnGrace <= 0 && d < cap && (s.level === 'planet' || s.level === 'star')) {
         // 进入死亡序列：恒星整体捕获 = 汽化；星尘/行星 = 大气烧蚀
         this._beginDeath(s, LEVEL_LABELS[s.level] || '天体', s.idx, s.level === 'star' ? 'vaporize' : 'atmosphere', Math.max(this._systemRadius(s) * 1.1, cap * 4));
         return;
@@ -504,6 +535,11 @@ export const probeMethods = {
       for (const b of s.detail.bodies) {
         // 未发现的天体不可捕获——发现（接近）本身就是交互的前提
         if (b._hidden) continue;
+        // 星系核（超星系团的 galaxy 成员）本身是一个星系——多体集合，
+        // 内部绝大部分是空的，穿过核区是物理正确的行为，不做碰撞捕获
+        // （与"星团/星系不整体捕获"同一建模原则，§6.2）；它仍产生引力
+        // 与渐进发现，只是没有实心碰撞体。
+        if (b.type === 'galaxy') continue;
         // 母天体 + 二级成员一起检测；deco 装饰粒子（行星环）没有碰撞体——
         // 环是稀疏冰粒，穿过去是物理正确的行为
         const bodiesToCheck = b.children

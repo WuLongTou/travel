@@ -8,7 +8,7 @@ import {
   SEED_R_MIN, SEED_R_MAX, EJECTA_SPEED_MIN, EJECTA_SPEED_MAX,
   PROBE_INITIAL_SPEED, PROBE_BIGBANG_SPEED, BIG_BANG_WALL, PROBE_GRAVITY_MULT,
   SEED_AWAKEN_RADIUS, FORMATION_SPACING,
-  FRONTIER_INTERVAL, FRONTIER_DIST_MIN, FRONTIER_DIST_MAX,
+  FRONTIER_INTERVAL,
   REVEAL_RADIUS, REVEAL_SCALE, DISCOVERY_PER_STEP, COLLECTION_LEVELS,
   CLASS_DEFS, PROBE_DRAG_LEGACY, PROBE_IGM_DRAG, PROBE_RESPAWN_SPEED, PROBE_MAX_SPEED,
 } from './config.js';
@@ -58,12 +58,13 @@ export class CosmicSimulation {
       // 几乎不可感知，只在极近距离（<100 单位）才有轻微偏转——保持
       // 宇宙整体的平静与稳定，天体不漂移、不聚团。
       seedGravity: 180,
-      // 启动快进（显示层）：开局以 bootFastForwardScale 为起始倍率、按
-      // 指数曲线平滑回落到观赏倍率（时间常数 = wall×0.3，见 renderer.js），
-      // 把引力拉满（5.6 物理秒）压缩到约 10 真实秒。置 0 可关闭。
+      // 启动快进（显示层）：开局以 bootFastForwardScale 倍（6×）推进、
+      // 按乘性指数曲线平滑回落（时间常数 = wall×0.18 ≈ 2.5s，见
+      // renderer.js）——大爆炸的暴胀以真实的屏幕节奏掠过视野（"超大
+      // 能量释放"的观感来源），随后无缝回到环境倍率节奏。置 1 可关闭。
       bootFastForwardWall: 14,
-      bootFastForwardScale: 1.5,
-      camZoom: 40,         // 第三人称镜头距离（缩放）
+      bootFastForwardScale: 6,
+      camZoom: 55,         // 第三人称镜头基准距离（面板已精简，固定为跟拍子系统的巡航值）
       camPanX: 0,          // 镜头平移偏移（世界单位，受限）
       camPanY: 0,
       filamentStrength: 1, velocityDispersion: 1, massBias: 0,
@@ -218,12 +219,36 @@ export class CosmicSimulation {
         // 不同类型沿径向分带：小质量晕最近，巨质量黑洞种子最远，
         // 小球航行时才会由近到远、由小到大逐步遇到。
         const t = count > 1 ? k / (count - 1) : 0;
-        let r;
-        if (def.key === 'small') r = 180 + t * 1800 + Math.random() * 80;
-        else if (def.key === 'medium') r = 380 + t * 2800 + Math.random() * 150;
-        else if (def.key === 'large') r = 650 + t * 3800 + Math.random() * 250;
-        else r = 1000 + t * 4500 + Math.random() * 300;
-        const speed = BASE_SPEED * (0.62 + Math.random() * 0.30) + Math.min(24, r * 0.004);
+        let rBase;
+        if (def.key === 'small') rBase = 180 + t * 1800;
+        else if (def.key === 'medium') rBase = 380 + t * 2800;
+        else if (def.key === 'large') rBase = 650 + t * 3800;
+        else rBase = 1000 + t * 4500;
+        // 天体在初始化时就已定型：宇宙大爆炸已经把物质抛到远方，
+        // 远方早已凝聚成完整结构，小球靠近只是"发现"细节（§5.2）。
+        // 等级提前确定，供下面的隔离校验取隔离半径。
+        const willCollapse = def.key === 'giant' && hash01(idx * 13 + 101) < 0.35;
+        const level = finalLevelFor(def.key, willCollapse);
+        // 最小间距拒绝采样（§ISOLATION_RADII，2026-09-03）：候选位置距
+        // 所有已放置种子 ≥ 双方隔离半径之和才接受——从结构上保证初始
+        // 宇宙里任何两个系统都不挤在一起（"系统之间隔着大片空旷"）。
+        // 纤维方向拥挤时逐步放宽：先加大径向抖动，10 次后脱离纤维、
+        // 全天各向同性重采（一条射线的容量有限，多出的种子自然溢出
+        // 到整个天球）；30 次后兜底接受最后一个候选，保证必然终止。
+        let r = rBase + Math.random() * 80;
+        for (let attempt = 0; attempt < 30; attempt++) {
+          r = rBase + Math.random() * (80 + attempt * 60);
+          if (attempt >= 10) dir = randomUnit();
+          const cand = [dir[0] * r, dir[1] * r, dir[2] * r];
+          if (this._isPositionIsolated(cand, level)) break;
+        }
+        // 结构准静止（2026-09-03）：暴胀后暗物质晕只保留极缓慢的本动
+        // 漂移——真实宇宙里星系相对哈勃流的本动速度只占很小比例，
+        // 可观测尺度上结构是稳定的。旧值 5~9.6/s 会让种子在百秒内
+        // 漂移 400+ 单位，把初始最小间距（§ISOLATION_RADII）完全打穿，
+        // 系统彼此漂进漂出，"扎堆"观感回归。暴胀的位移由 inflate 项
+        // 独立承担（前 2 秒把物质推到远方），与这里的本动无关。
+        const speed = 0.4 + Math.random() * 0.8;
         const axis = randomUnit();
         const u0 = Math.abs(axis[0]) < 0.85 ? [1, 0, 0] : [0, 1, 0];
         const dot = u0[0] * axis[0] + u0[1] * axis[1] + u0[2] * axis[2];
@@ -239,9 +264,6 @@ export class CosmicSimulation {
           axis[2] * u[0] - axis[0] * u[2],
           axis[0] * u[1] - axis[1] * u[0],
         ];
-        // 天体在初始化时就已定型：宇宙大爆炸已经把物质抛到远方，
-        // 远方早已凝聚成完整结构，小球靠近只是"发现"细节（§5.2）。
-        const willCollapse = def.key === 'giant' && hash01(idx * 13 + 101) < 0.35;
         // 暴涨：暴胀瞬间暗物质晕以超光速沿径向飞散（inflate），
         // 之后随时间指数衰减（step 里 exp(-1.5t)），最终只剩末速度
         // vel 的漂移——"暴涨→减速→结构静止"。这使宇宙整体呈现
@@ -261,7 +283,7 @@ export class CosmicSimulation {
           duration: def.durBase + Math.random() * def.durSpan,
           growth: 1,
           awakened: true,
-          level: finalLevelFor(def.key, willCollapse),
+          level,
           axis, u, v,
           members: [],
           lastVisit: -Infinity,

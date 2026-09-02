@@ -67,10 +67,13 @@ export function createCameraFollow(state, controls, camera, sim) {
           Math.sin(ovAng) * overviewDist * 0.72,
         );
         _v3.set(0, 0, 0);
-        const shake = Math.exp(-state.time * 2.6) * 0.22;
+        // 能量释放的震感（2026-09-03 加强）：幅度 0.35、双频抖动、
+        // 稍慢的衰减——奇点爆发瞬间镜头被"震"到，1 秒内平息
+        const shake = Math.exp(-state.time * 2.1) * 0.35;
         if (shake > 0.002) {
-          _v2.x += Math.sin(state.time * 83) * shake;
-          _v2.y += Math.cos(state.time * 77) * shake;
+          _v2.x += Math.sin(state.time * 89) * shake;
+          _v2.y += Math.cos(state.time * 71) * shake * 0.8;
+          _v2.z += Math.sin(state.time * 97 + 1.7) * shake * 0.6;
         }
         camera.position.lerp(_v2, Math.min(1, dtReal * 3.0));
         controls.target.lerp(_v3, Math.min(1, dtReal * 3.4));

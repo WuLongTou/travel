@@ -17,7 +17,7 @@ export function createFlashOverlay() {
         gl_Position = vec4(position.xy, 0.0, 1.0);
       }
     `,
-    fragmentShader: `
+      fragmentShader: `
       varying vec2 vUv;
       uniform float uTime;
       uniform float uAlpha;
@@ -26,26 +26,33 @@ export function createFlashOverlay() {
         float r = length(p);
         vec2 dir = r > 0.0001 ? p / r : vec2(1.0, 0.0);
 
-        // 奇点白闪：前 ~0.2 秒整屏过曝（大爆炸就是一瞬间）
-        float flash = exp(-uTime * 13.0) * 2.4;
-        // 暴胀冲击波环：5.2/s 扫过全屏（0.3s 内越过视野）、4/s 快速衰减
-        // ——扫过即熄灭，不残留光环
-        float shockR = uTime * 5.2;
-        float ring = exp(-pow((r - shockR) * 5.5, 2.0)) * exp(-uTime * 4.0);
+        // 奇点白闪：前 ~0.3 秒整屏过曝（超大能量释放的主观感受）
+        float flash = exp(-uTime * 11.0) * 3.2;
+        // 主冲击波环：5.8/s 扫过全屏、3.4/s 快速衰减——扫过即熄灭
+        float shockR = uTime * 5.8;
+        float ring = exp(-pow((r - shockR) * 4.8, 2.0)) * exp(-uTime * 3.4);
+        // 余波前锋：慢一拍、更宽、色偏红——两次波前先后掠过视野
+        float shockR2 = uTime * 3.4;
+        float ring2 = exp(-pow((r - shockR2) * 2.6, 2.0)) * exp(-uTime * 2.2) * 0.55;
         // 放射状能量射线：密集、快消（超光速扩张的"能量喷射"感）
         float ang = atan(p.y, p.x);
         float rays = pow(max(0.0, abs(sin(ang * 18.0 + uTime * 5.0))), 24.0);
-        rays *= exp(-uTime * 4.5) * 0.7 * (1.0 - smoothstep(0.15, 1.45, r));
+        rays *= exp(-uTime * 4.0) * 0.9 * (1.0 - smoothstep(0.15, 1.45, r));
         // 中心余晖：主脉冲后快速熄灭
-        float core = exp(-r * r * 16.0) * exp(-uTime * 7.0) * 1.2;
+        float core = exp(-r * r * 15.0) * exp(-uTime * 6.0) * 1.5;
 
+        // 温度冷却（普朗克色温的直观近似）：早期白热 → 后期深橙红
+        float cool = 1.0 - exp(-uTime * 1.4);
+        vec3 hot = vec3(1.0, 0.95, 0.86);
+        vec3 cold = vec3(1.0, 0.45, 0.16);
         // 色散：冲击波边缘红蓝略微分离，更像高温等离子体
-        float ca = ring * 0.20 + core * 0.12;
+        float ca = (ring + ring2) * 0.22 + core * 0.12;
         vec3 col = vec3(0.0);
         col += vec3(1.10, 0.98, 0.88) * flash;
-        col += vec3(1.00, 0.72, 0.42) * ring;
+        col += mix(hot, cold, cool * 0.8) * ring * vec3(1.0, 0.74, 0.44);
+        col += vec3(0.95, 0.42, 0.20) * ring2;
         col += vec3(0.65, 0.78, 1.00) * rays;
-        col += vec3(1.00, 0.92, 0.72) * core;
+        col += mix(vec3(1.0, 0.92, 0.72), vec3(1.0, 0.55, 0.28), cool) * core;
         col.r += ca * (0.6 + dir.x * 0.4);
         col.b += ca * (0.6 - dir.x * 0.4);
 

@@ -4,13 +4,11 @@ import { CosmicSimulation, createCosmosRenderer, LEVEL_LABELS } from './cosmos.j
 import { AudioEngine } from './audio.js';
 import './style.css';
 
-// 初始条件从 localStorage 恢复（"🎲 重开宇宙"reload 后仍生效）
-const INIT_CFG_KEY = 'cosmos-init-config';
-let savedInitConfig = {};
-try { savedInitConfig = JSON.parse(localStorage.getItem(INIT_CFG_KEY) || '{}') || {}; } catch { savedInitConfig = {}; }
-
+// 面板已精简（2026-09-03）：物理/镜头/性能参数全部使用 sim.config 的
+// 内置默认值，不再暴露 UI——观感上真正需要用户手调的只有"航行节奏"
+// 与"音乐强度"两项，其余交给自动机制（环境倍率自动慢放、FPS 自动降级）。
 const canvas = document.getElementById('scene');
-const sim = new CosmicSimulation(savedInitConfig);
+const sim = new CosmicSimulation();
 const renderer = (() => { try { return createCosmosRenderer(canvas, sim); } catch (e) { document.body.insertAdjacentHTML('beforeend', '<pre style="position:fixed;top:0;left:0;z-index:99999;color:#fff;background:#a00;font-size:13px;padding:10px;max-height:80vh;overflow:auto">' + (e.stack || e.message) + '</pre>'); throw e; } })();
 const audio = new AudioEngine();
 
@@ -106,7 +104,7 @@ el.micBtn.addEventListener('click', async () => {
   }
 });
 
-// 时间流速
+// 时间流速（航行节奏基准倍率；接近系统时的自动慢放由渲染层 envScale 完成）
 function syncTimeScale() {
   renderer.state.timeScale = parseFloat(el.timeScale.value);
   el.timeScaleVal.textContent = renderer.state.timeScale.toFixed(2) + '×';
@@ -130,124 +128,8 @@ el.eventLogBtn.addEventListener('click', () => {
 });
 el.exportLogBtn.addEventListener('click', exportLog);
 
-// ---------- 性能预算（§9.5）：上限滑杆 + FPS 自适应降级 ----------
-el.perfSystems = document.getElementById('perf-systems');
-el.perfSystemsVal = document.getElementById('perf-systems-val');
-el.perfBodies = document.getElementById('perf-bodies');
-el.perfBodiesVal = document.getElementById('perf-bodies-val');
-el.autoQualityBtn = document.getElementById('btn-auto-quality');
-
-function syncPerfConfig() {
-  sim.config.maxDetailSystems = parseInt(el.perfSystems.value, 10);
-  sim.config.maxDetailBodies = parseInt(el.perfBodies.value, 10);
-  el.perfSystemsVal.textContent = String(sim.config.maxDetailSystems);
-  el.perfBodiesVal.textContent = String(sim.config.maxDetailBodies);
-}
-el.perfSystems.addEventListener('input', syncPerfConfig);
-el.perfBodies.addEventListener('input', syncPerfConfig);
-syncPerfConfig();
-
-el.autoQualityBtn.addEventListener('click', () => {
-  sim.config.autoQuality = !sim.config.autoQuality;
-  if (!sim.config.autoQuality) sim.config.qualityTier = 0; // 关闭时恢复全质量
-  el.autoQualityBtn.textContent = sim.config.autoQuality ? '⚙ 自动降级：开' : '⚙ 自动降级：关';
-});
-
-// ---------- 初始条件（§9.6）：改完滑杆 → 🎲 重开宇宙应用 ----------
-el.initFilament = document.getElementById('init-filament');
-el.initFilamentVal = document.getElementById('init-filament-val');
-el.initDisp = document.getElementById('init-disp');
-el.initDispVal = document.getElementById('init-disp-val');
-el.initBias = document.getElementById('init-bias');
-el.initBiasVal = document.getElementById('init-bias-val');
-el.regenBtn = document.getElementById('btn-regen');
-
-function syncInitConfig() {
-  sim.config.filamentStrength = parseFloat(el.initFilament.value);
-  sim.config.velocityDispersion = parseFloat(el.initDisp.value);
-  sim.config.massBias = parseFloat(el.initBias.value);
-  el.initFilamentVal.textContent = sim.config.filamentStrength.toFixed(1) + '×';
-  el.initDispVal.textContent = sim.config.velocityDispersion.toFixed(2) + '×';
-  el.initBiasVal.textContent = (sim.config.massBias > 0 ? '+' : '') + sim.config.massBias.toFixed(1);
-  localStorage.setItem(INIT_CFG_KEY, JSON.stringify({
-    filamentStrength: sim.config.filamentStrength,
-    velocityDispersion: sim.config.velocityDispersion,
-    massBias: sim.config.massBias,
-  }));
-}
-// 先把持久化值回填滑杆再同步：sim 构造时已注入 localStorage 的初始条件，
-// 若直接用滑杆 HTML 默认值同步，会把持久化配置冲掉
-el.initFilament.value = String(sim.config.filamentStrength);
-el.initDisp.value = String(sim.config.velocityDispersion);
-el.initBias.value = String(sim.config.massBias);
-el.initFilament.addEventListener('input', syncInitConfig);
-el.initDisp.addEventListener('input', syncInitConfig);
-el.initBias.addEventListener('input', syncInitConfig);
-syncInitConfig();
-
-// 初始条件只在构造时消费，改完必须重开宇宙。松手后让「重开宇宙」按钮呼吸，
-// 明确告诉用户下一步点哪里（静态角标见 index.html 的 <em> 提示）。
-// 注意：不能借用 #status —— 主循环每帧都会把它改写成"时间·纪元·小球状态"。
-function markRegenPending() {
-  el.regenBtn.classList.add('pending');
-}
-el.initFilament.addEventListener('change', markRegenPending);
-el.initDisp.addEventListener('change', markRegenPending);
-el.initBias.addEventListener('change', markRegenPending);
-
-el.regenBtn.addEventListener('click', () => location.reload());
-
-// ---------- 引力实验参数（实时直通 sim.config，立即生效） ----------
-el.gravG = document.getElementById('grav-g');
-el.gravGVal = document.getElementById('grav-g-val');
-el.massScale = document.getElementById('mass-scale');
-el.massScaleVal = document.getElementById('mass-scale-val');
-el.trailLen = document.getElementById('trail-len');
-el.trailLenVal = document.getElementById('trail-len-val');
-el.camZoom = document.getElementById('cam-zoom');
-el.camZoomVal = document.getElementById('cam-zoom-val');
-el.resetProbeBtn = document.getElementById('btn-reset-probe');
-el.resetParamsBtn = document.getElementById('btn-reset-params');
-
-// 取值范围已在 HTML 的 min/max 上钳制，这里只做一次兜底，防止极端值把积分打爆
-const GRAV_DEFAULTS = {
-  gravityG: 16, bodyMassScale: 1,
-  trailLength: 750, camZoom: 55,
-};
-const clampNum = (v, lo, hi, dflt) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt;
-};
-
-function syncGravConfig() {
-  const c = sim.config;
-  c.gravityG = clampNum(el.gravG.value, 4, 40, GRAV_DEFAULTS.gravityG);
-  c.bodyMassScale = clampNum(el.massScale.value, 0.25, 3, GRAV_DEFAULTS.bodyMassScale);
-  c.trailLength = Math.round(clampNum(el.trailLen.value, 100, 3000, GRAV_DEFAULTS.trailLength));
-  c.camZoom = clampNum(el.camZoom.value, 10, 80, GRAV_DEFAULTS.camZoom);
-  el.gravGVal.textContent = c.gravityG.toFixed(1);
-  el.massScaleVal.textContent = c.bodyMassScale.toFixed(2) + '×';
-  const secs = (c.trailLength * 0.045).toFixed(1);
-  el.trailLenVal.textContent = `${c.trailLength} 点 / ${secs}s`;
-  el.camZoomVal.textContent = c.camZoom.toFixed(0);
-}
-[el.gravG, el.massScale, el.trailLen, el.camZoom].forEach((n) => {
-  n.addEventListener('input', syncGravConfig);
-});
-syncGravConfig();
-
-el.resetProbeBtn.addEventListener('click', () => {
-  // 用默认巡航速度与当前航向重新发射（初速矢量滑杆已精简掉）
-  sim.resetProbe({ speed: 20 });
-});
-
-el.resetParamsBtn.addEventListener('click', () => {
-  el.gravG.value = String(GRAV_DEFAULTS.gravityG);
-  el.massScale.value = String(GRAV_DEFAULTS.bodyMassScale);
-  el.trailLen.value = String(GRAV_DEFAULTS.trailLength);
-  el.camZoom.value = String(GRAV_DEFAULTS.camZoom);
-  syncGravConfig();
-});
+// ---------- 重开宇宙：重新随机生成一个全新宇宙 ----------
+document.getElementById('btn-regen').addEventListener('click', () => location.reload());
 
 // FPS 看门狗：EMA 帧率连续偏低则升档降级（0→1→2），恢复良好再缓慢降档。
 // 档位只在 <40 判低、>50 判好，40~50 为稳持带，避免临界帧率来回跳。
@@ -293,9 +175,8 @@ el.followBtn.addEventListener('click', () => {
 // 键位 = WASD / QE（FPS 风格）+ 方向键 + Space/Shift 同义。键按下时
 // 维持在该集合里，window blur 时清空避免"卡键"。Space 默认会滚动页面，
 // 所以 keydown 里 preventDefault。
+// 推力大小固定为 sim.config.thrustMag 默认值 8（面板已精简，不再暴露滑杆）。
 el.thrustBtn = document.getElementById('btn-thrust');
-el.thrustMag = document.getElementById('thrust-mag');
-el.thrustMagVal = document.getElementById('thrust-mag-val');
 
 const thrustKeys = new Set();
 window.addEventListener('keydown', (e) => {
@@ -312,13 +193,6 @@ window.addEventListener('keyup', (e) => {
   thrustKeys.delete(e.key.toLowerCase());
 });
 window.addEventListener('blur', () => thrustKeys.clear());
-
-function syncThrustConfig() {
-  sim.config.thrustMag = parseFloat(el.thrustMag.value);
-  el.thrustMagVal.textContent = sim.config.thrustMag.toFixed(1);
-}
-el.thrustMag.addEventListener('input', syncThrustConfig);
-syncThrustConfig();
 
 el.thrustBtn.addEventListener('click', () => {
   sim.config.thrustEnabled = !sim.config.thrustEnabled;

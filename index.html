@@ -32,75 +32,16 @@
       <button id="btn-follow" title="轨迹跟拍开关。开启：稳定上帝视角——方位/俯角恒定不旋转，自动框住最近一段航行轨迹，绕行天体时缓慢拉远看整圈轨迹。关闭：自由观察，左键旋转 / 右键平移 / 滚轮沿视线推进，全程无限移动。">🎥 跟拍：开</button>
       <button id="btn-thrust" title="推进器开关。开启后用键盘控制小球：W/S 前后、A/D 左右、Q/E 上下（方向键同义），推力方向始终基于当前摄像机视角。关闭时小球只受引力（默认）。">🚀 推进器：关</button>
       <button id="btn-event-log" title="展开 / 收起事件日志：按时间线回放宇宙里发生过的所有事件，可导出 JSON。">📜 日志</button>
-      <button id="btn-regen" title="用当前初始条件（初始宇宙分组里的三项）重新生成一个宇宙。">🎲 重开宇宙</button>
+      <button id="btn-regen" title="重新生成一个全新的宇宙（新的随机种子分布），小球从大爆炸重新出发。">🎲 重开宇宙</button>
     </div>
     <div class="slider-row">
-      <label title="屏幕上的快慢：物理时间增量 = 真实帧时间 × 本系数，只改变沿轨道推进的快慢（调小=慢放，调大=快进），不影响引力与轨道形状。观感速度 ≈ 26 × 本系数 单位/秒。">观感速度 <span id="time-scale-val"></span></label>
-      <input type="range" id="time-scale" min="0.02" max="2" step="0.01" value="0.1" />
+      <label title="航行节奏：空旷航段以本系数全速推进，接近天体系统时自动慢放约 3 倍（从容看清天体交互），无需手动切换。开局大爆炸自带短暂快进。">航行节奏 <span id="time-scale-val"></span></label>
+      <input type="range" id="time-scale" min="0.05" max="2" step="0.01" value="0.42" />
     </div>
     <div class="slider-row">
       <label title="音乐驱动幅度（0～2.5×）：缩放节拍与能量对画面（粒子尺寸、发光、涟漪）的影响强度。0 = 完全不受音乐影响。">音乐强度 <span id="intensity-val"></span></label>
       <input type="range" id="intensity" min="0" max="2.5" step="0.1" value="1" />
     </div>
-    <details class="group">
-      <summary>镜头与轨迹</summary>
-      <div class="slider-row">
-        <label title="第三人称镜头到视点的基准距离（10～80）。这是下限：镜头还会按最近的航行轨迹与绕行轨道半径自动缓慢拉远（严格限速），保证轨迹完整入画。">镜头距离 <span id="cam-zoom-val"></span></label>
-        <input type="range" id="cam-zoom" min="10" max="80" step="1" value="55" />
-      </div>
-      <div class="slider-row">
-        <label title="轨迹保留点数（100～3000）：按 0.045 秒/点采样，保留时长 ≈ 点数 × 0.045 秒。轨迹按时间淡出，并用颜色区分速率（冷=慢、暖=快）。">轨迹长度 <span id="trail-len-val"></span></label>
-        <input type="range" id="trail-len" min="100" max="3000" step="50" value="750" />
-      </div>
-    </details>
-    <details class="group">
-      <summary>引力实验</summary>
-      <div class="slider-row">
-        <label title="引力常数 G（4～40，默认 16）：直接缩放所有引力加速度。调大 → 轨迹弯曲更明显、更容易被捕获；调小 → 接近直线惯性飞行。实时生效。">引力常数 G <span id="grav-g-val"></span></label>
-        <input type="range" id="grav-g" min="4" max="40" step="0.5" value="16" />
-      </div>
-      <div class="slider-row">
-        <label title="天体质量全局倍率（0.25～3）：所有天体的有效质量乘以该系数。等效于放大引力源强度，但不改变天体分布。">天体质量倍率 <span id="mass-scale-val"></span></label>
-        <input type="range" id="mass-scale" min="0.25" max="3" step="0.05" value="1" />
-      </div>
-      <div class="slider-row">
-        <label title="玩家推力大小（0～30，默认 8）：开启推进器后施加在小球上的加速度大小。与引力 G 同量级时足以抵近系统或主动逃逸引力井。">推力大小 <span id="thrust-mag-val"></span></label>
-        <input type="range" id="thrust-mag" min="0" max="30" step="0.5" value="8" />
-      </div>
-      <div class="btn-row">
-        <button id="btn-reset-probe" title="把小球放回最近天体的安全距离外、以默认巡航速度重新发射，并清空当前轨迹。用于反复观察同一初始条件下的引力作用。">↺ 重置小球</button>
-        <button id="btn-reset-params" title="把引力常数、质量倍率、镜头距离与轨迹长度恢复为默认值。">⟲ 恢复默认</button>
-      </div>
-    </details>
-    <details class="group">
-      <summary>初始宇宙 <em>重开后生效</em></summary>
-      <div class="slider-row">
-        <label title="纤维凝聚强度（0～2）：暗物质晕沿「宇宙纤维」分布的集中度。0 = 完全均匀，1 = 自然，2 = 强纤维（天体成串成片）。"><span>纤维凝聚</span><span id="init-filament-val"></span></label>
-        <input type="range" id="init-filament" min="0" max="2" step="0.1" value="1" />
-      </div>
-      <div class="slider-row">
-        <label title="速度弥散（0.3～2）：大爆炸时物质初速的随机散布倍率。0.3 = 整齐膨胀，1 = 自然爆炸，2 = 剧烈湍流。"><span>速度弥散</span><span id="init-disp-val"></span></label>
-        <input type="range" id="init-disp" min="0.3" max="2" step="0.05" value="1" />
-      </div>
-      <div class="slider-row">
-        <label title="质量函数偏置（-1～+1）：在「多小质量」与「多大质量」之间搬运数量份额。+1 偏多巨质量天体（黑洞/星系更多），-1 偏多小天体。"><span>质量偏置</span><span id="init-bias-val"></span></label>
-        <input type="range" id="init-bias" min="-1" max="1" step="0.1" value="0" />
-      </div>
-    </details>
-    <details class="group">
-      <summary>性能</summary>
-      <div class="btn-row">
-        <button id="btn-auto-quality" title="帧率自适应降级。开启：帧率持续偏低时自动降低细节（冻结 LOD 升级、停止新建细节系统、卸载最远的系统）；恢复后逐档还原。">⚙ 自动降级：开</button>
-      </div>
-      <div class="slider-row">
-        <label title="同时拥有内部细节（可分辨的单个天体）的系统数量上限（1～6）。这是性能与观感的主要权衡点，配置差就调小。">细节系统上限 <span id="perf-systems-val"></span></label>
-        <input type="range" id="perf-systems" min="1" max="6" step="1" value="3" />
-      </div>
-      <div class="slider-row">
-        <label title="所有活跃系统的细节天体总数上限（100～1500）。一个星系约 400~500 个成员。">细节体上限 <span id="perf-bodies-val"></span></label>
-        <input type="range" id="perf-bodies" min="100" max="1500" step="50" value="1000" />
-      </div>
-    </details>
 
     <div class="status" id="status">正在初始化…</div>
     </div>
@@ -118,7 +59,7 @@
     <div class="legend-item"><span class="dot" style="background:#fff"></span>探测球</div>
   </div>
 
-  <div class="hint">🎥 跟拍自动框住轨迹 · 靠近系统时天体逐个显形 · 持续被捕获时经虫洞跃迁逃逸 · 关闭跟拍后自由观察</div>
+  <div class="hint">🎥 跟拍自动框住轨迹 · 接近系统时自动慢放、逐个发现天体 · 被持续捕获时经虫洞跃迁逃逸 · 关闭跟拍后自由观察</div>
 
   <!-- 航行信息：小球 / 最近系统 / 宇宙实时状态 -->
   <div class="hud">

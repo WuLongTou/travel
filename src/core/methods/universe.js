@@ -39,9 +39,90 @@ export const universeMethods = {
   // （_tryAwakenSeed 已删除：详情系统由 _manageDetails 按"接近 1.4R"
   //  直接创建/卸载，唤醒门控是旧形成动画体系的遗留，无人调用。）
 
-  _generateFrontierSeed() {
-    if (this.time - this.lastFrontierTime < FRONTIER_INTERVAL) return;
+  // ---- "下一站"保险（2026-09-03 新增）----
+  // 小球在大尺度结构的合引力牵引下，航向持续弯曲（20 秒可转 10°+，
+  // 实测侧向加速度 ~0.2-0.4/s²——真实物理：纤维/走廊结构的整体引力
+  // 在拉它）。沿"当前速度方向"投放的目标到达时全部偏出，一次偏转就
+  // 制造上百秒的遭遇空窗。因此保险机制建立在**预测航迹**上：
+  //   _predictProbePath 用当前引力场前瞻积分小球未来 20s 的轨迹
+  //   （种子位置随已知速度线性外推——种子准静止、无加速，外推准确）；
+  //   _hasNextWaypoint 沿预测轨迹逐点检查是否有种子落在可遭遇半径
+  //   （1.4×detailR）内；没有则把保险目标**直接投放在预测轨迹上**
+  //   （~250 单位处，完全静止），航线怎么弯它都在路上——叙事上即
+  //   "宇宙网纤维上总连着下一个节点"。
+  _predictProbePath(horizon = 20, dt = 1.0) {
     const pr = this.probe;
+    const pos = [pr.pos[0], pr.pos[1], pr.pos[2]];
+    const vel = [pr.vel[0], pr.vel[1], pr.vel[2]];
+    const gG = this.config.gravityG;
+    const mS = this.config.bodyMassScale;
+    const gs = this.gravityStrength;
+    const path = [[pos[0], pos[1], pos[2], 0]];
+    const steps = Math.round(horizon / dt);
+    for (let i = 1; i <= steps; i++) {
+      const t = i * dt;
+      let ax = 0, ay = 0, az = 0;
+      if (gs > 0.001) {
+        for (const s of this.seeds) {
+          // 种子随已知速度线性外推（准静止，无加速）
+          const sx = s.pos[0] + s.vel[0] * t;
+          const sy = s.pos[1] + s.vel[1] * t;
+          const sz = s.pos[2] + s.vel[2] * t;
+          const dx = sx - pos[0];
+          const dy = sy - pos[1];
+          const dz = sz - pos[2];
+          const r2 = dx * dx + dy * dy + dz * dz;
+          if (r2 < 1e-6) continue;
+          const f = gG * PROBE_GRAVITY_MULT * (s.mass * mS) / Math.pow(r2 + EPS2, 0.95) * gs;
+          ax += f * dx; ay += f * dy; az += f * dz;
+        }
+      }
+      vel[0] += ax * dt; vel[1] += ay * dt; vel[2] += az * dt;
+      pos[0] += vel[0] * dt; pos[1] += vel[1] * dt; pos[2] += vel[2] * dt;
+      path.push([pos[0], pos[1], pos[2], t]);
+    }
+    return path;
+  },
+
+  // 缓存的预测路径（每秒重算一次——路径检查每步都要用，前瞻积分
+  // 20 步 × 57 种子不宜逐帧全价重算）
+  _waypointPathCache() {
+    if (!this._wpCache || this.time - this._wpCache.time > 1) {
+      this._wpCache = { time: this.time, path: this._predictProbePath() };
+    }
+    return this._wpCache.path;
+  },
+
+  _hasNextWaypoint() {
+    const pr = this.probe;
+    const sp = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
+    if (sp < 2) return true; // 低速（系统内机动）不判航线
+    const path = this._waypointPathCache();
+    for (const p of path) {
+      const t = p[3];
+      if (t < 3) continue; // 贴身段不算"下一站"
+      for (const s of this.seeds) {
+        const sx = s.pos[0] + s.vel[0] * t;
+        const sy = s.pos[1] + s.vel[1] * t;
+        const sz = s.pos[2] + s.vel[2] * t;
+        const dx = sx - p[0], dy = sy - p[1], dz = sz - p[2];
+        const reach = Math.max(10, (this._detailRadius(s) || 5) * 1.4);
+        if (dx * dx + dy * dy + dz * dz < reach * reach) return true;
+      }
+    }
+    return false;
+  },
+
+  _generateFrontierSeed() {
+    const pr = this.probe;
+    // 重生喘息期（2026-09-03）：刚重生的数秒内不投放——否则新目标
+    // 恰好落在重生路径正前方，小球以重生速度一头撞进下一个系统，
+    // 形成"死亡→重生→立刻又死"的连环。喘息 5 秒后恢复投放。
+    if (pr.respawnGrace > 5) return;
+    // 有"下一站"时按 FRONTIER_INTERVAL 节流投放（多样性与远景）；
+    // 没有（航线被偏转后前方空窗）则立即触发一次"保险投放"。
+    const needWaypoint = !this._hasNextWaypoint();
+    if (!needWaypoint && this.time - this.lastFrontierTime < FRONTIER_INTERVAL) return;
     // 回收"已被甩在身后/已远离"的休眠种子作为新结构；不需要过滤已绑定
     // 粒子（那是粒子的内部成员）。
     // 2026-09-02 修复两个导致"动态生成从未工作"的根因：
@@ -83,95 +164,162 @@ export const universeMethods = {
     // 航线，越飞越空。现在按权重补全部档位：small 占多数（体量小、细节
     // 预算便宜、掠过频繁），large/giant 稀少（它们更适合留在远处当远景
     // 地标；且细节成员动辄数百，投太近会瞬间撑满 maxDetailBodies 预算）。
-    const roll = Math.random();
+    // "下一站"保险投放以 medium 为主（恒星系/星团可遭遇半径 19.6~42），
+    // 混入 25% 的 small（行星系用更近的路径点 t≈5~7s，短程内预测残差
+    // 小于其 7 的可遭遇半径）；大结构留给常规投放当远景。
     let klass;
     let def;
-    if (roll < 0.40) {
-      klass = 'small';
-      def = CLASS_DEFS.find((d) => d.key === 'small');
-    } else if (roll < 0.72) {
-      klass = 'medium';
-      def = CLASS_DEFS.find((d) => d.key === 'medium');
-    } else if (roll < 0.92) {
-      // 较常见的远景星系
-      klass = 'large';
-      def = CLASS_DEFS.find((d) => d.key === 'large');
-    } else if (roll < 0.98) {
-      // 罕见：超大质量黑洞
-      klass = 'giant';
-      def = CLASS_DEFS.find((d) => d.key === 'giant');
+    if (needWaypoint) {
+      if (Math.random() < 0.25) {
+        klass = 'small';
+        def = CLASS_DEFS.find((d) => d.key === 'small');
+      } else {
+        klass = 'medium';
+        def = CLASS_DEFS.find((d) => d.key === 'medium');
+      }
     } else {
-      // 偶尔给点变化：远处的星云 / 行星种子
-      klass = 'nebula';
-      def = { key: 'nebula', massMin: 0.25, massMax: 0.85, durBase: 3.5, durSpan: 1.5 };
+      const roll = Math.random();
+      if (roll < 0.40) {
+        klass = 'small';
+        def = CLASS_DEFS.find((d) => d.key === 'small');
+      } else if (roll < 0.72) {
+        klass = 'medium';
+        def = CLASS_DEFS.find((d) => d.key === 'medium');
+      } else if (roll < 0.92) {
+        // 较常见的远景星系
+        klass = 'large';
+        def = CLASS_DEFS.find((d) => d.key === 'large');
+      } else if (roll < 0.98) {
+        // 罕见：超大质量黑洞
+        klass = 'giant';
+        def = CLASS_DEFS.find((d) => d.key === 'giant');
+      } else {
+        // 偶尔给点变化：远处的星云 / 行星种子
+        klass = 'nebula';
+        def = { key: 'nebula', massMin: 0.25, massMax: 0.85, durBase: 3.5, durSpan: 1.5 };
+      }
     }
-    // ---- 投放距离/散乱角按天体尺度分级（2026-09-02 第二版）----
-    // 第一版（统一 150~380 × scale）实测平均遭遇间隔仍 ~320 真实秒：
-    // 散乱角 0.18 在 265 单位距离上的横向偏差 ≈ 48 单位，远大于行星
-    // （detailR 5）/恒星系（14）/星团（30）的可遭遇半径，走廊档的
-    // 小天体依然大多擦肩而过。现在按"可遭遇半径 ≈ 距离 × 散乱角"反推：
-    //   · small（行星，detailR 5）：90~160 + 0.07 → 偏差 6~11，真正被经过
-    //     （53~94 真实秒一次；下限 60→90：太近会让"刚重生就撞上"，2026-09-02）
-    //   · medium（恒星/星团，14~30）：100~220 + 0.10 → 偏差 10~22
-    //   · large（星系，115）：350~600 + 0.18 → 偏差 63~108 < 115，可读形态
-    //   · giant（黑洞/巨星系）：450~750 + 0.18（体积大，远看才读得出形态）
-    //   · nebula（星云，26）：150~300 + 0.10
-    // 广域档（40%）保持 0.9 大散乱角：远景地标与纵深，不指望遭遇。
-    const distRange = klass === 'small' ? [90, 160]
-      : klass === 'medium' ? [100, 220]
-      : klass === 'nebula' ? [150, 300]
-      : klass === 'large' ? [350, 600]
-      : [450, 750];
-    const laneScatter = klass === 'small' ? 0.07
-      : klass === 'medium' ? 0.10
-      : 0.18;
+    // ---- 投放距离/散乱角按天体尺度分级（2026-09-03 真实比例版）----
+    // 核心原则：系统间距与系统尺度成比例——星系（detailR 115、直径 230）
+    // 的投放距离必须 ≥ 数倍直径（真实宇宙里星系间距是直径的 10~30 倍，
+    // 银河系到仙女座 25 倍），小天体按"可遭遇半径 ≈ 距离 × 散乱角 <
+    // detailR × 1.4"反推——散乱角要小到让走廊档投放真正被航线经过：
+    //   · small（行星，detailR 5，可遭遇 7）：100~240 + 0.045 → 偏差 4.5~11
+    //   · medium（恒星/星团，14~30）：160~320 + 0.06 → 偏差 9.6~19 < 19.6
+    //   · nebula（星云，26）：200~380 + 0.08
+    //   · large（星系，115）：900~1600 —— 4~7 倍星系直径，远景地标
+    //   · giant（黑洞/巨星系）：1000~1800 —— 极罕见，极空旷处
+    // 广域档（35%）保持 0.9 大散乱角：远景地标与纵深，不指望遭遇。
+    const distRange = klass === 'small' ? [100, 240]
+      : klass === 'medium' ? [160, 320]
+      : klass === 'nebula' ? [200, 380]
+      : klass === 'large' ? [900, 1600]
+      : [1000, 1800];
+    const laneScatter = klass === 'small' ? 0.045
+      : klass === 'medium' ? 0.06
+      : 0.12;
 
     // ---- 投放方向：两档（航线走廊 + 广域散布）----
-    // 旧实现统一用 0.28 的散乱角：在数百单位的投放距离上，横向偏移高达
-    // 80~150 单位，远大于天体的可遭遇半径（恒星系 detailR 14、行星 5），
-    // 绝大多数新结构只是"擦肩而过"——这才是宇宙显得空的直接原因。
-    //   · 走廊档（60%）：散乱角按天体分级（见上），投在会被经过的航线上
-    //   · 广域档（40%）：散乱角 0.9，作为远景地标与纵深（不指望遭遇）
-    const corridor = Math.random() < 0.6;
+    //   · 走廊档（65%）：散乱角收紧到"横向偏差 < 可遭遇半径"，投在
+    //     会被航线经过的位置（保险档不走这里——落点直接取预测航迹）
+    //   · 广域档（35%）：散乱角 0.9，作为远景地标与纵深（不指望遭遇）
+    const corridor = Math.random() < 0.65;
     const scatterAmt = corridor ? laneScatter : 0.9;
-    // 放在小球前方远处的位置，散乱角也放宽一点让它不全在正前方
+    // 放在小球前方远处的位置。投放点必须通过隔离校验（距所有现有种子
+    // ≥ 双方隔离半径之和，§ISOLATION_RADII）——常规投放 8 次重试，
+    // 都不满足就放弃（下个 FRONTIER_INTERVAL 再试）；保险投放 12 次、
+    // 距离逐次推远（150+30k，近场邻居挡住走廊时拉远即可挣脱隔离
+    // 约束），极端拥挤时同样放弃、下一步重试（小球在前进，几何在变）。
     const sp = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
-    let dir;
-    if (sp > 2) {
-      const scatter = randomUnit(1);
-      const bx = pr.vel[0] / sp + scatter[0] * scatterAmt;
-      const by = pr.vel[1] / sp + scatter[1] * scatterAmt;
-      const bz = pr.vel[2] / sp + scatter[2] * scatterAmt;
-      const bl = Math.hypot(bx, by, bz) || 1;
-      dir = [bx / bl, by / bl, bz / bl];
-    } else {
-      dir = randomUnit();
+    let dir = randomUnit();
+    let pos = null;
+    const willCollapse = klass === 'giant' ? Math.random() < 0.35 : false;
+    const newLevel = finalLevelFor(klass, willCollapse);
+    // ---- 掠过偏移（2026-09-03）：目标不落在航线正中 ----
+    // 落在正中意味着小球每次都穿过系统核心——恒星/行星都在核心附近的
+    // 轨道上，穿越核心=高概率撞上具体成员，形成连续死亡。真实宇宙里
+    // 航线几乎总是"掠过"：恒星的碰撞截面只占恒星系的极小部分。把落点
+    // 横向偏移 detailR×(0.9~1.8)——小球从系统边缘掠过（引力弯曲 +
+    // 渐进发现边缘成员），部分进入 1.4R 触发细节、部分仅引力交互。
+    // 大结构（detailR ≥ 50，星系/超星系团）不偏移：穿越星系看旋臂
+    // 本来就是内容，且其成员不整体捕获。
+    const detailRNew = this._detailRadius({ level: newLevel }) || 5;
+    const grazeOffset = detailRNew < 50 ? detailRNew * (0.55 + Math.random() * 0.95) : 0;
+    const addGraze = (base, anchorDir) => {
+      if (grazeOffset <= 0) return base;
+      // 垂直于锚方向的随机横向偏移
+      const n = randomUnit(1);
+      const dot = n[0] * anchorDir[0] + n[1] * anchorDir[1] + n[2] * anchorDir[2];
+      let ox = n[0] - anchorDir[0] * dot;
+      let oy = n[1] - anchorDir[1] * dot;
+      let oz = n[2] - anchorDir[2] * dot;
+      const ol = Math.hypot(ox, oy, oz);
+      if (ol < 1e-4) return base;
+      return [
+        base[0] + ox / ol * grazeOffset,
+        base[1] + oy / ol * grazeOffset,
+        base[2] + oz / ol * grazeOffset,
+      ];
+    };
+    const velDir = sp > 1e-3 ? [pr.vel[0] / sp, pr.vel[1] / sp, pr.vel[2] / sp] : [1, 0, 0];
+    const attempts = needWaypoint ? 10 : 8;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      if (needWaypoint) {
+        // 保险档：落点直接取**预测航迹**上的路径点（再加掠过偏移）——
+        // 航线怎么弯它都在路上；隔离被挡时逐步取更远的路径点。
+        // medium 用 t≈8~17s（距离 ~200-440），small 用更近的 t≈5~14s。
+        // 投放后的目标完全静止（vel=0，见下），预测即落点。
+        const path = this._waypointPathCache();
+        const baseIdx = klass === 'small' ? 5 : 8;
+        const pi = Math.min(path.length - 1, baseIdx + attempt);
+        const cand = addGraze([path[pi][0], path[pi][1], path[pi][2]], velDir);
+        if (this._isPositionIsolated(cand, newLevel, s.idx)) { pos = cand; break; }
+        continue;
+      }
+      if (sp > 2) {
+        // 常规档：沿当前航向 + 散乱角（走廊档收紧到可遭遇半径内）
+        const scatter = randomUnit(1);
+        const bx = pr.vel[0] / sp + scatter[0] * scatterAmt;
+        const by = pr.vel[1] / sp + scatter[1] * scatterAmt;
+        const bz = pr.vel[2] / sp + scatter[2] * scatterAmt;
+        const bl = Math.hypot(bx, by, bz) || 1;
+        dir = [bx / bl, by / bl, bz / bl];
+      } else {
+        dir = randomUnit();
+      }
+      const dist = (distRange[0] + Math.random() * (distRange[1] - distRange[0]))
+        * (corridor ? 1 : 1.6);
+      const base = [
+        pr.pos[0] + dir[0] * dist,
+        pr.pos[1] + dir[1] * dist,
+        pr.pos[2] + dir[2] * dist,
+      ];
+      const cand = corridor ? addGraze(base, dir) : base;
+      if (this._isPositionIsolated(cand, newLevel, s.idx)) { pos = cand; break; }
     }
-    const dist = (distRange[0] + Math.random() * (distRange[1] - distRange[0]))
-      * (corridor ? 1 : 1.6);
-    const pos = [
-      pr.pos[0] + dir[0] * dist,
-      pr.pos[1] + dir[1] * dist,
-      pr.pos[2] + dir[2] * dist,
-    ];
+    if (!pos) return; // 附近已拥挤：不硬塞，下一步/下个投放窗口再试
 
-    // 重置为休眠暗物质晕。
+    // 重置为休眠暗物质晕。本动速度与初始种子同档：准静止（见 sim._init）；
+    // 保险档目标完全静止（vel=0）——预测航迹的落点就是它此后的位置，
+    // 不会因自身漂移再次错开。
     s.klass = klass;
     s.dir = dir;
     s.pos = pos;
-    s.vel = [
-      pr.vel[0] * 0.35 + (Math.random() - 0.5) * 1.2,
-      pr.vel[1] * 0.35 + (Math.random() - 0.5) * 1.2,
-      pr.vel[2] * 0.35 + (Math.random() - 0.5) * 1.2,
-    ];
+    s.vel = needWaypoint
+      ? [0, 0, 0]
+      : [
+        (Math.random() - 0.5) * 1.2,
+        (Math.random() - 0.5) * 1.2,
+        (Math.random() - 0.5) * 1.2,
+      ];
     s.mass = def.massMin + Math.random() * (def.massMax - def.massMin);
     s.duration = def.durBase + Math.random() * def.durSpan;
     // 投放即定型：新结构在远处就已完整存在，小球靠近只是"发现"
     s.birth = 0;
     s.awakened = true;
     s.growth = 1;
-    s.willCollapse = klass === 'giant' ? Math.random() < 0.35 : false;
-    s.level = finalLevelFor(klass, s.willCollapse);
+    s.willCollapse = willCollapse;
+    s.level = newLevel;
     s._layout = null;      // 布局随新身份重新生成
     s.budgetNotified = false;
     // 引力影响范围要够大：这样即使系统离得很远也会把小球拉过去
@@ -208,7 +356,7 @@ export const universeMethods = {
       && this.time - (this._lastFrontierAnnounce || -Infinity) >= ANNOUNCE_GAP) {
       this._lastFrontierAnnounce = this.time;
       const classLabels = { nebula: '星云', small: '行星', medium: '恒星/星团', large: '星系', giant: '黑洞' };
-      this.events.push({ time: this.time, text: `🔭 远方探测到${classLabels[klass]}结构（引力范围 ${s.influenceRadius.toFixed(0)}）` });
+      this.events.push({ time: this.time, text: `🔭 远方探测到${classLabels[klass]}结构` });
     }
     this.lastFrontierTime = this.time;
   },

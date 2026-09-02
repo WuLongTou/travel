@@ -6,7 +6,7 @@ import {
   SEED_R_MIN, SEED_R_MAX, EJECTA_SPEED_MIN, EJECTA_SPEED_MAX,
   PROBE_INITIAL_SPEED, PROBE_BIGBANG_SPEED, BIG_BANG_WALL, PROBE_GRAVITY_MULT,
   SEED_AWAKEN_RADIUS, FORMATION_SPACING,
-  FRONTIER_INTERVAL, FRONTIER_DIST_MIN, FRONTIER_DIST_MAX,
+  FRONTIER_INTERVAL, ISOLATION_RADII,
   REVEAL_RADIUS, REVEAL_SCALE, DISCOVERY_PER_STEP, COLLECTION_LEVELS,
   CLASS_DEFS, PROBE_DRAG_LEGACY, PROBE_IGM_DRAG, PROBE_RESPAWN_SPEED, PROBE_MAX_SPEED,
 } from '../config.js';
@@ -29,13 +29,40 @@ export const queryMethods = {
 
   // 到最近天体系统的距离（虫洞逃逸安全校验用）
   _distanceToNearestSeed(x, y, z) {
-    let best = Infinity;
+    return this._nearestSeedInfo(x, y, z).dist;
+  },
+
+  // 最近种子的完整信息（距离 + 种子对象）——虫洞落点选"最空旷方向"、
+  // 出射方向背离最近天体时都需要知道"最近的是谁"
+  _nearestSeedInfo(x, y, z) {
+    let best = null, bestD = Infinity;
     for (const s of this.seeds) {
       const dx = s.pos[0] - x, dy = s.pos[1] - y, dz = s.pos[2] - z;
       const d2 = dx * dx + dy * dy + dz * dz;
-      if (d2 < best) best = d2;
+      if (d2 < bestD) { bestD = d2; best = s; }
     }
-    return Math.sqrt(best);
+    return { seed: best, dist: bestD === Infinity ? Infinity : Math.sqrt(bestD) };
+  },
+
+  // 系统隔离半径（§ISOLATION_RADII）：任意两个系统中心的间距下限。
+  // 与天体尺度（detailRadius）成比例——星系级 480（≈4 倍星系直径的
+  // 单侧距离），行星系 45。用于初始分布与 frontier 投放的最小间距
+  // 拒绝采样，保证"系统之间隔着大片空旷"，而不是扎堆。
+  _isolationRadius(s) {
+    return ISOLATION_RADII[s.level] || 60;
+  },
+
+  // 位置是否满足隔离约束：距所有现有种子 ≥ 双方隔离半径之和
+  // （excludeIdx 用于种子"搬家"时排除它自己）
+  _isPositionIsolated(pos, level, excludeIdx = -1) {
+    const iso = ISOLATION_RADII[level] || 60;
+    for (const s of this.seeds) {
+      if (s.idx === excludeIdx) continue;
+      const dx = s.pos[0] - pos[0], dy = s.pos[1] - pos[1], dz = s.pos[2] - pos[2];
+      const need = iso + (ISOLATION_RADII[s.level] || 60);
+      if (dx * dx + dy * dy + dz * dz < need * need) return false;
+    }
+    return true;
   },
 
   // 系统本体半径（影响相机绕行窗口、捕获与远景表达），与 detailRadius 同阶梯：

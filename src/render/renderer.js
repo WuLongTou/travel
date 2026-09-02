@@ -160,11 +160,15 @@ export function createCosmosRenderer(canvas, sim) {
   const state = {
     // timeScale **只是显示层的缩放系数**（详见 render() 中的物理量/显示量说明），
     // 不参与引力与任何受力计算，物理子步长与轨道结果都不随之改变。
-    // 默认 0.1：物理巡航速度约 17 单位/秒 → 观感约 1.7 单位/秒，
-    // 穿过直径 28 的恒星系约 16 秒，从容看清行星与伴星。
+    // 默认 0.42：物理巡航速度约 17 单位/秒 → 空旷航段观感约 7 单位/秒，
+    // 足够体现"航行"；接近系统时由 envScale（见 render()）自动慢放到
+    // ~0.15 倍率（观感 ~2.5 单位/秒），穿越恒星系仍从容可读。
     // 注意 main.js 的滑杆会在启动时再次同步，HTML 里的 value 才是真正生效值。
-    time: 0, timeScale: 0.1, musicIntensity: 1, follow: true,
+    time: 0, timeScale: 0.42, musicIntensity: 1, follow: true,
     physAcc: 0,
+    // 环境倍率 envScale（航行节奏自适应，2026-09-03）：接近天体系统时
+    // 自动慢放、空旷航行时全速。与用户滑杆相乘，只改显示快慢。
+    envScale: 1,
     // 上帝视角镜头（全部连续量，无模式机）：
     camAzimuth: -Math.PI / 2,  // 恒定世界方位角（初始化后不改，不跟随小球旋转）
     camDist: 55,  // 当前距离（向 wantDist 速率限幅逼近；CAM_CRUISE_DIST 已移 render/camera-follow.js）
@@ -230,18 +234,33 @@ export function createCosmosRenderer(canvas, sim) {
     //   沿轨道推进的快慢。
     // ==================================================================
     state.time += dtReal;
-    // 启动快进（平滑指数回落）：开局用高倍率把宇宙推进到"结构已成形"，
-    // 随后按指数曲线无缝回落到观赏倍率。旧实现是"恒定 0.5× 快进 15 秒后
-    // 硬切回观赏倍率"——切换瞬间小球屏幕速度骤降 10 倍，像急刹车；而且
-    // 快进期内小球屏幕速度高达 12+ 单位/秒，穿越系统只要一两秒，根本
-    // 来不及看清与天体的交互。指数回落没有任何切换点，速度单调递减，
-    // 开局"超光速喷出 → 逐渐放缓 → 从容航行"一气呵成。
-    // 两个阶段用的都是**同一个显示层系数机制**（只换算物理时间增量），
-    // 不触碰任何物理公式与子步长。
-    // bootFastForwardWall 在此语义下是回落时间常数的基准（tau = wall×0.3）。
-    const bootTau = Math.max(0.5, sim.config.bootFastForwardWall * 0.30);
-    const bootExtra = Math.max(0, sim.config.bootFastForwardScale - state.timeScale);
-    const scale = state.timeScale + bootExtra * Math.exp(-state.time / bootTau);
+    // ---- 环境倍率（航行节奏自适应，2026-09-03）----
+    // 空旷航段全速推进（滑杆值 ×1），接近天体系统时自动慢放（×0.35）——
+    // 解决"开局太慢"与"穿越系统要慢"的矛盾：物理层零改动，只缩放
+    // 每真实秒的物理时间增量。near 由最近系统距离/detailRadius 的
+    // 连续函数给出（1.1R 内满档、2.4R 外归零），双时间常数平滑
+    // （减速 2.5s、恢复 1.6s），无任何切换点。
+    {
+      const pr0 = sim.probe;
+      let envTarget = 1;
+      if (pr0.nearestSystem >= 0 && pr0.nearestDist < Infinity && sim.seeds[pr0.nearestSystem]) {
+        const ns = sim.seeds[pr0.nearestSystem];
+        const R = Math.max(1, sim._detailRadius(ns) || sim._systemRadius(ns));
+        const ratio = pr0.nearestDist / R;
+        const near = 1 - smoothstep(1.1, 2.4, ratio);
+        envTarget = 1 - 0.65 * near;
+      }
+      const envTau = envTarget < state.envScale ? 2.5 : 1.6;
+      state.envScale += (envTarget - state.envScale) * Math.min(1, dtReal / envTau);
+    }
+    // 启动快进（乘性指数回落，2026-09-03 重做）：开局以 bootFastForwardScale
+    // 倍（默认 6×）推进——大爆炸窗口（1.2 物理秒）在约半秒真实时间内演完，
+    // 喷流粒子 160~320 的初速以 ~2.5 物理秒/真实秒 的屏幕节奏掠过视野，
+    // "超光速暴胀"的冲击一眼可见；随后按指数曲线（tau = wall×0.18 ≈ 2.5s）
+    // 无缝回落到环境倍率节奏。乘性形式让倍率始终随用户滑杆同步缩放。
+    const bootTau = Math.max(0.5, sim.config.bootFastForwardWall * 0.18);
+    const bootMul = 1 + Math.max(0, sim.config.bootFastForwardScale - 1) * Math.exp(-state.time / bootTau);
+    const scale = state.timeScale * state.envScale * bootMul;
     state.physAcc += dtReal * scale;
     const PHYS_DT = 0.02;
     let guard = 0;

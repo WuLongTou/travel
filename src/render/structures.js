@@ -683,9 +683,11 @@ export function createStructures(scene, sim, glowTex, ringTex, camera) {
       else { haloTarget = 2.4 + s.mass * 0.6; haloFade = 0.9; } // void / dust
       g.halo.scale.setScalar(Math.max(0.001, haloTarget * pulse * (0.5 + 0.5 * Math.max(g.diskAmt, g.bhAmt))));
       g.halo.material.color.copy(levelColorTinted(lv, g));
-      // 星系/超星系团成形后光晕压暗：远处仍是一小团可辨识的光（真实：
-      // 未分辨的远方星系就是一个光斑），但不再是"贴图底雾"
-      g.halo.material.opacity = 0.30 * haloFade * mistFade
+      // 星系/超星系团成形后光晕适度保留：未分辨的远方星系就是夜空中
+      // 一小团可辨识的光（真实参考：仙女座星系 250 万光年外肉眼可见，
+      // 视直径比满月大 6 倍——远方星系应当是天空中最显眼的深空天体之一，
+      // 而不是淹没在黑暗里）。2026-09-03 自 0.30×0.45 提升。
+      g.halo.material.opacity = 0.55 * haloFade * mistFade
         * (lv === 'galaxy' || lv === 'supercluster' ? haloDim : 1);
       g.halo.visible = g.halo.material.opacity > 0.01;
 
