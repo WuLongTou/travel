@@ -49,6 +49,9 @@ export function createCameraFollow(state, controls, camera, sim) {
           state.orbitCenter.y += jy;
           state.orbitCenter.z += jz;
           trail.clearTrail();
+          // 瞬移后全景：新落点净空 ≥200、周围空旷，距离保持 55 的话
+          // 画面里只有小球。置位后由下方距离逻辑抬到 175 再自然收回。
+          state.panoramaDist = 175;
         }
       }
       state._lastProbePos.set(px, py, pz);
@@ -187,7 +190,7 @@ export function createCameraFollow(state, controls, camera, sim) {
         fY += state.velSmooth.y * 1.25 * biasK;
         fZ += state.velSmooth.z * 1.25 * biasK;
 
-        // ---- 距离：三层取最大，全部连续 ----
+        // ---- 距离：四层取最大，全部连续（2026-09-03 恢复轨迹框距）----
         const fovRad = (camera.fov * Math.PI) / 180;
         // ① 滑杆基准距离
         const zoomBase = Math.max(6, sim.config.camZoom || CAM_CRUISE_DIST);
@@ -197,15 +200,61 @@ export function createCameraFollow(state, controls, camera, sim) {
           const orbitDist = seedDist * 2.4 + sysR * 0.8;
           wantDist = Math.max(zoomBase, orbitDist * w + zoomBase * (1 - w));
         }
-        // ③ 轨迹感知框距：让最近一段轨迹始终完整入画。
-        //    （trail 提取后 trailCount/trailPos 已封装到 render/trail.js；
-        //     后续需要时由 trail 子系统提供 getBounds() 替代此内联计算。）
+        // ③ 轨迹感知框距（2026-09-03 恢复，模块提取时曾丢失）：
+        //    最近 ~6.8 显示秒（150 点 × 0.045s）的轨迹必须作为一条可读
+        //    弧线入画——"任何时候都能看到小球的运动轨迹"的结构性保证。
+        //    fit 用 exR（窗口最远轨迹点到小球的距离）而非包围球半径：
+        //    视点在小球附近且带前向偏置，真正决定入画的是"小球→轨迹
+        //    尾端"的张角；tan 半角对应"从画面内一点向外的可见半径"。
+        //    fitMix 同时把视点向轨迹中心混合（fit 主导时轨迹居中，
+        //    不再全部堆在画面后侧）。超出窗口的更早轨迹自然淡出。
+        let tb = null;
+        let fitMix = 0;
+        if (trail && trail.getBounds) {
+          tb = trail.getBounds(150, dtReal, px, py, pz);
+          if (tb && tb.exR > 1) {
+            const fitDist = Math.min(125, (tb.exR * 0.92 + 10) / Math.tan(fovRad / 2));
+            wantDist = Math.max(wantDist, fitDist);
+            fitMix = smoothstep(zoomBase + 12, 125, fitDist);
+          }
+        }
+        // ④ 系统框选（2026-09-03 新增）：接近/穿越天体系统时，系统全貌
+        //    也要与轨迹同框——nearFactor（1.8R 内 1、3.6R 外 0）连续混合
+        //    sysR×2.6。黑洞系统（sysR 17~19）拉到 45~50，星系（34~38）
+        //    拉到 88~99——穿越星系时镜头在系统尺度上，看到的是"星系中的
+        //    航行"而不是"贴在一颗星旁边"。行星/恒星系小（sysR 2~4），
+        //    基本不触发，保持贴近交互的观感。
+        if (sysR > 0 && seedDist < sysR * 3.6) {
+          const nearW = 1 - smoothstep(sysR * 1.8, sysR * 3.6, seedDist);
+          wantDist = Math.max(wantDist, zoomBase + (sysR * 2.6 - zoomBase) * nearW);
+        }
         // 绝对上限：主导天体切换等异常时刻 seedDist 可能瞬时失真，
         // 不封顶会把镜头拉到 100+，位置剧变 → 朝向剧变
         wantDist = Math.min(wantDist, CAM_MAX_DIST);
+        // ---- 虫洞/重生瞬移后的全景模式 ----
+        // 瞬移本身是刚体切换（前景天体瞬间替换），落点净空 ≥200、周围
+        // 一片空旷——若距离保持 55，画面里只有小球+星空，没有观赏性。
+        // 瞬移瞬间把距离直接抬到 175（与刚体平移同帧发生，观感是
+        // "跃迁到一个更远的视角重新启航"），之后由速率限幅自然收回
+        // 到 wantDist——回落期间新轨迹逐渐铺开、周围结构渐次入画。
+        if (state.panoramaDist > 0) {
+          state.panoramaDist = 0; // 一次性抬升（由瞬移检测写入）
+          state.camDist = Math.min(CAM_MAX_DIST, Math.max(state.camDist, 175));
+        }
         // 速率限幅：距离每秒相对变化不超过 CAM_DIST_RATE，消除"呼吸"
         const maxDDelta = Math.max(state.camDist, 1) * CAM_DIST_RATE * dtReal;
         state.camDist += Math.max(-maxDDelta, Math.min(maxDDelta, wantDist - state.camDist));
+
+        // ---- 视点向轨迹中心混合（fitMix 主导时轨迹居中入画）----
+        // 前向偏置把视点推向前方，轨迹会全部堆在画面后侧甚至出画；
+        // 框距主导时把视点往轨迹窗口中心挪 42%，弧线横过画面中部，
+        // "看的是航行轨迹"而不是"看小球身后的尾巴"。
+        if (tb && fitMix > 0.001) {
+          const k = 0.42 * fitMix;
+          fX += (tb.cx - fX) * k;
+          fY += (tb.cy - fY) * k;
+          fZ += (tb.cz - fZ) * k;
+        }
 
         // 全局方位角：初始化后恒定不变（不跟随小球旋转，见上文）
         // 方位角 = 恒定基准 + 极缓慢漂移（漂移只影响显示，与物理无关）

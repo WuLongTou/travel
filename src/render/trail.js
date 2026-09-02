@@ -110,7 +110,51 @@ export function createTrail(scene, sim, camera) {
     trailCount = 0;
     trail.visible = false;
     trailGeo.setDrawRange(0, 0);
+    boundsCache = null; // 轨迹清空后缓存立即失效
   }
 
-  return { trail, pushTrail, syncTrailRibbon, clearTrail };
+  // ---- 轨迹包围球（镜头"轨迹感知框距"的数据源，2026-09-03 恢复）----
+  // 返回最近 maxPoints 个采样点（按 0.045s/点 ≈ 显示秒）的包围球：
+  // { cx, cy, cz, r, exR }。r = 包围球半径；exR = 窗口内最远采样点到
+  // 小球当前显示位置 (px,py,pz) 的距离——框距用它（视点在小球附近、
+  // 带前向偏置，以"小球→轨迹最远端"张角 fit 画面才准确）。
+  // 0.25s 节流缓存——镜头每帧消费但几何变化慢，O(N) 重算每秒 4 次
+  // 足够（750 点全量重算 <0.1ms）。
+  let boundsCache = null;
+  let boundsTimer = 0;
+  const _b = { cx: 0, cy: 0, cz: 0, r: 0, exR: 0 };
+  function getBounds(maxPoints, dtReal, px, py, pz) {
+    boundsTimer -= dtReal || 0;
+    if (boundsCache && boundsTimer > 0) return boundsCache;
+    boundsTimer = 0.25;
+    const n = Math.min(trailCount, Math.max(8, maxPoints | 0));
+    if (n < 8) { boundsCache = null; return null; }
+    const start = trailCount - n;
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    let ex2 = 0;
+    for (let i = start; i < trailCount; i++) {
+      const i3 = i * 3;
+      const x = trailPos[i3], y = trailPos[i3 + 1], z = trailPos[i3 + 2];
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+      if (px !== undefined) {
+        const dx = x - px, dy = y - py, dz = z - pz;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 > ex2) ex2 = d2;
+      }
+    }
+    _b.cx = (minX + maxX) / 2;
+    _b.cy = (minY + maxY) / 2;
+    _b.cz = (minZ + maxZ) / 2;
+    // 包围球半径（以小球当前位置为球面上一点，保证轨迹端点+小球都入画）
+    const hx = (maxX - minX) / 2, hy = (maxY - minY) / 2, hz = (maxZ - minZ) / 2;
+    _b.r = Math.sqrt(hx * hx + hy * hy + hz * hz);
+    _b.exR = px !== undefined ? Math.sqrt(ex2) : _b.r;
+    boundsCache = { cx: _b.cx, cy: _b.cy, cz: _b.cz, r: _b.r, exR: _b.exR };
+    return boundsCache;
+  }
+
+  return { trail, pushTrail, syncTrailRibbon, clearTrail, getBounds };
 }

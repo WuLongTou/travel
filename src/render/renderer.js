@@ -182,6 +182,8 @@ export function createCosmosRenderer(canvas, sim) {
     velSmooth: new THREE.Vector3(),
     // 上一帧小球显示位置（检测虫洞/重生的大尺度瞬移，触发镜头刚体平移）
     _lastProbePos: new THREE.Vector3(),
+    // 瞬移后的一次性全景距离抬升信号（camera-follow 消费后清零）
+    panoramaDist: 0,
     // 实际生效的镜头平移量 [x, y]（已含钳制与高速收回）
     camPanApplied: [0, 0],
   };

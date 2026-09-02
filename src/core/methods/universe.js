@@ -157,18 +157,18 @@ export const universeMethods = {
       if (d > bestD) { bestD = d; s = c; }
     }
 
-    // ---- 类型：全档位加权（2026-09-02：不再只补大系统）----
-    // 旧实现只补 medium/large/giant/nebula——航线上几乎没有小天体，而
-    // 恒星系（detailR 14）、行星（detailR 5）这些真正能被看清、能发生
-    // 引力交互的"近景"，全靠初始 24 个 small + 18 个 medium 匀给整条
-    // 航线，越飞越空。现在按权重补全部档位：small 占多数（体量小、细节
-    // 预算便宜、掠过频繁），large/giant 稀少（它们更适合留在远处当远景
-    // 地标；且细节成员动辄数百，投太近会瞬间撑满 maxDetailBodies 预算）。
-    // "下一站"保险投放以 medium 为主（恒星系/星团可遭遇半径 19.6~42），
-    // 混入 25% 的 small（行星系用更近的路径点 t≈5~7s，短程内预测残差
-    // 小于其 7 的可遭遇半径）；大结构留给常规投放当远景。
+    // ---- 类型：三景深加权（2026-09-03 重排，配合镜头观赏性整改）----
+    // 近景遭遇（走廊档，会被航线经过）：small 38% + medium 30%——
+    // 恒星系/行星这些能被看清、能发生引力交互的近景是主内容；
+    // 中景地标（可读结构 250~720）：nebula 8% + large 4%——星云的
+    // 彩色云体、星系的旋臂轮廓在小球几百单位外依然可读，是画面
+    // 中景的层次（此前中景真空：星云仅 2%、星系 900+ 太远）；
+    // 远景地标（光点/光斑）：large 14% + giant 4%。
+    // "下一站"保险投放以 medium 为主（可遭遇半径 19.6~42），混入 25%
+    // 的 small（行星系用更近的路径点，短程预测残差小于其可遭遇半径）。
     let klass;
     let def;
+    let midScene = false; // 中景档标记（距离分级用）
     if (needWaypoint) {
       if (Math.random() < 0.25) {
         klass = 'small';
@@ -179,14 +179,24 @@ export const universeMethods = {
       }
     } else {
       const roll = Math.random();
-      if (roll < 0.40) {
+      if (roll < 0.38) {
         klass = 'small';
         def = CLASS_DEFS.find((d) => d.key === 'small');
-      } else if (roll < 0.72) {
+      } else if (roll < 0.68) {
         klass = 'medium';
         def = CLASS_DEFS.find((d) => d.key === 'medium');
-      } else if (roll < 0.92) {
-        // 较常见的远景星系
+      } else if (roll < 0.76) {
+        // 中景星云：可读的彩色云体
+        klass = 'nebula';
+        def = { key: 'nebula', massMin: 0.25, massMax: 0.85, durBase: 3.5, durSpan: 1.5 };
+        midScene = true;
+      } else if (roll < 0.80) {
+        // 中景星系：旋臂轮廓可读
+        klass = 'large';
+        def = CLASS_DEFS.find((d) => d.key === 'large');
+        midScene = true;
+      } else if (roll < 0.94) {
+        // 远景星系：光斑地标
         klass = 'large';
         def = CLASS_DEFS.find((d) => d.key === 'large');
       } else if (roll < 0.98) {
@@ -194,7 +204,7 @@ export const universeMethods = {
         klass = 'giant';
         def = CLASS_DEFS.find((d) => d.key === 'giant');
       } else {
-        // 偶尔给点变化：远处的星云 / 行星种子
+        // 远处星云点缀
         klass = 'nebula';
         def = { key: 'nebula', massMin: 0.25, massMax: 0.85, durBase: 3.5, durSpan: 1.5 };
       }
@@ -212,8 +222,8 @@ export const universeMethods = {
     // 广域档（35%）保持 0.9 大散乱角：远景地标与纵深，不指望遭遇。
     const distRange = klass === 'small' ? [100, 240]
       : klass === 'medium' ? [160, 320]
-      : klass === 'nebula' ? [200, 380]
-      : klass === 'large' ? [900, 1600]
+      : klass === 'nebula' ? (midScene ? [260, 440] : [200, 380])
+      : klass === 'large' ? (midScene ? [480, 720] : [900, 1600])
       : [1000, 1800];
     const laneScatter = klass === 'small' ? 0.045
       : klass === 'medium' ? 0.06

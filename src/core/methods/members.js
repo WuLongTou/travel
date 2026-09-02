@@ -41,11 +41,12 @@ export const membersMethods = {
     const scaleCount = (n) => Math.max(8, Math.floor(n * density));
 
     if (s.level === 'void' || s.level === 'dust') {
-      // 星云：绝大多数是气体尘埃（tier 0），少量亮星埋在内圈（tier 1）
+      // 星云：弥散的气体尘埃云铺开到系统大半半径（0.72r——星云在真实
+      // 宇宙就是跨数十光年的弥散结构，不是一团密集粒子），少量亮星埋在内圈
       const count = 90 + Math.floor(rng() * 60);
       for (let i = 0; i < count; i++) {
         const isStar = rng() < 0.12;
-        const orbitR = 0.4 + rng() * r * 0.55;
+        const orbitR = 0.4 + rng() * r * 0.72;
         const height = (rng() - 0.5) * orbitR * 0.85;
         addOrbitBody(
           isStar ? 'star' : 'gas',
@@ -58,10 +59,13 @@ export const membersMethods = {
         );
       }
     } else if (s.level === 'cluster') {
-      // 星团：tier 0 三十余颗外圈恒星 + tier 1 四五十颗内圈恒星，球状分布
+      // 星团：球状分布——外圈拉到 0.52r 弥散、内圈适度收拢（0.40r）。
+      // 球状星团核心密度确实高于外围（真实如此：palomar 15 半数恒星在
+      // 核心半径内），但整体仍是"数十颗星散布在几十单位里"，
+      // 每颗恒星之间隔着明显的星间距，不是一团密集粒子。
       const count = 30 + Math.floor(rng() * 15);
       for (let i = 0; i < count; i++) {
-        const orbitR = 0.8 + rng() * r * 0.42;
+        const orbitR = 0.8 + rng() * r * 0.52;
         const height = (rng() - 0.5) * orbitR * 0.65;
         addOrbitBody(
           'star', 0.015 + rng() * 0.08, 0.035 + rng() * 0.06,
@@ -72,7 +76,7 @@ export const membersMethods = {
       }
       const count2 = 45 + Math.floor(rng() * 25);
       for (let i = 0; i < count2; i++) {
-        const orbitR = 0.6 + rng() * r * 0.45;
+        const orbitR = 0.6 + rng() * r * 0.40;
         const height = (rng() - 0.5) * orbitR * 0.6;
         addOrbitBody(
           'star', 0.012 + rng() * 0.06, 0.030 + rng() * 0.05,
@@ -101,11 +105,13 @@ export const membersMethods = {
         );
       }
       // 行星：无伴星时贴近分布；有伴星时整体推到伴星轨道外（> 2.2 倍分离距），
-      // 轨道带少量离心率（0~0.16）——真实行星轨道没有正圆
+      // 轨道带少量离心率（0~0.16）——真实行星轨道没有正圆，且行星间隔
+      // 拉开（0.55r/0.68r——真实行星系统的轨道间距是 AU 级，水星到海王星
+      // 跨 30 AU，内紧外松不是挤成一团）
       const innerBase = compMaxR > 0 ? compMaxR * 2.2 + 0.3 : 1.4;
       const count = 2 + Math.floor(rng() * 2);
       for (let i = 0; i < count; i++) {
-        const orbitR = innerBase + rng() * r * 0.4;
+        const orbitR = innerBase + rng() * r * 0.55;
         addOrbitBody(
           'planet', 0.004 + rng() * 0.012, 0.030 + rng() * 0.03,
           orbitR, (rng() - 0.5) * orbitR * 0.2,
@@ -116,7 +122,7 @@ export const membersMethods = {
       const count2 = 2 + Math.floor(rng() * 3);
       for (let i = 0; i < count2; i++) {
         const isGas = rng() < 0.3;
-        const orbitR = innerBase + 0.4 + rng() * r * 0.5;
+        const orbitR = innerBase + 0.4 + rng() * r * 0.68;
         addOrbitBody(
           isGas ? 'gas' : 'planet',
           isGas ? 0.0008 + rng() * 0.003 : 0.003 + rng() * 0.01,
@@ -191,7 +197,12 @@ export const membersMethods = {
         type: 'blackhole', mass: 0.45 + s.mass * 0.25, radius: 0.32 + s.mass * 0.06,
         colorSeed: 0, orbit: null, tier: 0,
       });
-      const diskR = r * 0.42;   // 盘半径（0.55→0.42：恒星更紧凑，避免"空旷大圆盘"）
+      // 盘半径（2026-09-03 自 0.42 恢复拉开到 0.58）：成员铺满系统大半
+      // 半径——星系是"数百颗恒星隔着星际距离组成的庞大结构"，不是
+      // 挤在中心的一团粒子。同样的成员数铺在 1.9 倍面积上，恒星间距
+      // ×1.38，穿越时大部分空间是空的（真实星系正是如此：恒星占星系
+      // 体积的比例可忽略）。
+      const diskR = r * 0.58;
       const galOmega = (orbitR) => (0.14 + rng() * 0.08) * baseSpeed / Math.pow(0.6 + orbitR, 0.85);
       if (isElliptical) {
         // 椭圆星系：无旋臂无盘，三维球状、向心集中，老年恒星为主
@@ -381,12 +392,13 @@ export const membersMethods = {
       }
       // 给每个星系节点一批外层恒星云（远景可读的成员点云，比子星系盘
       // 稍大——这是"星系际空间里稀疏的星场"，不是贴着星系核的点）。
-      // 轨道半径按 node.radius 的 1.2~3.5 倍（≈0.4~1.7 单位），与子星系
-      // 盘（0.9~2.4 单位）重叠但更外，构成银晕/外层星场。
+      // 轨道半径按 node.radius 的 2.2~5.0 倍（2026-09-03 自 1.2~3.5 拉开：
+      // 银晕恒星本就该散在星系盘外围的广袤空间里，贴核分布会读成
+      // "一坨密集团"），与子星系盘（0.9~2.4 单位）外缘衔接构成银晕。
       for (let n = 0; n < nodes.length; n++) {
         const node = nodes[n];
         for (let i = 0; i < 24; i++) {
-          const orbitR = node.radius * (1.2 + rng() * 2.3);
+          const orbitR = node.radius * (2.2 + rng() * 2.8);
           const angle = node.angle + (rng() - 0.5) * 0.65;
           addOrbitBody(
             'star', 0.015 + rng() * 0.05, 0.035 + rng() * 0.04,
@@ -401,7 +413,7 @@ export const membersMethods = {
         const node = nodes[n];
         const innerCount = 10 + Math.floor(rng() * 6);
         for (let i = 0; i < innerCount; i++) {
-          const orbitR = node.radius * (1.0 + rng() * 2.2);
+          const orbitR = node.radius * (1.8 + rng() * 3.0);
           const angle = node.angle + (rng() - 0.5) * 0.8;
           addOrbitBody(
             rng() < 0.5 ? 'gas' : 'planet',
@@ -416,13 +428,17 @@ export const membersMethods = {
     } else if (s.level === 'blackhole') {
       // 黑洞系统：中心黑洞（事件视界）+ 三档核球恒星/行星尘埃。
       // 中心黑洞是致密引力源，小球进入事件视界即被潮汐撕碎（tidal）。
+      // 核球恒星轨道拉开到 r 的 0.5~0.6（2026-09-03）：真实 SMBH 的
+      // S 星群轨道周期以十年计、相互间隔远大于恒星半径——几十颗恒星
+      // 散布在黑洞周围十几单位内，每颗之间隔着清晰间距，而不是
+      // 挤成一团"粒子云"。
       layout.push({
         type: 'blackhole', mass: 0.45 + s.mass * 0.25, radius: 0.32 + s.mass * 0.06,
         colorSeed: 0, orbit: null, tier: 0,
       });
       const midCount = 16 + Math.floor(rng() * 8);
       for (let i = 0; i < midCount; i++) {
-        const orbitR = 2.0 + Math.pow(rng(), 0.7) * r * 0.3;
+        const orbitR = 2.0 + Math.pow(rng(), 0.7) * r * 0.52;
         const angle = rng() * TAU;
         const height = (rng() - 0.5) * orbitR * 0.18;
         addOrbitBody(
@@ -434,7 +450,7 @@ export const membersMethods = {
       }
       const nearCount = 30 + Math.floor(rng() * 14);
       for (let i = 0; i < nearCount; i++) {
-        const orbitR = 1.4 + Math.pow(rng(), 0.7) * r * 0.4;
+        const orbitR = 1.4 + Math.pow(rng(), 0.7) * r * 0.60;
         const angle = rng() * TAU;
         const height = (rng() - 0.5) * orbitR * 0.18;
         addOrbitBody(
@@ -446,7 +462,7 @@ export const membersMethods = {
       }
       const innerCount = 18 + Math.floor(rng() * 10);
       for (let i = 0; i < innerCount; i++) {
-        const orbitR = 1.0 + Math.pow(rng(), 0.7) * r * 0.32;
+        const orbitR = 1.0 + Math.pow(rng(), 0.7) * r * 0.46;
         const angle = rng() * TAU;
         const height = (rng() - 0.5) * orbitR * 0.18;
         addOrbitBody(

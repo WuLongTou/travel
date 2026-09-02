@@ -79,10 +79,14 @@ export function createStarfield() {
   // 恒星颜色按真实黑体色温分布（O/B/A 偏蓝 → G 黄白 → K/M 橙红），
   // 而不是"几乎全白"。分三层：暗星海 + 中亮 + 少量亮星（形成层次）。
   const group = new THREE.Group();
+  // sizeAttenuation: false —— 星点以**固定像素尺寸**渲染。背景星空在
+  // "无穷远"（天球），角尺寸本就该恒定；此前用 sizeAttenuation:true +
+  // 半径 900~4500，多数星点被衰减成亚像素（闪烁的微光），中央视野
+  // 几乎没有可读星点（2026-09-03 修复，配合镜头框距的观赏性整改）。
   const layers = [
-    { n: 7000, size: 1.0, lo: 0.025, hi: 0.28, pow: 2.3, op: 0.9 },
-    { n: 900, size: 1.9, lo: 0.26, hi: 0.58, pow: 2.6, op: 0.95 },
-    { n: 130, size: 3.4, lo: 0.56, hi: 0.95, pow: 2.9, op: 1.0 },
+    { n: 7000, size: 1.3, lo: 0.035, hi: 0.30, pow: 2.3, op: 0.95 },
+    { n: 900, size: 2.1, lo: 0.28, hi: 0.62, pow: 2.6, op: 1.0 },
+    { n: 130, size: 3.6, lo: 0.60, hi: 0.98, pow: 2.9, op: 1.0 },
   ];
   // 黑体色温 → 近似的 RGB（由蓝到白到橙红）
   function blackbody(t, out) {
@@ -116,7 +120,7 @@ export function createStarfield() {
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     const mat = new THREE.PointsMaterial({
-      size: L.size, sizeAttenuation: true, vertexColors: true,
+      size: L.size, sizeAttenuation: false, vertexColors: true,
       transparent: true, opacity: L.op, depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
@@ -129,7 +133,9 @@ export function createStarfield() {
 
 // 远星云：极少量、极暗的彩色气体云，跟随相机（无限宇宙感）。
 // 宇宙空间整体应该是黑暗的——星云只是偶尔点缀的色斑，不能成为"背景光"。
-// 数量 18→9、透明度砍半以上：之前的成片蓝紫色雾把整个天幕染亮染蓝。
+// 数量 18→9（保持）；透明度 2026-09-03 自 0.035~0.08 回调到 0.055~0.105：
+// 配合固定像素星点，天幕要有可读的层次（星等层次 + 偶尔的色斑纵深），
+// 但依然是"黑暗宇宙里偶尔的点缀"，不是背景光。
 export function createNebulae(glowTex) {
   const group = new THREE.Group();
   const palette = [
@@ -142,7 +148,7 @@ export function createNebulae(glowTex) {
       map: glowTex,
       color: palette[i % palette.length],
       transparent: true, depthWrite: false, depthTest: false,
-      blending: THREE.AdditiveBlending, opacity: 0.035 + Math.random() * 0.045,
+      blending: THREE.AdditiveBlending, opacity: 0.055 + Math.random() * 0.05,
     }));
     // 散布在天球上，距离很远（远于恒星层，营造纵深）
     const dir = randomUnit(1);
