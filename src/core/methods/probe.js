@@ -1,7 +1,7 @@
 // CosmicSimulation 的 probe 方法组（目录梳理：mixin 装配，方法体未改动）。
 // 通过 Object.assign 挂到 prototype，方法内仍以 this 访问实例状态。
 import {
-  DYN_G, EPS2, N_PARTICLES, N_CLOUD_PARTICLES, N_EJECTA_PARTICLES,
+  EPS2, N_PARTICLES, N_CLOUD_PARTICLES, N_EJECTA_PARTICLES,
   GRAVITY_START, GRAVITY_FULL, BASE_SPEED,
   SEED_R_MIN, SEED_R_MAX, EJECTA_SPEED_MIN, EJECTA_SPEED_MAX,
   PROBE_INITIAL_SPEED, PROBE_BIGBANG_SPEED, BIG_BANG_WALL, PROBE_GRAVITY_MULT,
@@ -115,7 +115,9 @@ export const probeMethods = {
     pr.generation += 1;
     pr.respawns += 1;
     pr.respawnFlash = 1;
-    pr.respawnGrace = 6; // 重生后 6 秒内不再捕获，保证能飞出系统继续航行
+    pr.respawnGrace = 10; // 重生后 10 秒内不再捕获（2026-09-02 6→10）：
+    // frontier 近投 small 行星后航线更密，6 秒宽限不够飞出密集区，
+    // 实测 600 物理秒重生 20 次（11 次大气烧蚀），频繁死亡打断航行节奏
     // 记录死亡方式与位置（渲染层在generation变化时播放对应特效）
     pr.deathType = deathType;
     pr.deathPos = [pr.pos[0], pr.pos[1], pr.pos[2]];
@@ -195,7 +197,7 @@ export const probeMethods = {
     const vl = Math.max(1e-4, Math.hypot(vx, vy, vz));
     vx /= vl; vy /= vl; vz /= vl;
     pr.vel = [vx * PROBE_RESPAWN_SPEED, vy * PROBE_RESPAWN_SPEED, vz * PROBE_RESPAWN_SPEED];
-    pr.respawnGrace = 6;
+    pr.respawnGrace = 10; // 与 _respawnFrom 一致（2026-09-02 6→10）
     pr.respawnFlash = 1;
     pr.label = `经虫洞跃迁逃出【${label}】`;
     pr.lastCaptureSeed = -1; // 成功逃逸，重置捕获记忆
@@ -290,7 +292,7 @@ export const probeMethods = {
       pr.gravAccel[0] = ax; pr.gravAccel[1] = ay; pr.gravAccel[2] = az;
       pr.vel[0] += ax * h; pr.vel[1] += ay * h; pr.vel[2] += az * h;
       // 注意：这里**不做**任何"限速 / 巡航速度"处理。
-      // 速度大小由引力与介质阻尼自然决定（终端速度约 33 单位/秒）。
+      // 速度大小由引力与介质阻尼自然决定（上限由下方 PROBE_MAX_SPEED 截断）。
       // 想让屏幕上走得慢，请在显示层调 state.timeScale（见 render() 中的
       // state.physAcc 累积），不要动这里的物理量 —— 改动会破坏轨道结果。
 

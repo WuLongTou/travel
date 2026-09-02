@@ -28,8 +28,6 @@ const el = {
   eventToast: document.getElementById('event-toast'),
   hudProbe: document.getElementById('hud-probe'),
   hudGrav: document.getElementById('hud-grav'),
-  hudOrbit: document.getElementById('hud-orbit'),
-  hudCam: document.getElementById('hud-cam'),
   hudNear: document.getElementById('hud-near'),
   hudCosmos: document.getElementById('hud-cosmos'),
   eventPanel: document.getElementById('event-panel'),
@@ -124,36 +122,10 @@ function syncIntensity() {
 el.intensity.addEventListener('input', syncIntensity);
 syncIntensity();
 
-// ---------- 虫洞参数（直通 sim.config，即时生效） ----------
-el.whDist = document.getElementById('wormhole-dist');
-el.whDistVal = document.getElementById('wormhole-dist-val');
-el.whDur = document.getElementById('wormhole-duration');
-el.whDurVal = document.getElementById('wormhole-duration-val');
-el.whWin = document.getElementById('wormhole-window');
-el.whWinVal = document.getElementById('wormhole-window-val');
-el.whSafe = document.getElementById('wormhole-safe');
-el.whSafeVal = document.getElementById('wormhole-safe-val');
-
-function syncWormholeConfig() {
-  sim.config.wormholeDist = parseFloat(el.whDist.value);
-  sim.config.wormholeDuration = parseFloat(el.whDur.value);
-  sim.config.wormholeWindow = parseFloat(el.whWin.value);
-  sim.config.wormholeSafeMargin = parseFloat(el.whSafe.value);
-  el.whDistVal.textContent = sim.config.wormholeDist.toFixed(0);
-  el.whDurVal.textContent = sim.config.wormholeDuration.toFixed(1) + 's';
-  el.whWinVal.textContent = sim.config.wormholeWindow.toFixed(0) + 's';
-  el.whSafeVal.textContent = sim.config.wormholeSafeMargin.toFixed(0);
-}
-el.whDist.addEventListener('input', syncWormholeConfig);
-el.whDur.addEventListener('input', syncWormholeConfig);
-el.whWin.addEventListener('input', syncWormholeConfig);
-el.whSafe.addEventListener('input', syncWormholeConfig);
-syncWormholeConfig();
-
 // ---------- 事件日志面板开关与导出 ----------
 el.eventLogBtn.addEventListener('click', () => {
   const open = el.eventPanel.classList.toggle('open');
-  el.eventLogBtn.textContent = open ? '📜 关闭日志' : '📜 事件日志';
+  el.eventLogBtn.textContent = open ? '📜 关闭日志' : '📜 日志';
   if (open) renderEventList();
 });
 el.exportLogBtn.addEventListener('click', exportLog);
@@ -230,31 +202,17 @@ el.gravG = document.getElementById('grav-g');
 el.gravGVal = document.getElementById('grav-g-val');
 el.massScale = document.getElementById('mass-scale');
 el.massScaleVal = document.getElementById('mass-scale-val');
-el.radiusScale = document.getElementById('radius-scale');
-el.radiusScaleVal = document.getElementById('radius-scale-val');
-el.seedGrav = document.getElementById('seed-grav');
-el.seedGravVal = document.getElementById('seed-grav-val');
 el.trailLen = document.getElementById('trail-len');
 el.trailLenVal = document.getElementById('trail-len-val');
 el.camZoom = document.getElementById('cam-zoom');
 el.camZoomVal = document.getElementById('cam-zoom-val');
-el.camPanX = document.getElementById('cam-panx');
-el.camPanXVal = document.getElementById('cam-panx-val');
-el.camPanY = document.getElementById('cam-pany');
-el.camPanYVal = document.getElementById('cam-pany-val');
-el.probeSpeed = document.getElementById('probe-speed');
-el.probeSpeedVal = document.getElementById('probe-speed-val');
-el.probeAz = document.getElementById('probe-az');
-el.probeAzVal = document.getElementById('probe-az-val');
-el.probeEl = document.getElementById('probe-el');
-el.probeElVal = document.getElementById('probe-el-val');
 el.resetProbeBtn = document.getElementById('btn-reset-probe');
 el.resetParamsBtn = document.getElementById('btn-reset-params');
 
 // 取值范围已在 HTML 的 min/max 上钳制，这里只做一次兜底，防止极端值把积分打爆
 const GRAV_DEFAULTS = {
-  gravityG: 16, bodyMassScale: 1, bodyRadiusScale: 1,
-  trailLength: 750, camZoom: 55, camPanX: 0, camPanY: 0,
+  gravityG: 16, bodyMassScale: 1,
+  trailLength: 750, camZoom: 55,
 };
 const clampNum = (v, lo, hi, dflt) => {
   const n = Number(v);
@@ -265,56 +223,29 @@ function syncGravConfig() {
   const c = sim.config;
   c.gravityG = clampNum(el.gravG.value, 4, 40, GRAV_DEFAULTS.gravityG);
   c.bodyMassScale = clampNum(el.massScale.value, 0.25, 3, GRAV_DEFAULTS.bodyMassScale);
-  c.bodyRadiusScale = clampNum(el.radiusScale.value, 0.5, 2, GRAV_DEFAULTS.bodyRadiusScale);
   c.trailLength = Math.round(clampNum(el.trailLen.value, 100, 3000, GRAV_DEFAULTS.trailLength));
-  c.seedGravity = clampNum(el.seedGrav.value, 0, 4000, 400);
   c.camZoom = clampNum(el.camZoom.value, 10, 80, GRAV_DEFAULTS.camZoom);
-  c.camPanX = clampNum(el.camPanX.value, -30, 30, GRAV_DEFAULTS.camPanX);
-  c.camPanY = clampNum(el.camPanY.value, -30, 30, GRAV_DEFAULTS.camPanY);
   el.gravGVal.textContent = c.gravityG.toFixed(1);
   el.massScaleVal.textContent = c.bodyMassScale.toFixed(2) + '×';
-  el.radiusScaleVal.textContent = c.bodyRadiusScale.toFixed(2) + '×';
-  el.seedGravVal.textContent = c.seedGravity.toFixed(0);
   const secs = (c.trailLength * 0.045).toFixed(1);
   el.trailLenVal.textContent = `${c.trailLength} 点 / ${secs}s`;
   el.camZoomVal.textContent = c.camZoom.toFixed(0);
-  el.camPanXVal.textContent = c.camPanX.toFixed(0);
-  el.camPanYVal.textContent = c.camPanY.toFixed(0);
 }
-[el.gravG, el.massScale, el.radiusScale, el.trailLen, el.seedGrav,
-  el.camZoom, el.camPanX, el.camPanY].forEach((n) => {
+[el.gravG, el.massScale, el.trailLen, el.camZoom].forEach((n) => {
   n.addEventListener('input', syncGravConfig);
 });
 syncGravConfig();
 
-// 初速矢量（只在点「重置小球」时读取）
-function syncProbeLaunch() {
-  el.probeSpeedVal.textContent = parseFloat(el.probeSpeed.value).toFixed(1);
-  el.probeAzVal.textContent = parseFloat(el.probeAz.value).toFixed(0) + '°';
-  el.probeElVal.textContent = parseFloat(el.probeEl.value).toFixed(0) + '°';
-}
-[el.probeSpeed, el.probeAz, el.probeEl].forEach((n) => {
-  n.addEventListener('input', syncProbeLaunch);
-});
-syncProbeLaunch();
-
 el.resetProbeBtn.addEventListener('click', () => {
-  sim.resetProbe({
-    speed: clampNum(el.probeSpeed.value, 0, 60, 30),
-    az: (clampNum(el.probeAz.value, -180, 180, 0) * Math.PI) / 180,
-    el: (clampNum(el.probeEl.value, -80, 80, 0) * Math.PI) / 180,
-  });
+  // 用默认巡航速度与当前航向重新发射（初速矢量滑杆已精简掉）
+  sim.resetProbe({ speed: 20 });
 });
 
 el.resetParamsBtn.addEventListener('click', () => {
   el.gravG.value = String(GRAV_DEFAULTS.gravityG);
   el.massScale.value = String(GRAV_DEFAULTS.bodyMassScale);
-  el.radiusScale.value = String(GRAV_DEFAULTS.bodyRadiusScale);
   el.trailLen.value = String(GRAV_DEFAULTS.trailLength);
-  el.seedGrav.value = '400';
   el.camZoom.value = String(GRAV_DEFAULTS.camZoom);
-  el.camPanX.value = String(GRAV_DEFAULTS.camPanX);
-  el.camPanY.value = String(GRAV_DEFAULTS.camPanY);
   syncGravConfig();
 });
 
@@ -355,7 +286,7 @@ function watchPerformance(dt) {
 el.followBtn.addEventListener('click', () => {
   const next = !renderer.state.follow;
   renderer.setFollowEnabled(next);
-  el.followBtn.textContent = next ? '🎥 轨迹跟拍：开' : '🎥 轨迹跟拍：关';
+  el.followBtn.textContent = next ? '🎥 跟拍：开' : '🎥 跟拍：关';
 });
 
 // ---------- 推进器（玩家键盘操控） ----------
@@ -483,30 +414,22 @@ function showEvent(text) {
   function updateHud() {
     const pr = sim.probe;
     const speed = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
-    el.hudProbe.textContent = `第 ${pr.generation} 代 · 速度 ${speed.toFixed(1)}`;
-    // 引力状态：加速度大小、速率/逃逸速度之比 κ、以及由此判定的状态
+    el.hudProbe.textContent = `第 ${pr.generation} 代 · 速率 ${speed.toFixed(1)}`;
+    // 运动状态：自由航行 / 坠落接近 / 环绕轨道 / 临界 / 逃逸甩出
     const gi = pr.gravInfo;
     if (gi) {
-      el.hudGrav.textContent =
-        `a=${gi.accel.toFixed(2)} · κ=${gi.kappa.toFixed(2)} · ${gi.state}`;
-      el.hudOrbit.textContent = Number.isFinite(gi.nearDist)
-        ? `距 ${gi.nearDist.toFixed(1)} · v_esc ${gi.vEsc.toFixed(1)}`
-        : '—';
+      const kappaTxt = gi.accel > 0.02 ? ` · κ=${gi.kappa.toFixed(2)}` : '';
+      el.hudGrav.textContent = gi.state + kappaTxt;
     }
-    // 镜头只有一种自动模式（轨迹跟拍），不再有模式细分
-    el.hudCam.textContent = renderer.state.follow ? '轨迹跟拍' : '自由观察';
   const ns = pr.nearestSystem >= 0 ? sim.seeds[pr.nearestSystem] : null;
   if (ns) {
-    const stage = !ns.awakened ? '休眠'
-      : ns.growth < 1 ? `形成中 ${Math.floor(ns.growth * 100)}%`
-      : '已成形';
-    el.hudNear.textContent = `${LEVEL_LABELS[ns.level] || ns.level} · ${pr.nearestDist.toFixed(0)} · ${stage}`;
+    el.hudNear.textContent = `${LEVEL_LABELS[ns.level] || ns.level} · ${pr.nearestDist.toFixed(0)}`;
   } else {
     el.hudNear.textContent = '—';
   }
   const formed = sim.seeds.reduce((n, s) => n + (s.detail ? 1 : 0), 0);
   const tier = sim.config.qualityTier;
-  el.hudCosmos.textContent = `已成形系统 ${formed} · 细节体 ${sim.activeDetails.reduce((n, s) => n + s.detail.bodies.length, 0)}${tier > 0 ? ` · 降级${tier}` : ''}`;
+  el.hudCosmos.textContent = `成形 ${formed} · 细节体 ${sim.activeDetails.reduce((n, s) => n + s.detail.bodies.length, 0)}${tier > 0 ? ` · 降级${tier}` : ''}`;
 }
 
 // ---------- 事件日志面板（可回放时间线 + 导出） ----------

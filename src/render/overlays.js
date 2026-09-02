@@ -26,19 +26,18 @@ export function createFlashOverlay() {
         float r = length(p);
         vec2 dir = r > 0.0001 ? p / r : vec2(1.0, 0.0);
 
-        // 奇点白闪：前 ~0.3 秒整屏过曝（强度从 1.35 → 2.2，爆炸威力感）
-        float flash = exp(-uTime * 11.0) * 2.2;
-        // 高速膨胀的冲击波环：更快（2.6→3.2/s 扫过全屏）、更粗（5.0 展宽）、
-        // 衰减放缓（2.2→1.5，冲击波扫过整个视野时保持可见——"扩散到全
-        // 宇宙"的冲击感）
-        float shockR = uTime * 3.2;
-        float ring = exp(-pow((r - shockR) * 5.0, 2.0)) * exp(-uTime * 1.5);
-        // 放射状能量射线：更密集更快更强（超光速扩张的"能量喷射"感）
+        // 奇点白闪：前 ~0.2 秒整屏过曝（大爆炸就是一瞬间）
+        float flash = exp(-uTime * 13.0) * 2.4;
+        // 暴胀冲击波环：5.2/s 扫过全屏（0.3s 内越过视野）、4/s 快速衰减
+        // ——扫过即熄灭，不残留光环
+        float shockR = uTime * 5.2;
+        float ring = exp(-pow((r - shockR) * 5.5, 2.0)) * exp(-uTime * 4.0);
+        // 放射状能量射线：密集、快消（超光速扩张的"能量喷射"感）
         float ang = atan(p.y, p.x);
-        float rays = pow(max(0.0, abs(sin(ang * 18.0 + uTime * 4.0))), 24.0);
-        rays *= exp(-uTime * 2.0) * 0.8 * (1.0 - smoothstep(0.15, 1.45, r));
-        // 中心余晖：更亮更短（4.5/s 衰减，主脉冲后快速熄灭）
-        float core = exp(-r * r * 14.0) * exp(-uTime * 4.5) * 1.1;
+        float rays = pow(max(0.0, abs(sin(ang * 18.0 + uTime * 5.0))), 24.0);
+        rays *= exp(-uTime * 4.5) * 0.7 * (1.0 - smoothstep(0.15, 1.45, r));
+        // 中心余晖：主脉冲后快速熄灭
+        float core = exp(-r * r * 16.0) * exp(-uTime * 7.0) * 1.2;
 
         // 色散：冲击波边缘红蓝略微分离，更像高温等离子体
         float ca = ring * 0.20 + core * 0.12;

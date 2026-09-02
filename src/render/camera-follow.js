@@ -56,24 +56,24 @@ export function createCameraFollow(state, controls, camera, sim) {
     if (!state.follow) return;
 
       controls.enabled = false;
-      if (sim.time < 2.3) {
-        // 智能镜头第一阶段：暴胀刚刚结束，宇宙还很空。
-        // 镜头留在奇点附近，完整看到火球、冲击波和高速喷流。
-        const ovAng = sim.time * 0.10;
-        const overviewDist = 13 + sim.time * 9;
+      if (state.time < 1.5) {
+        // 智能镜头第一阶段：见证奇点火球与暴胀冲击波（按显示时间，
+        // 不受物理慢放拖长）。镜头留在奇点附近，1.5s 后即交接给跟拍视角。
+        const ovAng = state.time * 0.12;
+        const overviewDist = 13 + state.time * 14;
         _v2.set(
           Math.cos(ovAng) * overviewDist * 0.72,
           overviewDist * 0.50,
           Math.sin(ovAng) * overviewDist * 0.72,
         );
         _v3.set(0, 0, 0);
-        const shake = Math.exp(-sim.time * 2.0) * 0.22;
+        const shake = Math.exp(-state.time * 2.6) * 0.22;
         if (shake > 0.002) {
-          _v2.x += Math.sin(sim.time * 83) * shake;
-          _v2.y += Math.cos(sim.time * 77) * shake;
+          _v2.x += Math.sin(state.time * 83) * shake;
+          _v2.y += Math.cos(state.time * 77) * shake;
         }
-        camera.position.lerp(_v2, Math.min(1, dtReal * 2.0));
-        controls.target.lerp(_v3, Math.min(1, dtReal * 2.4));
+        camera.position.lerp(_v2, Math.min(1, dtReal * 3.0));
+        controls.target.lerp(_v3, Math.min(1, dtReal * 3.4));
         camera.lookAt(controls.target);
       } else {
         // ---- 轨迹优先的连续上帝视角（唯一自动镜头）----
@@ -258,8 +258,10 @@ export function createCameraFollow(state, controls, camera, sim) {
         camera.lookAt(controls.target);
       }
 
+      // 速度感 FOV：高速时视野轻微放大制造冲刺感。幅度收敛（旧版
+      // +16° 把一切都推远，天体与轨迹显得又小又快，反而看不清交互）
       const pvFov = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
-      const targetFov = 58 + Math.min(16, pvFov * 0.5) + beat * 1.5;
+      const targetFov = 58 + Math.min(7, pvFov * 0.28) + beat * 1.2;
       camera.fov += (targetFov - camera.fov) * Math.min(1, dtReal * 3.0);
       camera.updateProjectionMatrix();
   }

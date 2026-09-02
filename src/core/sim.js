@@ -3,7 +3,7 @@
 // 捕获/重生/虫洞、渐进发现、成员布局与子星系（目录梳理第三步：
 // 从 src/cosmos.js 拆出，渲染域见 src/render/renderer.js）。
 import {
-  DYN_G, EPS2, N_PARTICLES, N_CLOUD_PARTICLES, N_EJECTA_PARTICLES,
+  EPS2, N_PARTICLES, N_CLOUD_PARTICLES, N_EJECTA_PARTICLES,
   GRAVITY_START, GRAVITY_FULL, BASE_SPEED,
   SEED_R_MIN, SEED_R_MAX, EJECTA_SPEED_MIN, EJECTA_SPEED_MAX,
   PROBE_INITIAL_SPEED, PROBE_BIGBANG_SPEED, BIG_BANG_WALL, PROBE_GRAVITY_MULT,
@@ -40,7 +40,6 @@ export class CosmicSimulation {
     //   filamentStrength    纤维凝聚强度：越高越多暗物质晕贴小球航向分布（默认 1）
     //   velocityDispersion  速度弥散：物质初速的随机散布倍率，1=自然爆炸（默认 1）
     //   massBias            质量函数偏置：-1 偏小质量、+1 偏大质量（默认 0）
-    //   systemDynamics      集合系统动力学：恒星间相互引力微扰（默认开）
     this.config = {
       wormholeDist: 800, wormholeDuration: 1.4, wormholeWindow: 8,
       // 虫洞跃迁后的安全余量：目标点距任何天体的最小距离。若不足则
@@ -54,23 +53,20 @@ export class CosmicSimulation {
       bodyMassScale: 1,    // 天体质量全局倍率
       bodyRadiusScale: 1,  // 天体半径全局倍率（影响碰撞判定与视觉大小）
       trailLength: 750,    // 轨迹保留点数
-      // 天体间引力（万有引力，2026-08-30 新增）：种子（天体系统）之间
-      // 的 N-body 软化引力。0 = 关闭；默认 400：近距离（<100 单位）大
-      // 系统开始有可感知的相互偏转，远场仍以 Hubble 流为主不坍缩；
-      // 调大（如 2000+）可观察到两个星系明显的相对接近/绕行。
-      seedGravity: 400,
-      // 启动快进（显示层）：开局 bootFastForwardWall 真实秒内用 bootFastForwardScale
-      // 推进，避免宇宙演化被观赏倍率一起拖慢。置 0 可关闭。
-      // 倍率从 1.5 降到 0.5：开局小球不再狂飙，但仍以约 10 倍观赏倍率
-      // 推进结构形成（形成需 3~7.5 物理秒，0.5×下 6~15 真实秒即可成形）。
-      bootFastForwardWall: 15,
-      bootFastForwardScale: 0.5,
+      // 天体间引力（万有引力）：种子（天体系统）之间的 N-body 软化引力。
+      // 0 = 关闭；默认 180：真实宇宙里星系间的相对运动在可观测尺度上
+      // 几乎不可感知，只在极近距离（<100 单位）才有轻微偏转——保持
+      // 宇宙整体的平静与稳定，天体不漂移、不聚团。
+      seedGravity: 180,
+      // 启动快进（显示层）：开局以 bootFastForwardScale 为起始倍率、按
+      // 指数曲线平滑回落到观赏倍率（时间常数 = wall×0.3，见 renderer.js），
+      // 把引力拉满（5.6 物理秒）压缩到约 10 真实秒。置 0 可关闭。
+      bootFastForwardWall: 14,
+      bootFastForwardScale: 1.5,
       camZoom: 40,         // 第三人称镜头距离（缩放）
       camPanX: 0,          // 镜头平移偏移（世界单位，受限）
       camPanY: 0,
       filamentStrength: 1, velocityDispersion: 1, massBias: 0,
-      // 集合系统动力学（§9.7）：恒星间相互引力微扰，叠加在分析轨道上
-      systemDynamics: true,
       // 玩家推进器（§10，默认关闭）：开启后 WASD/方向键按摄像机视角
       // 推力。thrustMag 是加速度大小（与引力 G 同量级，玩家足以改变
       // 航向、抵近系统或逃逸引力井，但不会"超人化"甩开物理节奏）。
@@ -194,10 +190,21 @@ export class CosmicSimulation {
         // filamentStrength 整体缩放贴附概率：0=完全均匀各向同性，2=强纤维
         let biasProb = 0.55;
         let scatterScale = 0.12;
-        if (def.key === 'small') { biasProb = 0.65; scatterScale = 0.09; }
-        else if (def.key === 'medium') { biasProb = 0.80; scatterScale = 0.06; }
-        else if (def.key === 'large') { biasProb = 0.88; scatterScale = 0.035; }
-        else { biasProb = 0.92; scatterScale = 0.025; }
+        // 散布半径收紧（2026-09-01）：旧值（0.09/0.06/0.035/0.025）下小球与
+        // 沿线天体的典型垂直偏差 ≈15~20 单位，多数相遇成了远距离掠过，
+        // 看不清引力交互。收紧后典型最近距离进入 5~12 单位——恒星系
+        // （detailR 14）会真正被穿过、行星（detailR 5）能贴身掠过。
+        // 2026-09-02：贴附概率下调（0.72/0.84/0.90/0.92 → 0.58/0.66/0.72/0.75）。
+        // 旧值下 72%~92% 的种子都压在同一条 probeDir 射线附近，每次"重开
+        // 宇宙"遇到的是同一束天体、同一条走廊——宇宙看起来是"一条线"而不是
+        // "一片空间"，重复感很强。现在约 1/4~1/2 的种子改为全天散布：它们
+        // 大多很远，作为远景星系提供纵深与"宇宙很大"的观感；留在射线上的
+        // 那部分仍然保持收紧后的散布半径（0.055~0.022），保证航线上依旧
+        // 有 5~12 单位的贴身遭遇可看。
+        if (def.key === 'small') { biasProb = 0.58; scatterScale = 0.055; }
+        else if (def.key === 'medium') { biasProb = 0.66; scatterScale = 0.040; }
+        else if (def.key === 'large') { biasProb = 0.72; scatterScale = 0.030; }
+        else { biasProb = 0.75; scatterScale = 0.022; }
         biasProb = Math.min(0.98, biasProb * cfg.filamentStrength);
         if (Math.random() < biasProb) {
           const scatter = randomUnit(1);
@@ -411,7 +418,14 @@ export class CosmicSimulation {
     // 种子（天体系统）之间按万有引力相互吸引——近距离大系统产生
     // 可感知的相对接近/偏转，符合真实宇宙的引力相互作用。O(n²) 每步
     // 3249 对，廉价；强度由 config.seedGravity 控制（0 关闭）。
-    this._applySeedGravity(dt);
+    // 2026-09-02 降频到 5Hz：默认 seedGravity=180 下远场（>100 单位）
+    // 加速度 < 0.01/s²，对种子运动几乎无影响；每物理步重算纯属浪费。
+    // 每 0.2s 算一次、按 0.2s 积分，视觉行为不变。
+    this._seedGravTimer = (this._seedGravTimer || 0) + dt;
+    if (this._seedGravTimer >= 0.2) {
+      this._seedGravTimer = 0;
+      this._applySeedGravity(0.2);
+    }
 
     // 更新普通物质
     // 引力常数与天体质量倍率（UI 可调，取值已在 UI 侧钳制）
@@ -534,7 +548,13 @@ export class CosmicSimulation {
     }
 
     // 结构统计（等级本身由 time/class 驱动，members 用于亮度/尺寸微调）
-    if (gs > 0.05 && Math.random() < dt * 1.4) this._assignMembers();
+    // 2026-09-02 降频：members 数组只被 frontier 回收时读取（解绑粒子），
+    // 无需每帧 35% 概率重算 O(N·S)。改为每 2 物理秒一次。
+    this._membersTimer = (this._membersTimer || 0) + dt;
+    if (gs > 0.05 && this._membersTimer >= 2) {
+      this._membersTimer = 0;
+      this._assignMembers();
+    }
     this._recordEvents();
 
     // 靠近大系统时才实时生成内部细节，远离后卸载。

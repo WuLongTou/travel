@@ -6,9 +6,6 @@
 // ---------- 模拟参数 ----------
 // 引力常数已改为运行时可调（sim.config.gravityG，UI 滑杆直通），
 // 默认值 16 与原来的常量一致，保证行为不变。
-// 集合系统动力学（§9.7）微扰强度：恒星间相互引力的等效常数。
-// 偏小刻意为之——微扰只让相对运动"活起来"，不破坏分析轨道的形态。
-export const DYN_G = 1.4;
 export const EPS2 = 0.16;
 export const N_PARTICLES = 820;
 export const N_CLOUD_PARTICLES = 600;   // 远方的原初气体云粒子，分布在暗物质晕周围
@@ -16,6 +13,11 @@ export const N_EJECTA_PARTICLES = N_PARTICLES - N_CLOUD_PARTICLES; // 从奇点�
 export const GRAVITY_START = 1.15;
 export const GRAVITY_FULL = 5.6;
 export const BASE_SPEED = 8.0;
+
+// 小球巡航物理速度体系（2026-09-01 调低）：巡航 17 / 上限 26 / 重生 20。
+// 之前 24/34/30 配合启动快进期的 0.5× 倍率，屏幕速度常在 12+ 单位/秒，
+// 穿越恒星系只要一两秒，根本来不及看清与天体的交互。降速后引力弯曲
+// 更明显（同样的引力有更多时间起作用）、穿越节奏更从容。
 
 // 暴胀：第一瞬间物质被推到很远，之后才在远方形成原子和宇宙网。
 export const SEED_R_MIN = 180;
@@ -25,7 +27,7 @@ export const SEED_R_MAX = 900;
 // 巡航速度——"前快后慢"的暴胀后减速，不是匀速直线。
 export const EJECTA_SPEED_MIN = 160;
 export const EJECTA_SPEED_MAX = 320;
-export const PROBE_INITIAL_SPEED = 24;  // 小球只携带暴胀结束后的惯性速度
+export const PROBE_INITIAL_SPEED = 17;  // 小球只携带暴胀结束后的惯性速度（巡航速度）
 export const PROBE_BIGBANG_SPEED = 110; // 暴胀瞬间的初始速度（超光速视觉），爆炸窗口内减速
 export const BIG_BANG_WALL = 1.2;       // 爆炸窗口：小球超光速豁免 MAX_SPEED + 减速期
 
@@ -40,13 +42,18 @@ export const PROBE_GRAVITY_MULT = 2.0;
 export const SEED_AWAKEN_RADIUS = 220;
 export const FORMATION_SPACING = 1.5;
 
-// 航线前沿动态生成：宇宙很空，所以每次只生成一个远处的「大系统」，
-// 靠它巨大的引力范围（光年级）慢慢把小球拉过去，而不是贴脸生成。
-// 投放间距保持星系直径（130+）的 2.3~4.3 倍——尊重"星系际空间极其空旷"
-// 的常识（真实本星系群间距是银河系直径的 ~25 倍），又不至于让航程无聊。
-export const FRONTIER_INTERVAL = 5.5;
-export const FRONTIER_DIST_MIN = 300;
-export const FRONTIER_DIST_MAX = 560;
+// 航线前沿动态生成：沿航线前方持续把远处的休眠种子回收成新结构，
+// 形成"流式加载"的无限宇宙（旧的落在身后、新的出现在前方）。
+// 2026-09-02 重调——旧参数（每 5.5s 一个、固定投 300~560、只补中/大/巨）
+// 是本作"观感速度不合理"的根因：boot 快进结束后小球屏幕速度约 1.7 单位/秒
+// （timeScale 0.1 × 巡航 17），而下一个结构在 300~560 单位外，两次遭遇
+// 之间要空载 2~5 分钟——不是"宇宙空旷"，是"什么都没发生"。
+// 现在：间隔缩短到 2.5s、基准距离拉近到 150~380，并按天体尺度再缩放
+// （见 universe.js 的 distScale）——小天体近投（频繁掠过）、大结构远投
+// （体积大、细节体多，太近会瞬间撑满细节预算）。
+export const FRONTIER_INTERVAL = 2.5;
+export const FRONTIER_DIST_MIN = 150;
+export const FRONTIER_DIST_MAX = 380;
 // ---- 渐进发现（§5.2）----
 // 集合系统（星团/星系/超星系团/黑洞系统）的成员从远景阶段就以"成员点云"
 // 的形式存在：远处看到的就已经是"一群天体"，而不是一个渲染成星系的单个天体。
@@ -89,5 +96,5 @@ export const PROBE_DRAG_LEGACY = 0.4;
 export const PROBE_IGM_DRAG = 0.004;     // 星系际介质极微弱阻尼，防止无限加速后飞离可视宇宙
 // 重生 / 手动重置时从系统边缘获得的初始速度（物理量，不改）。
 // 屏幕上的快慢由显示层的 state.timeScale 决定，与这里无关。
-export const PROBE_RESPAWN_SPEED = 30.0;
-export const PROBE_MAX_SPEED = 34;       // 速度上限：引力弹弓加速有界，保证形成节奏与跟拍节奏不被甩开
+export const PROBE_RESPAWN_SPEED = 20.0;
+export const PROBE_MAX_SPEED = 26;       // 速度上限：引力弹弓加速有界，保证形成节奏与跟拍节奏不被甩开

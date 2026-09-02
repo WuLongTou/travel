@@ -391,11 +391,9 @@ export function createStructures(scene, sim, glowTex, ringTex, camera) {
             const pol = orbitPolar(b.orbit, ang);
             const c = Math.cos(pol[0]), sn = Math.sin(pol[0]);
             const rEff = pol[1];
-            // 动力学微扰偏移（§9.7）与 sim 侧保持一致；叠加出场半径系数
-            const bx = (b.boff ? b.boff[0] : 0), by = (b.boff ? b.boff[1] : 0), bz = (b.boff ? b.boff[2] : 0);
-            pos[i * 3] = s.pos[0] + s.u[0] * c * rEff + s.v[0] * sn * rEff + s.axis[0] * b.orbit.height + bx;
-            pos[i * 3 + 1] = s.pos[1] + s.u[1] * c * rEff + s.v[1] * sn * rEff + s.axis[1] * b.orbit.height + by;
-            pos[i * 3 + 2] = s.pos[2] + s.u[2] * c * rEff + s.v[2] * sn * rEff + s.axis[2] * b.orbit.height + bz;
+            pos[i * 3] = s.pos[0] + s.u[0] * c * rEff + s.v[0] * sn * rEff + s.axis[0] * b.orbit.height;
+            pos[i * 3 + 1] = s.pos[1] + s.u[1] * c * rEff + s.v[1] * sn * rEff + s.axis[1] * b.orbit.height;
+            pos[i * 3 + 2] = s.pos[2] + s.u[2] * c * rEff + s.v[2] * sn * rEff + s.axis[2] * b.orbit.height;
           } else {
             pos[i * 3] = b.pos[0]; pos[i * 3 + 1] = b.pos[1]; pos[i * 3 + 2] = b.pos[2];
           }
@@ -474,15 +472,14 @@ export function createStructures(scene, sim, glowTex, ringTex, camera) {
         for (const b of bodies) {
           if (!b.children) continue;
           const pb = b;
-          // 母体显示位置：与主循环一致（椭圆轨道 + 动力学偏移 boff）
+          // 母体显示位置：与主循环一致（椭圆轨道插值）
           const paM = pb.prevAngle + (pb.orbit.angle - pb.prevAngle) * alpha;
           const ppol = orbitPolar(pb.orbit, paM);
           const pcd = Math.cos(ppol[0]), psn = Math.sin(ppol[0]);
           const prEff = ppol[1];
-          const pbx = (pb.boff ? pb.boff[0] : 0), pby = (pb.boff ? pb.boff[1] : 0), pbz = (pb.boff ? pb.boff[2] : 0);
-          const sx = s.pos[0] + s.u[0] * pcd * prEff + s.v[0] * psn * prEff + s.axis[0] * pb.orbit.height + pbx;
-          const sy = s.pos[1] + s.u[1] * pcd * prEff + s.v[1] * psn * prEff + s.axis[1] * pb.orbit.height + pby;
-          const sz = s.pos[2] + s.u[2] * pcd * prEff + s.v[2] * psn * prEff + s.axis[2] * pb.orbit.height + pbz;
+          const sx = s.pos[0] + s.u[0] * pcd * prEff + s.v[0] * psn * prEff + s.axis[0] * pb.orbit.height;
+          const sy = s.pos[1] + s.u[1] * pcd * prEff + s.v[1] * psn * prEff + s.axis[1] * pb.orbit.height;
+          const sz = s.pos[2] + s.u[2] * pcd * prEff + s.v[2] * psn * prEff + s.axis[2] * pb.orbit.height;
           // 母体的显形进度：环粒子随母行星一起淡入（星环不能先于行星出现）
           const pReveal = clamp01(pb.revealT ?? 1);
           for (const ch of b.children) {

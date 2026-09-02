@@ -26,24 +26,24 @@ export function createCosmicSky() {
       }
       void main() {
         vec3 dir = normalize(vDir);
-        // 银河带：方向性结构光（不是环境光），保留作为天文特征
+        // 银河带：只提高带内**星点**的密度与亮度（真实银河就是密集星场），
+        // 不加任何弥漫底色——宇宙背景是纯黑的，没有"环境光"
         float band = exp(-pow((dir.y * 0.75 + dir.z * 0.35), 2.0) * 9.0);
-        // 背景基色：**纯黑**（用户要求去掉宇宙环境光——均匀底色/噪点
-        // 全部移除，银河带作为方向性结构光保留，星点保留）。
-        vec3 base = vec3(0.020, 0.032, 0.070) * band;
-        // 离散星点：把方向切成小格，每格随机出现一颗星
+        vec3 base = vec3(0.0);
+        // 离散星点：把方向切成小格，每格随机出现一颗星。
+        // 银河带内格子出星概率更高（阈值放宽），读作一条密星带
         vec3 cell = floor(dir * 220.0);
         float h = hash(cell);
-        float star = smoothstep(0.9975, 1.0, h);
+        float star = smoothstep(0.9975 - band * 0.0028, 1.0, h);
         vec3 starColor = mix(vec3(0.75, 0.82, 1.0), vec3(1.0, 0.95, 0.85), hash(cell + 7.0));
-        base += starColor * star * (0.5 + hash(cell + 11.0) * 0.7);
+        base += starColor * star * (0.35 + hash(cell + 11.0) * 0.55) * (0.7 + band * 0.3);
         // 少量彩色亮星
         float bright = smoothstep(0.9997, 1.0, hash(cell + 3.0));
-        base += vec3(1.0, 0.85, 0.7) * bright * 0.6;
+        base += vec3(1.0, 0.85, 0.7) * bright * 0.5;
         gl_FragColor = vec4(base, 1.0);
       }
     `,
-    uniforms: { uTime: { value: 0 } },
+    // （uTime 已移除：shader 未使用，纯死代码）
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
@@ -80,9 +80,9 @@ export function createStarfield() {
   // 而不是"几乎全白"。分三层：暗星海 + 中亮 + 少量亮星（形成层次）。
   const group = new THREE.Group();
   const layers = [
-    { n: 7000, size: 1.0, lo: 0.03, hi: 0.36, pow: 2.3, op: 0.9 },
-    { n: 900, size: 1.9, lo: 0.36, hi: 0.72, pow: 2.6, op: 0.95 },
-    { n: 130, size: 3.4, lo: 0.72, hi: 1.15, pow: 2.9, op: 1.0 },
+    { n: 7000, size: 1.0, lo: 0.025, hi: 0.28, pow: 2.3, op: 0.9 },
+    { n: 900, size: 1.9, lo: 0.26, hi: 0.58, pow: 2.6, op: 0.95 },
+    { n: 130, size: 3.4, lo: 0.56, hi: 0.95, pow: 2.9, op: 1.0 },
   ];
   // 黑体色温 → 近似的 RGB（由蓝到白到橙红）
   function blackbody(t, out) {
@@ -127,29 +127,29 @@ export function createStarfield() {
   return group;
 }
 
-// 远星云：十几团巨大、极淡的彩色气体云，跟随相机（无限宇宙感）。
-// 用加色混合的柔光精灵，颜色覆盖深蓝/青/品红/暖橙/翠绿等，给"真实宇宙"
-// 补上色深与形态多样性——有的细长、有的浑圆、有的斜置。
+// 远星云：极少量、极暗的彩色气体云，跟随相机（无限宇宙感）。
+// 宇宙空间整体应该是黑暗的——星云只是偶尔点缀的色斑，不能成为"背景光"。
+// 数量 18→9、透明度砍半以上：之前的成片蓝紫色雾把整个天幕染亮染蓝。
 export function createNebulae(glowTex) {
   const group = new THREE.Group();
   const palette = [
     0x2a3f7a, 0x4a2a6a, 0x1e5a6a, 0x6a3a2a, 0x35406a, 0x5a2a4a,
-    0x2a5a4a, 0x6a2a5a, 0x3a4a7a, 0x7a5a2a, 0x224a6a, 0x5a4a2a,
+    0x2a5a4a, 0x6a2a5a, 0x3a4a7a,
   ];
-  const N = 18;
+  const N = 9;
   for (let i = 0; i < N; i++) {
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
       map: glowTex,
       color: palette[i % palette.length],
       transparent: true, depthWrite: false, depthTest: false,
-      blending: THREE.AdditiveBlending, opacity: 0.11 + Math.random() * 0.13,
+      blending: THREE.AdditiveBlending, opacity: 0.035 + Math.random() * 0.045,
     }));
     // 散布在天球上，距离很远（远于恒星层，营造纵深）
     const dir = randomUnit(1);
     const r = 4000 + Math.random() * 2400;
     sprite.position.set(dir[0] * r, dir[1] * r, dir[2] * r);
     // 巨大且形态多样：长宽比随机（细长→浑圆），尺寸数百~上千世界单位
-    const w = 240 + Math.random() * 720;
+    const w = 240 + Math.random() * 640;
     const h = w * (0.35 + Math.random() * 0.85);
     sprite.scale.set(w, h, 1);
     sprite.material.rotation = Math.random() * Math.PI;

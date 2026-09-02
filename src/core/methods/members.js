@@ -1,7 +1,7 @@
 // CosmicSimulation 的 members 方法组（目录梳理：mixin 装配，方法体未改动）。
 // 通过 Object.assign 挂到 prototype，方法内仍以 this 访问实例状态。
 import {
-  DYN_G, EPS2, N_PARTICLES, N_CLOUD_PARTICLES, N_EJECTA_PARTICLES,
+  EPS2, N_PARTICLES, N_CLOUD_PARTICLES, N_EJECTA_PARTICLES,
   GRAVITY_START, GRAVITY_FULL, BASE_SPEED,
   SEED_R_MIN, SEED_R_MAX, EJECTA_SPEED_MIN, EJECTA_SPEED_MAX,
   PROBE_INITIAL_SPEED, PROBE_BIGBANG_SPEED, BIG_BANG_WALL, PROBE_GRAVITY_MULT,
@@ -601,21 +601,23 @@ export const membersMethods = {
       s.detail.discovered = true;
       this.events.push({ time: this.time, text: `🔍 靠近【${label}】，最近的成员率先显形` });
     }
-    if (s.detail.foundCount >= s.detail.bodies.length) {
+    // "全部显形"只播报一次（2026-09-02 修复）：foundCount 达满后继续
+    // 调用本函数会重复推事件——旧版遭遇少没暴露，frontier 系统变密后
+    // 实测刷出 1013 条。加 _allRevealed 去重标志。
+    if (!s.detail._allRevealed && s.detail.foundCount >= s.detail.bodies.length) {
+      s.detail._allRevealed = true;
       this.events.push({ time: this.time, text: `✨ 【${label}】${s.detail.bodies.length} 个成员已全部显形` });
     }
   },
 
-  // 推进集合系统全体成员的轨道与动力学。
-  // 注意：可见性由渐进发现（§5.2）决定，与小球到系统的距离无关——
+  // 推进集合系统全体成员的轨道。
+  // 成员走**纯解析开普勒轨道**（圆/椭圆 + 近快远慢），不做任何 N-body
+  // 微扰叠加——之前的"恒星间相互引力微扰"（§9.7，bv/boff 漂移）会让
+  // 恒星围绕轨道抖动漂移，看起来杂乱且不物理（真实星系在可观测的
+  // 时间尺度上就是平滑轨道的集合体）。轨道运动平滑、确定、可复现。
+  // 可见性由渐进发现（§5.2）决定，与小球到系统的距离无关——
   // 未发现的成员照样在轨道上运动，远景成员点云据此把它们画在真实位置。
   _updateDetailBodies(s, dt) {
-    const dynOn = this.config.systemDynamics && this.config.qualityTier < 1;
-    // ---- 集合系统动力学（§9.7）：恒星间相互引力的软化微扰 ----
-    // 力以 20Hz 互算（O(n²) 只对恒星），积分为有界速度漂移 bv，
-    // 叠加在分析轨道上（boff 偏移）。构造上不可能逃逸/瓦解，
-    // 但相对运动是真实的 N-body 力（星团互绕、旋臂扰动、核球响应）。
-    const dynBodies = dynOn ? [] : null;
     for (const b of s.detail.bodies) {
       // 渐进发现（§5）：未发现的天体保持隐藏（无引力/不可捕获），
       // 但轨道照常推进——远景预览与揭示动画基于真实位置
@@ -635,12 +637,6 @@ export const membersMethods = {
       b.pos[0] = s.pos[0] + s.u[0] * c * rEff + s.v[0] * sn * rEff + s.axis[0] * b.orbit.height;
       b.pos[1] = s.pos[1] + s.u[1] * c * rEff + s.v[1] * sn * rEff + s.axis[1] * b.orbit.height;
       b.pos[2] = s.pos[2] + s.u[2] * c * rEff + s.v[2] * sn * rEff + s.axis[2] * b.orbit.height;
-      // 动力学偏移叠加（恒星才参与互算；行星/尘埃保持纯轨道）
-      if (dynBodies && b.mass >= 0.01) {
-        if (!b.bv) { b.bv = [0, 0, 0]; b.boff = [0, 0, 0]; }
-        b.pos[0] += b.boff[0]; b.pos[1] += b.boff[1]; b.pos[2] += b.boff[2];
-        dynBodies.push(b);
-      }
       // 二级系统：行星/卫星/环粒子绕母天体运动（母体是移动目标，用其本步位置）
       if (b.children) {
         for (const ch of b.children) {
@@ -666,36 +662,6 @@ export const membersMethods = {
             }
           }
         }
-      }
-    }
-    if (dynBodies && dynBodies.length > 1) {
-      s.detail.dynTimer = (s.detail.dynTimer || 0) + dt;
-      const recompute = s.detail.dynTimer >= 0.05; // 20Hz 互算
-      if (recompute) s.detail.dynTimer = 0;
-      const damp = Math.exp(-dt * 0.5);
-      for (const b of dynBodies) {
-        if (recompute) {
-          let ax = 0, ay = 0, az = 0;
-          for (const o of dynBodies) {
-            if (o === b) continue;
-            const dx = o.pos[0] - b.pos[0], dy = o.pos[1] - b.pos[1], dz = o.pos[2] - b.pos[2];
-            const r2 = dx * dx + dy * dy + dz * dz + 0.5; // 软化
-            const f = DYN_G * o.mass / (r2 * Math.sqrt(r2));
-            ax += f * dx; ay += f * dy; az += f * dz;
-          }
-          b.bv[0] = (b.bv[0] + ax * 0.05) * damp;
-          b.bv[1] = (b.bv[1] + ay * 0.05) * damp;
-          b.bv[2] = (b.bv[2] + az * 0.05) * damp;
-          // 有界：漂移速度封顶，构造上杜绝逃逸
-          const sp = Math.hypot(b.bv[0], b.bv[1], b.bv[2]);
-          if (sp > 0.5) { const k = 0.5 / sp; b.bv[0] *= k; b.bv[1] *= k; b.bv[2] *= k; }
-        }
-        // 弱弹簧锚定：boff 缓慢回落（约 14s 半衰期），长时间驻留也不"融化"
-        const anchor = Math.exp(-dt * 0.05);
-        b.boff[0] = (b.boff[0] + b.bv[0] * dt) * anchor;
-        b.boff[1] = (b.boff[1] + b.bv[1] * dt) * anchor;
-        b.boff[2] = (b.boff[2] + b.bv[2] * dt) * anchor;
-        b.pos[0] += b.bv[0] * dt; b.pos[1] += b.bv[1] * dt; b.pos[2] += b.bv[2] * dt;
       }
     }
   },

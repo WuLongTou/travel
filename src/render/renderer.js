@@ -23,7 +23,9 @@ export function createCosmosRenderer(canvas, sim) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.25;
+  // 曝光收敛到 1.05：之前 1.25 会把大面积点云/星云整体提亮，宇宙显得
+  // "发灰发亮"；真实宇宙是黑的，只有天体本身亮
+  renderer.toneMappingExposure = 1.05;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000); // 纯黑：宇宙环境无环境光
@@ -31,18 +33,17 @@ export function createCosmosRenderer(canvas, sim) {
   camera.position.set(0, 2.4, 9);
 
   // ---- 后处理辉光（UnrealBloom）：真实宇宙的"发光"质感 ----
-  // 阈值调低、强度温和：让恒星/星云/小球/轨迹都带上柔光，而不是只有高光爆白。
+  // 阈值 0.62、强度 0.45：只有恒星/黑洞/小球等真亮天体触发柔光；
+  // 阈值太低时大面积点云会叠加成雾，宇宙显得又亮又蓝
   const composer = new EffectComposer(renderer);
   composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   composer.setSize(window.innerWidth, window.innerHeight);
   composer.addPass(new RenderPass(scene, camera));
   const bloomPass = new UnrealBloomPass(
     new THREE.Vector2(window.innerWidth, window.innerHeight),
-    0.55,   // strength 强度（之前 0.85 太强，把 820 粒子点云 + 1640 条流线的
-            //   additive 光晕扩散成白雾；0.55 保留恒星/黑洞/小球的发光质感）
-    0.55,   // radius 半径
-    0.55,   // threshold 阈值（之前 0.30 太低，粒子/流线的中亮度也触发 bloom
-            //   导致远景叠加成雾；0.55 只让恒星/黑洞/小球等真亮天体触发）
+    0.45,   // strength 强度
+    0.50,   // radius 半径
+    0.62,   // threshold 阈值
   );
   composer.addPass(bloomPass);
 
@@ -103,13 +104,13 @@ export function createCosmosRenderer(canvas, sim) {
     focusActive = false;
   }, { passive: false });
 
-  // 自由视角 · 双击聚焦小球：双击画布把观察目标平滑飞向小球，
-  // 之后可用滚轮继续靠近仔细观察（解决"远距离无法自主靠近"）。
+  // 自由视角 · 双击聚焦小球：双击画布后观察目标平滑飞向小球并持续跟随
+  // （小球在动，只飞向快照点会丢目标），之后可用滚轮推进/拉远打断跟随
+  // 继续自由观察（解决"远距离无法自主靠近"）。
   const focusTarget = new THREE.Vector3();
   let focusActive = false;
   canvas.addEventListener('dblclick', () => {
     if (state.follow) return; // 仅在自由视角下生效
-    focusTarget.set(sim.probe.pos[0], sim.probe.pos[1], sim.probe.pos[2]);
     focusActive = true;
   });
 
@@ -159,10 +160,10 @@ export function createCosmosRenderer(canvas, sim) {
   const state = {
     // timeScale **只是显示层的缩放系数**（详见 render() 中的物理量/显示量说明），
     // 不参与引力与任何受力计算，物理子步长与轨道结果都不随之改变。
-    // 默认 0.05：物理终端速度约 33 单位/秒 → 观感约 1.65 单位/秒，
-    // 穿过直径 60 的星系约 36 秒，从容看清旋臂与成员。
+    // 默认 0.1：物理巡航速度约 17 单位/秒 → 观感约 1.7 单位/秒，
+    // 穿过直径 28 的恒星系约 16 秒，从容看清行星与伴星。
     // 注意 main.js 的滑杆会在启动时再次同步，HTML 里的 value 才是真正生效值。
-    time: 0, timeScale: 0.05, musicIntensity: 1, follow: true,
+    time: 0, timeScale: 0.1, musicIntensity: 1, follow: true,
     physAcc: 0,
     // 上帝视角镜头（全部连续量，无模式机）：
     camAzimuth: -Math.PI / 2,  // 恒定世界方位角（初始化后不改，不跟随小球旋转）
@@ -229,15 +230,18 @@ export function createCosmosRenderer(canvas, sim) {
     //   沿轨道推进的快慢。
     // ==================================================================
     state.time += dtReal;
-    // 启动快进：开局用高倍率把宇宙推进到"结构已成形"，再回落到观赏倍率慢速航行。
-    // 若全程都用观赏倍率(0.08)，宇宙演化也会被拖慢 12.5 倍 —— 光是等引力拉满
-    // (GRAVITY_FULL=5.6 物理秒) 就要 70 秒真实时间，开场会很无聊。
+    // 启动快进（平滑指数回落）：开局用高倍率把宇宙推进到"结构已成形"，
+    // 随后按指数曲线无缝回落到观赏倍率。旧实现是"恒定 0.5× 快进 15 秒后
+    // 硬切回观赏倍率"——切换瞬间小球屏幕速度骤降 10 倍，像急刹车；而且
+    // 快进期内小球屏幕速度高达 12+ 单位/秒，穿越系统只要一两秒，根本
+    // 来不及看清与天体的交互。指数回落没有任何切换点，速度单调递减，
+    // 开局"超光速喷出 → 逐渐放缓 → 从容航行"一气呵成。
     // 两个阶段用的都是**同一个显示层系数机制**（只换算物理时间增量），
     // 不触碰任何物理公式与子步长。
-    const bootWall = sim.config.bootFastForwardWall;
-    const bootScale = sim.config.bootFastForwardScale;
-    const booting = state.time < bootWall && bootScale > state.timeScale;
-    const scale = booting ? bootScale : state.timeScale;
+    // bootFastForwardWall 在此语义下是回落时间常数的基准（tau = wall×0.3）。
+    const bootTau = Math.max(0.5, sim.config.bootFastForwardWall * 0.30);
+    const bootExtra = Math.max(0, sim.config.bootFastForwardScale - state.timeScale);
+    const scale = state.timeScale + bootExtra * Math.exp(-state.time / bootTau);
     state.physAcc += dtReal * scale;
     const PHYS_DT = 0.02;
     let guard = 0;
@@ -268,7 +272,9 @@ export function createCosmosRenderer(canvas, sim) {
     const pulse = 1 + beat * 0.22 + energy * 0.10;
 
     particles.update(dtReal, audioLevels);
-    explosion.update(sim.time);
+    // 大爆炸特效按**显示时间**推进：早期物理慢放（观赏倍率）不该把
+    // 爆炸动画也拖长——爆炸就是一瞬间，与倍率无关
+    explosion.update(state.time);
     structures.updateStructures(dtReal, audioLevels, pulse);
     // 先画远景成员点云（未发现的成员），再由 detail 点云叠加已发现的成员
     structures.updatePreviewClouds();
@@ -277,12 +283,16 @@ export function createCosmosRenderer(canvas, sim) {
 
 
     cameraFollow.update([px, py, pz], pr, alpha, dtReal, beat, trail);
-    // 自由视角：OrbitControls 接管，双击聚焦（target 平滑飞向小球）
+    // 自由视角：OrbitControls 接管，双击聚焦（target 持续跟随小球）
     if (!state.follow) {
       controls.enabled = true;
       if (focusActive) {
+        // 目标点每帧更新为小球当前显示位置——聚焦是"跟随"而非"飞向
+        // 快照点"，小球一直在动，旧实现飞到快照就停、小球随后飞出画面。
+        // 滚轮推进/拉远会打断（wheel 监听里 focusActive = false），
+        // 用户之后可用滚轮自由接近。
+        focusTarget.set(px, py, pz);
         controls.target.lerp(focusTarget, Math.min(1, dtReal * 5.0));
-        if (controls.target.distanceTo(focusTarget) < 1.0) focusActive = false;
       }
       controls.update();
     }
@@ -308,11 +318,11 @@ export function createCosmosRenderer(canvas, sim) {
 
     // 先渲染主场景（含辉光后处理），再叠加全屏爆炸闪光层与虫洞特效。
     // 降级时**不硬关 bloom**（硬关会让亮星/小球瞬间变暗——环境光"时亮
-    // 时暗"的元凶之一），而是平滑降低强度：tier0 0.85 → tier1 0.5 →
-    // tier2 0.28。背景（scene.background + cosmicSky）始终是恒定深黑，
+    // 时暗"的元凶之一），而是平滑降低强度：tier0 0.45 → tier1 0.30 →
+    // tier2 0.18。背景（scene.background + cosmicSky）始终是恒定深黑，
     // 不随帧率/时间波动（FPS 自适应降级，见 §3.1）。
     bloomPass.enabled = true;
-    bloomPass.strength = sim.config.qualityTier >= 2 ? 0.20 : sim.config.qualityTier === 1 ? 0.35 : 0.55;
+    bloomPass.strength = sim.config.qualityTier >= 2 ? 0.18 : sim.config.qualityTier === 1 ? 0.30 : 0.45;
     renderer.autoClear = true;
     composer.render();
     if (explosion.flashOverlay.mat.uniforms.uAlpha.value > 0.002) {
@@ -341,6 +351,18 @@ export function createCosmosRenderer(canvas, sim) {
         // 退出跟拍时把 FOV 收回基准，交给 OrbitControls 的滚轮控制
         camera.fov = 58;
         camera.updateProjectionMatrix();
+      }
+      // 切回跟拍时吸收当前相机方位角（2026-09-02 修复）：
+      // 跟拍模式用 state.camAzimuth 恒定方位，若保持模块常量 -π/2，
+      // 用户在自由模式任意旋转后切回跟拍，画面会"啪"地跳回东北视角。
+      // 相机球坐标 camera = target - (sin az, ·, cos az)·horizM，
+      // 反推 az = atan2(target.x - camera.x, target.z - camera.z)。
+      if (v && !state.follow) {
+        const dx = controls.target.x - camera.position.x;
+        const dz = controls.target.z - camera.position.z;
+        if (Math.hypot(dx, dz) > 1e-4) {
+          state.camAzimuth = Math.atan2(dx, dz);
+        }
       }
       state.follow = v;
       if (v) controls.enabled = false;
