@@ -10,7 +10,7 @@ import {
   SEED_AWAKEN_RADIUS, FORMATION_SPACING,
   FRONTIER_INTERVAL,
   REVEAL_RADIUS, REVEAL_SCALE, DISCOVERY_PER_STEP, COLLECTION_LEVELS,
-  CLASS_DEFS, PROBE_DRAG_LEGACY, PROBE_IGM_DRAG, PROBE_RESPAWN_SPEED, PROBE_MAX_SPEED,
+  CLASS_DEFS, PROBE_IGM_DRAG, PROBE_RESPAWN_SPEED, PROBE_MAX_SPEED,
 } from './config.js';
 import { randomUnit, clamp01, smoothstep, easeInOut, orbitPolar, hash01 } from './utils.js';
 import { levelForSeed, finalLevelFor, LEVEL_LABELS, DEATH_VERBS, EVENT_LEVELS, EVENT_MESSAGES } from './sim-shared.js';
@@ -28,7 +28,7 @@ export class CosmicSimulation {
   constructor(initialConfig = {}) {
     this.time = 0;
     this.events = [];
-    // 运行时可调配置（UI 滑杆直通）：
+    // 运行时可调配置（构造注入 / 运行期内部改写；面板已精简，无常规滑杆）：
     //   wormholeDist     虫洞跃迁距离（世界单位）
     //   wormholeDuration 虫洞动画时长（秒）
     //   wormholeWindow   判定"持续捕获"的时间窗口（秒），窗口内被同一系统再次捕获即触发虫洞
@@ -48,7 +48,7 @@ export class CosmicSimulation {
       wormholeSafeMargin: 200,
       maxDetailSystems: 3, maxDetailBodies: 1000,
       qualityTier: 0, autoQuality: true,
-      // 引力与天体（UI 滑杆实时可调，范围在 main.js 侧钳制以防数值发散）
+      // 引力与天体（运行时可调；面板精简后仅经构造注入，见 config 注释）
       gravityG: 16,        // 引力常数（原模块常量 G）
       bodyMassScale: 1,    // 天体质量全局倍率
       bodyRadiusScale: 1,  // 天体半径全局倍率（影响碰撞判定与视觉大小）
@@ -334,39 +334,9 @@ export class CosmicSimulation {
     this.probe.vel = [probeDir[0] * probeSpeed, probeDir[1] * probeSpeed, probeDir[2] * probeSpeed];
   }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
   // ---- 死亡序列（§9.3）：捕获后先播一段"坠入/汽化/被撕碎"演出，
   // 物理冻结、杀手引用实时取 pos（绕行天体也在动），结束后才重生 ----
   static DEATH_DUR = { atmosphere: 1.1, vaporize: 0.7, tidal: 1.3, generic: 0.8 };
-
-
-
-
-
-
-
-
 
   get heat() {
     return Math.max(0, 1 - this.gravityStrength);

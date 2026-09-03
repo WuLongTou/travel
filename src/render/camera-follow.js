@@ -5,7 +5,7 @@
 //   - 智能镜头第一阶段（t<2.3s：留在奇点附近看大爆炸）
 //   - 轨迹优先的连续上帝视角（方位角/俯角恒定 + 极慢漂移 + 距离限幅）
 //   - 速度感 FOV（跟拍时随速度放大视野）
-// update(pos, pr, alpha, dtReal, beat) 每帧调用；state.follow=false 时直接 return。
+// update(pos, pr, alpha, dtReal, beat, trail) 每帧调用；state.follow=false 时直接 return。
 import * as THREE from 'three';
 import { smoothstep } from '../core/utils.js';
 
@@ -40,7 +40,7 @@ export function createCameraFollow(state, controls, camera, sim) {
       const jx = px - state._lastProbePos.x;
       const jy = py - state._lastProbePos.y;
       const jz = pz - state._lastProbePos.z;
-      if (jx * jx + jy * jy + jz * jz > 100 * 100) {
+      if (jx * jx + jy * jy + jz * jz > TELEPORT_THRESHOLD_SQ) {
         if (state.follow && state._focusInit) {
           controls.target.x += jx;
           controls.target.y += jy;

@@ -7,7 +7,7 @@
 import * as THREE from 'three';
 import { levelColor, levelColorTinted, levelCoreScale, levelSolidScale } from './colors.js';
 import { COLLECTION_LEVELS } from '../core/config.js';
-import { hash01, clamp01, smoothstep, randomUnit, orbitPolar, easeInOut } from '../core/utils.js';
+import { hash01, clamp01, smoothstep, orbitPolar, easeInOut } from '../core/utils.js';
 
 export function createStructures(scene, sim, glowTex, ringTex, camera) {
   const makeSprite = (map, color) => new THREE.Sprite(new THREE.SpriteMaterial({

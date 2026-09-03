@@ -132,7 +132,8 @@ el.exportLogBtn.addEventListener('click', exportLog);
 document.getElementById('btn-regen').addEventListener('click', () => location.reload());
 
 // FPS 看门狗：EMA 帧率连续偏低则升档降级（0→1→2），恢复良好再缓慢降档。
-// 档位只在 <40 判低、>50 判好，40~50 为稳持带，避免临界帧率来回跳。
+// 档位在 <40 判低、>45 判好（判好需持续 10s 才降档），40~45 为稳持带，
+// 避免临界帧率来回跳。
 // tier 含义（sim._manageDetails 消费）：
 //   1 = 冻结 LOD 升级、停止创建新细节系统（存量保留）
 //   2 = 再把最远的细节系统卸载到上限一半，点尺寸缩小
@@ -283,18 +284,18 @@ function showEvent(text) {
 }
 
 // ---------- 航行信息面板 ----------
-  // 低频刷新（4Hz）：面板是给人读的，无需每帧重排 DOM
-  let hudTimer = 0;
-  function updateHud() {
-    const pr = sim.probe;
-    const speed = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
-    el.hudProbe.textContent = `第 ${pr.generation} 代 · 速率 ${speed.toFixed(1)}`;
-    // 运动状态：自由航行 / 坠落接近 / 环绕轨道 / 临界 / 逃逸甩出
-    const gi = pr.gravInfo;
-    if (gi) {
-      const kappaTxt = gi.accel > 0.02 ? ` · κ=${gi.kappa.toFixed(2)}` : '';
-      el.hudGrav.textContent = gi.state + kappaTxt;
-    }
+// 低频刷新（4Hz）：面板是给人读的，无需每帧重排 DOM
+let hudTimer = 0;
+function updateHud() {
+  const pr = sim.probe;
+  const speed = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
+  el.hudProbe.textContent = `第 ${pr.generation} 代 · 速率 ${speed.toFixed(1)}`;
+  // 运动状态：自由航行 / 坠落接近 / 环绕轨道 / 临界 / 逃逸甩出
+  const gi = pr.gravInfo;
+  if (gi) {
+    const kappaTxt = gi.accel > 0.02 ? ` · κ=${gi.kappa.toFixed(2)}` : '';
+    el.hudGrav.textContent = gi.state + kappaTxt;
+  }
   const ns = pr.nearestSystem >= 0 ? sim.seeds[pr.nearestSystem] : null;
   if (ns) {
     el.hudNear.textContent = `${LEVEL_LABELS[ns.level] || ns.level} · ${pr.nearestDist.toFixed(0)}`;
@@ -434,8 +435,6 @@ window.__renderer = renderer;
 window.__camera = renderer.camera;
 window.__scene = renderer.scene;
 window.__controls = renderer.controls;
-window.__stars = renderer.stars;
-window.__ripples = renderer.ripples;
 window.__audio = audio;
 window.__frames = 0;
 window.__exportLog = buildLogJson;

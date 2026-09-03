@@ -110,11 +110,6 @@ export const CLASS_DEFS = [
   { key: 'giant',  name: '巨质量晕', count: 3,  durBase: 7.5, durSpan: 2.5, massMin: 2.30, massMax: 3.80 },
 ];
 
-// 主角小球是一艘没有预定航线的自由探测器：只受引力和气体阻尼影响。
-// 进入天体系统后的星际气体阻尼按层级分级（见 _updateProbe）：
-// 行星/恒星 2.2、星团/黑洞/星云 0.5、星系/超星系团 0（延展引力 +
-// 任何非零阻尼 = 螺旋坠入星系核）+ 深度线性。此常量不再使用。
-export const PROBE_DRAG_LEGACY = 0.4;
 export const PROBE_IGM_DRAG = 0.004;     // 星系际介质极微弱阻尼，防止无限加速后飞离可视宇宙
 // 重生 / 手动重置时从系统边缘获得的初始速度（物理量，不改）。
 // 屏幕上的快慢由显示层的 state.timeScale 决定，与这里无关。

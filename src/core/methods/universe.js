@@ -8,7 +8,7 @@ import {
   SEED_AWAKEN_RADIUS, FORMATION_SPACING,
   FRONTIER_INTERVAL,
   REVEAL_RADIUS, REVEAL_SCALE, DISCOVERY_PER_STEP, COLLECTION_LEVELS,
-  CLASS_DEFS, PROBE_DRAG_LEGACY, PROBE_IGM_DRAG, PROBE_RESPAWN_SPEED, PROBE_MAX_SPEED,
+  CLASS_DEFS, PROBE_IGM_DRAG, PROBE_RESPAWN_SPEED, PROBE_MAX_SPEED,
 } from '../config.js';
 import { randomUnit, clamp01, smoothstep, easeInOut, orbitPolar, hash01 } from '../utils.js';
 import { levelForSeed, finalLevelFor, LEVEL_LABELS, DEATH_VERBS, EVENT_LEVELS, EVENT_MESSAGES, gravityParamsFor } from '../sim-shared.js';
@@ -45,12 +45,14 @@ export const universeMethods = {
   // 在拉它）。沿"当前速度方向"投放的目标到达时全部偏出，一次偏转就
   // 制造上百秒的遭遇空窗。因此保险机制建立在**预测航迹**上：
   //   _predictProbePath 用当前引力场前瞻积分小球未来 20s 的轨迹
-  //   （种子位置随已知速度线性外推——种子准静止、无加速，外推准确）；
+  //   会整段跳过种子可遭遇半径（≥10）内的窗口，让保险投放误判航线前方无目标；
+  //   种子准静止、无加速，细化后外推仍准确）
+  //   （积分步长 0.25s，2026-09-03 自 1.0s 细化：1s 采样的路径点间距 ~20 单位，
   //   _hasNextWaypoint 沿预测轨迹逐点检查是否有种子落在可遭遇半径
   //   （1.4×detailR）内；没有则把保险目标**直接投放在预测轨迹上**
   //   （~250 单位处，完全静止），航线怎么弯它都在路上——叙事上即
   //   "宇宙网纤维上总连着下一个节点"。
-  _predictProbePath(horizon = 20, dt = 1.0) {
+  _predictProbePath(horizon = 20, dt = 0.25) {
     const pr = this.probe;
     const pos = [pr.pos[0], pr.pos[1], pr.pos[2]];
     const vel = [pr.vel[0], pr.vel[1], pr.vel[2]];
@@ -88,7 +90,7 @@ export const universeMethods = {
   },
 
   // 缓存的预测路径（每秒重算一次——路径检查每步都要用，前瞻积分
-  // 20 步 × 57 种子不宜逐帧全价重算）
+  // 80 步 × 57 种子不宜逐帧全价重算）
   _waypointPathCache() {
     if (!this._wpCache || this.time - this._wpCache.time > 1) {
       this._wpCache = { time: this.time, path: this._predictProbePath() };
@@ -288,8 +290,10 @@ export const universeMethods = {
         // medium 用 t≈8~17s（距离 ~200-440），small 用更近的 t≈5~14s。
         // 投放后的目标完全静止（vel=0，见下），预测即落点。
         const path = this._waypointPathCache();
-        const baseIdx = klass === 'small' ? 5 : 8;
-        const pi = Math.min(path.length - 1, baseIdx + attempt);
+        // 路径点按 0.25s/步采样：small 从 t≈5s（idx 20）起、medium 从
+        // t≈8s（idx 32）起，每次重试沿轨迹推后 1s（×4 步）
+        const baseIdx = klass === 'small' ? 20 : 32;
+        const pi = Math.min(path.length - 1, baseIdx + attempt * 4);
         const cand = addGraze([path[pi][0], path[pi][1], path[pi][2]], velDir);
         if (this._isPositionIsolated(cand, newLevel, s.idx)) { pos = cand; break; }
         continue;

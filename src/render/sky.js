@@ -174,5 +174,3 @@ export function createNebulae(glowTex) {
   }
   return group;
 }
-
-// 全屏爆炸闪光 / 冲击波 / 径向射线叠加层

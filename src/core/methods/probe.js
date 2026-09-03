@@ -8,7 +8,7 @@ import {
   SEED_AWAKEN_RADIUS, FORMATION_SPACING,
   FRONTIER_INTERVAL,
   REVEAL_RADIUS, REVEAL_SCALE, DISCOVERY_PER_STEP, COLLECTION_LEVELS,
-  CLASS_DEFS, PROBE_DRAG_LEGACY, PROBE_IGM_DRAG, PROBE_RESPAWN_SPEED, PROBE_MAX_SPEED,
+  CLASS_DEFS, PROBE_IGM_DRAG, PROBE_RESPAWN_SPEED, PROBE_MAX_SPEED,
 } from '../config.js';
 import { randomUnit, clamp01, smoothstep, easeInOut, orbitPolar, hash01 } from '../utils.js';
 import { levelForSeed, finalLevelFor, LEVEL_LABELS, DEATH_VERBS, EVENT_LEVELS, EVENT_MESSAGES, gravityParamsFor } from '../sim-shared.js';
@@ -247,7 +247,7 @@ export const probeMethods = {
     pr.respawnGrace = Math.max(0, pr.respawnGrace - dt);
     pr.wormholeTimer = Math.max(0, pr.wormholeTimer - dt);
     const gs = this.gravityStrength;
-    // 引力常数与天体质量倍率运行时可调（UI 滑杆），取值已在 UI 侧钳制
+    // 引力常数与天体质量倍率运行时可调（取值在构造/注入侧钳制）
     const gG = this.config.gravityG;
     const mS = this.config.bodyMassScale;
 

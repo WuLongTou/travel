@@ -117,7 +117,7 @@ export function createProbeFx(scene, sim, glowTex, ringTex, trail, camera) {
   // 圆锥（粗端在球侧、细端远端）朝速度反方向延伸；shader 让远端自然
   // 衰减归零，开启推进时由 render 接管位置/朝向/长度。
   // 半径与长度故意比直觉大：cone 自身的可见面积小（远端渐细 + 衰减
-  // 渐弱），加上 bloom 阈值 0.30，只有"够粗"才能在远景里看出方向。
+  // 渐弱），加上 bloom 阈值 0.62，只有"够粗"才能在远景里看出方向。
   const probeTrailGeo = new THREE.ConeGeometry(0.7, 1.0, 24, 1, true);
   // 把底端（粗端）从 +Y/2 平移到原点，模型坐标系下底端 = (0,0,0)、顶端 = (0,1,0)
   probeTrailGeo.translate(0, 0.5, 0);

@@ -6,8 +6,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { randomUnit, clamp01, smoothstep, easeInOut, orbitPolar, hash01 } from '../core/utils.js';
-import { COLLECTION_LEVELS } from '../core/config.js';
+import { smoothstep } from '../core/utils.js';
 import { makeGlowTexture, makeRingTexture } from './textures.js';
 import { levelColor, levelColorTinted, levelCoreScale, levelSolidScale } from './colors.js';
 import { createCosmicSky, createStarfield, createNebulae } from './sky.js';
@@ -123,14 +122,6 @@ export function createCosmosRenderer(canvas, sim) {
   const starfield = createStarfield(glowTex);
   scene.add(starfield);
 
-  // ---------- 大爆炸专用精灵 ----------
-  function makeSprite(map, color) {
-    return new THREE.Sprite(new THREE.SpriteMaterial({
-      map, color, transparent: true, depthWrite: false,
-      blending: THREE.AdditiveBlending, depthTest: false,
-    }));
-  }
-
   // 天体结构 + 成员点云子系统（已提取到 render/structures.js）
   const structures = createStructures(scene, sim, glowTex, ringTex, camera);
   // 远星云层：跟随相机，给"真实宇宙"补上色深与纵深
@@ -139,24 +130,12 @@ export function createCosmosRenderer(canvas, sim) {
   // 大爆炸特效子系统（已提取到 render/explosion.js，工厂返回 update + flashOverlay）
   const explosion = createExplosionFx(scene, glowTex);
 
-
-  // ---------- 天体结构（每个暗物质晕一组） ----------
-
-
-  // ---- 运动轨迹（发光渐细缎带）----
-  // 用相机朝向的三角带(ribbon)替代 1px 细线：带宽随"旧→新"从尾到头渐宽、
-  // 亮度渐亮，配合加色混合与 bloom 辉光，呈现"彗尾/光迹"的质感。
-  // 缎带始终正对相机，轨迹的弯曲、绕圈走向一览无余。
-
   // 虫洞特效叠加层
   const wormholeOverlay = createWormholeOverlay();
   let lastWormhole = 0; // 记录已处理的虫洞触发次数
 
-  // 巡航镜头（cruise）常量：轨道视角，远远看轨迹 + 镜头稳定
   // 启动快进（显示层）：开局这段真实秒数内用高倍率把宇宙推进到已成形。
   // 参数放在 sim.config 里，便于调参与测试（测试可置 0 排除干扰）。
-
-  // 上帝视角：镜头拉远、俯角抬高，且方位角恒定（不跟随小球旋转）
 
   const state = {
     // timeScale **只是显示层的缩放系数**（详见 render() 中的物理量/显示量说明），
@@ -207,11 +186,6 @@ export function createCosmosRenderer(canvas, sim) {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
   }
-
-  // 轨迹采样节流：不必每帧一个点（60fps 下 750 点只有 12 秒），
-
-  // 速率 → 颜色：慢=冷青蓝，快=暖橙金。配合加色混合，越暗越透明，
-  // 于是"淡出"直接靠把颜色乘向黑色实现。
 
   const zeroAudio = () => ({ bass: 0, mid: 0, treble: 0, beat: 0, energy: 0 });
 
@@ -282,12 +256,7 @@ export function createCosmosRenderer(canvas, sim) {
     const py = pr.prevPos[1] + (pr.pos[1] - pr.prevPos[1]) * alpha;
     const pz = pr.prevPos[2] + (pr.pos[2] - pr.prevPos[2]) * alpha;
 
-    // 大尺度瞬移检测（虫洞跃迁/重生把小球瞬移到远方）：跟拍模式下把镜头
-    // **整体刚体平移**同样的位移量——纯平移不改变任何朝向（正是"不旋转、
-    // 不翻转"的要求），星空背景跟随相机，视觉上只有前景天体瞬间切换；
-    // 平滑轨道中心一起搬，避免它以限速慢慢滑行 480 单位拖动视点。
-    // 同时清空轨迹，避免一根跨越几百单位的"跃迁直线"污染轨迹框距。
-
+    // 大尺度瞬移检测与镜头刚体平移（含轨迹清空）在 camera-follow 内处理
     const audioLevels = audio && typeof audio.getLevels === 'function' ? audio.getLevels() : zeroAudio();
     const beat = Math.min(1, audioLevels.beat * state.musicIntensity);
     const energy = Math.min(1, audioLevels.energy * state.musicIntensity);
@@ -332,9 +301,6 @@ export function createCosmosRenderer(canvas, sim) {
     starfield.position.copy(camera.position);
     nebulae.position.copy(camera.position);
 
-    // 速度感 FOV：速度越快视野略放大，制造"冲刺"的张力；节拍再叠加轻微呼吸。
-    // 仅在跟拍模式下生效；自由观察时由 OrbitControls 的滚轮控制远近。
-
     // 轨迹缎带在镜头定位后重建（始终朝向相机）
     trail.syncTrailRibbon();
 
@@ -362,7 +328,6 @@ export function createCosmosRenderer(canvas, sim) {
 
   return {
     render, resize, state, camera, scene, controls,
-    stars: [], ripples: [],
     setFollowEnabled(v) {
       if (state.follow && !v) {
         const fwd = new THREE.Vector3();

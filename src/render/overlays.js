@@ -1,7 +1,5 @@
 // 渲染域：全屏叠加层（大爆炸闪光 / 虫洞跃迁）
 import * as THREE from 'three';
-import { randomUnit } from '../core/utils.js';
-import { COLLECTION_LEVELS } from '../core/config.js';
 
 export function createFlashOverlay() {
   const geo = new THREE.PlaneGeometry(2, 2);

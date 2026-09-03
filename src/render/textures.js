@@ -1,7 +1,5 @@
 // 渲染域：程序化生成的纹理（发光点 / 冲击波环）
 import * as THREE from 'three';
-import { randomUnit } from '../core/utils.js';
-import { COLLECTION_LEVELS } from '../core/config.js';
 
 export function makeGlowTexture(size = 256) {
   const c = document.createElement('canvas');

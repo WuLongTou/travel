@@ -219,57 +219,6 @@ input[type="range"]::-moz-range-thumb {
   box-shadow: 0 0 8px rgba(127, 176, 255, 0.45);
 }
 
-/* 改过初始条件但还没重开：让「重开宇宙」按钮呼吸，提示该点它了 */
-@keyframes regen-pending {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(127, 176, 255, 0); }
-  50% { box-shadow: 0 0 0 4px rgba(127, 176, 255, 0.25); }
-}
-.btn-row button.pending {
-  animation: regen-pending 1.3s ease-in-out infinite;
-  border-color: var(--accent);
-  color: var(--text);
-}
-
-/* 可折叠分组 */
-.panel details.group {
-  margin-top: 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
-  padding-top: 8px;
-}
-.panel details.group summary {
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--text-dim);
-  letter-spacing: 1px;
-  list-style: none;
-  user-select: none;
-  margin-bottom: 8px;
-  transition: color 0.15s;
-}
-.panel details.group summary:hover {
-  color: var(--text);
-}
-.panel details.group summary::-webkit-details-marker {
-  display: none;
-}
-.panel details.group summary::before {
-  content: '▸';
-  display: inline-block;
-  width: 14px;
-  opacity: 0.6;
-  transition: transform 0.15s ease;
-}
-.panel details.group[open] summary::before {
-  transform: rotate(90deg);
-}
-.panel details.group summary em {
-  font-style: normal;
-  font-size: 10px;
-  opacity: 0.5;
-  margin-left: 5px;
-  letter-spacing: 0.5px;
-}
-
 .status {
   font-size: 11px;
   color: var(--text-dim);

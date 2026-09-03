@@ -1,7 +1,5 @@
 // 渲染域：天体等级配色（含每个天体的确定性色调偏移）
 import * as THREE from 'three';
-import { randomUnit } from '../core/utils.js';
-import { COLLECTION_LEVELS } from '../core/config.js';
 
 export function levelColor(level) {
   const colors = {

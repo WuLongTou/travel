@@ -7,7 +7,8 @@
 import * as THREE from 'three';
 
 export function createTrail(scene, sim, camera) {
-  const TRAIL_MAX = 3000;
+  // 环形缓冲容量：默认显示 400 点（trailLength），留 2× 余量供调参
+  const TRAIL_MAX = 800;
   // 轨迹缎带半宽（2026-09-03 自 0.13 收细到 0.085）：轨迹是"细淡的
   // 指示线"，加色混合 + bloom 后 0.13 会显粗；与小球（半径 0.16，
   // 月亮级）同比例。
@@ -65,7 +66,7 @@ export function createTrail(scene, sim, camera) {
   const _vb = new THREE.Vector3();
   const _side = new THREE.Vector3();
   function syncTrailRibbon() {
-    const N = Math.max(8, Math.min(TRAIL_MAX, Math.round(sim.config.trailLength || 750)));
+    const N = Math.max(8, Math.min(TRAIL_MAX, Math.round(sim.config.trailLength || 400)));
     const start = Math.max(0, trailCount - N);
     const show = trailCount - start;
     if (show < 2) { trail.visible = false; return; }
@@ -124,7 +125,7 @@ export function createTrail(scene, sim, camera) {
   // 小球当前显示位置 (px,py,pz) 的距离——框距用它（视点在小球附近、
   // 带前向偏置，以"小球→轨迹最远端"张角 fit 画面才准确）。
   // 0.25s 节流缓存——镜头每帧消费但几何变化慢，O(N) 重算每秒 4 次
-  // 足够（750 点全量重算 <0.1ms）。
+  // 足够（400 点全量重算 <0.1ms）。
   let boundsCache = null;
   let boundsTimer = 0;
   const _b = { cx: 0, cy: 0, cz: 0, r: 0, exR: 0 };
