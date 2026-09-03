@@ -379,13 +379,16 @@ export const probeMethods = {
       }
       // ---- 巡航恢复（游戏化）----
       // 被系统阻尼减速后（离开系统时可能只有 6~10/s），空旷区以
-      // 0.1/s 向巡航 PROBE_INITIAL_SPEED 松弛——避免"8/s 爬行 50 秒"
+      // 0.3/s 向巡航 PROBE_INITIAL_SPEED 松弛——避免"8/s 爬行 50 秒"
       // 的无聊空旷航段（相当于飞船的巡航引擎维持航速，纯速度维持、
       // 不产生方向改变；在系统阻尼区内不生效，不影响捕获判定）。
+      // 2026-09-03 自 0.1 上调：延展引力全程泵速 vs 恢复拉速互相拉锯，
+      // 0.1 拉不回巡航——实测小球常态跑在 20~26 顶着限速，穿越窗口
+      // 被压缩；0.3 让离开系统后 ~5s 内回到巡航节奏。
       if (this.time > BIG_BANG_WALL && drag <= 0) {
         const sp2 = Math.hypot(pr.vel[0], pr.vel[1], pr.vel[2]);
         if (sp2 < PROBE_INITIAL_SPEED && sp2 > 1e-3) {
-          const k = Math.min(1, h * 0.1);
+          const k = Math.min(1, h * 0.3);
           const ux = pr.vel[0] / sp2, uy = pr.vel[1] / sp2, uz = pr.vel[2] / sp2;
           pr.vel[0] += (ux * PROBE_INITIAL_SPEED - pr.vel[0]) * k;
           pr.vel[1] += (uy * PROBE_INITIAL_SPEED - pr.vel[1]) * k;

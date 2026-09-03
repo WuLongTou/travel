@@ -635,8 +635,10 @@ export const membersMethods = {
   // 未发现的成员照样在轨道上运动，远景成员点云据此把它们画在真实位置。
   _updateDetailBodies(s, dt) {
     for (const b of s.detail.bodies) {
-      // 渐进发现（§5）：未发现的天体保持隐藏（无引力/不可捕获），
-      // 但轨道照常推进——远景预览与揭示动画基于真实位置
+      // 渐进发现（§5.2，2026-09-03 修正口径）：未发现的天体保持隐藏、
+      // 不可碰撞捕获（接近是交互前提），但**引力照常施加**（probe.js
+      // 的成员引力循环不区分 revealed——"发现"只是视觉概念，恒星
+      // 物理上就在那里）；轨道照常推进——远景预览与揭示动画基于真实位置
       b._hidden = !b.revealed;
       if (b.revealed && b.revealT < 1) b.revealT = Math.min(1, b.revealT + dt * 1.6);
       if (!b.orbit) {

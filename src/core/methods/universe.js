@@ -248,16 +248,21 @@ export const universeMethods = {
     let pos = null;
     const willCollapse = klass === 'giant' ? Math.random() < 0.35 : false;
     const newLevel = finalLevelFor(klass, willCollapse);
-    // ---- 掠过偏移（2026-09-03）：目标不落在航线正中 ----
+    // ---- 掠过偏移（2026-09-03，同日再收敛）：目标不落在航线正中 ----
     // 落在正中意味着小球每次都穿过系统核心——恒星/行星都在核心附近的
     // 轨道上，穿越核心=高概率撞上具体成员，形成连续死亡。真实宇宙里
-    // 航线几乎总是"掠过"：恒星的碰撞截面只占恒星系的极小部分。把落点
-    // 横向偏移 detailR×(0.9~1.8)——小球从系统边缘掠过（引力弯曲 +
-    // 渐进发现边缘成员），部分进入 1.4R 触发细节、部分仅引力交互。
-    // 大结构（detailR ≥ 50，星系/超星系团）不偏移：穿越星系看旋臂
-    // 本来就是内容，且其成员不整体捕获。
+    // 航线几乎总是"掠过"：恒星的碰撞截面只占恒星系的极小部分。
+    // 首版 detailR×(0.55~1.5) 过保守：实测典型最近距离 0.9~1.3R，
+    // 擦着 detail 边缘过、成员显形圈（旧阈值）一个都够不着。收敛为
+    // detailR×(0.25~0.9)；行星系（detailR 5，捕获截面 ~0.2）30% 直接
+    // 零偏移穿越——小球本体半径 0.16，穿过核心区仍大概率无恙，
+    // 而近距穿越的引力弯曲与显形最强烈。恒星系保留下限 0.25×14=3.5，
+    // 避开主星本体（捕获半径 ~0.28）。大结构（detailR ≥ 50，星系/
+    // 超星系团）不偏移：穿越星系看旋臂本来就是内容，成员不整体捕获。
     const detailRNew = this._detailRadius({ level: newLevel }) || 5;
-    const grazeOffset = detailRNew < 50 ? detailRNew * (0.55 + Math.random() * 0.95) : 0;
+    const grazeOffset = detailRNew >= 50 ? 0
+      : detailRNew < 8 && Math.random() < 0.30 ? 0
+      : detailRNew * (0.25 + Math.random() * 0.65);
     const addGraze = (base, anchorDir) => {
       if (grazeOffset <= 0) return base;
       // 垂直于锚方向的随机横向偏移

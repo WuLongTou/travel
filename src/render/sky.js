@@ -20,15 +20,17 @@ export function createCosmicSky() {
     `,
     fragmentShader: `
       varying vec3 vDir;
-      uniform float uTime;
       float hash(vec3 p) {
         return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
       }
       void main() {
         vec3 dir = normalize(vDir);
         // 银河带：只提高带内**星点**的密度与亮度（真实银河就是密集星场），
-        // 不加任何弥漫底色——宇宙背景是纯黑的，没有"环境光"
-        float band = exp(-pow((dir.y * 0.75 + dir.z * 0.35), 2.0) * 9.0);
+        // 不加任何弥漫底色——宇宙背景是纯黑的，没有"环境光"。
+        // 带法向与 Points 星层的 GALAXY_NORMAL 完全一致（归一化后的
+        // (0.34,0.88,-0.32)/|(0.34,0.88,-0.32)|）——首版两套法向夹角
+        // ~48°，画面上出现两条不同的"银河带"（2026-09-03 修复）。
+        float band = exp(-pow(dot(dir, vec3(0.3413, 0.8834, -0.3212)), 2.0) * 9.0);
         vec3 base = vec3(0.0);
         // 离散星点：把方向切成小格，每格随机出现一颗星。
         // 银河带内格子出星概率更高（阈值放宽），读作一条密星带
@@ -43,7 +45,6 @@ export function createCosmicSky() {
         gl_FragColor = vec4(base, 1.0);
       }
     `,
-    // （uTime 已移除：shader 未使用，纯死代码）
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
@@ -74,19 +75,26 @@ export function sampleGalaxyDirection() {
   return [vx + GALAXY_NORMAL[0] * th, vy + GALAXY_NORMAL[1] * th, vz + GALAXY_NORMAL[2] * th];
 }
 
-export function createStarfield() {
+export function createStarfield(glowTex) {
   // 真实夜空的星等分布是幂律：暗星压倒性多数，亮星极少。
   // 恒星颜色按真实黑体色温分布（O/B/A 偏蓝 → G 黄白 → K/M 橙红），
   // 而不是"几乎全白"。分三层：暗星海 + 中亮 + 少量亮星（形成层次）。
+  // 2026-09-03 真实化整改：旧尺寸 1.3/2.1/3.6px 折算角尺寸 4.2/6.8/
+  // 11.6 角分——真实夜空最亮的天狼星视觉光晕也只有 2~3 角分，普通
+  // 肉眼星接近分辨极限（<1 角分）。恒星是接近点源的光点，个体差异
+  // 体现在亮度（星等差可达万倍）而非大小：尺寸降到 1.0/1.5/2.2px、
+  // 亮星 130→60（同屏可读星从 ~800 降到 ~400，真实肉眼视野在银河
+  // 带外约 100~300 颗），并给星点加径向渐变贴图（方块点在亮星上
+  // 可辨，与成员点云的圆点风格不统一）。
   const group = new THREE.Group();
   // sizeAttenuation: false —— 星点以**固定像素尺寸**渲染。背景星空在
   // "无穷远"（天球），角尺寸本就该恒定；此前用 sizeAttenuation:true +
   // 半径 900~4500，多数星点被衰减成亚像素（闪烁的微光），中央视野
   // 几乎没有可读星点（2026-09-03 修复，配合镜头框距的观赏性整改）。
   const layers = [
-    { n: 7000, size: 1.3, lo: 0.035, hi: 0.30, pow: 2.3, op: 0.95 },
-    { n: 900, size: 2.1, lo: 0.28, hi: 0.62, pow: 2.6, op: 1.0 },
-    { n: 130, size: 3.6, lo: 0.60, hi: 0.98, pow: 2.9, op: 1.0 },
+    { n: 4500, size: 1.0, lo: 0.035, hi: 0.30, pow: 2.3, op: 0.95 },
+    { n: 500, size: 1.5, lo: 0.28, hi: 0.62, pow: 2.6, op: 1.0 },
+    { n: 60, size: 2.2, lo: 0.60, hi: 0.98, pow: 2.9, op: 1.0 },
   ];
   // 黑体色温 → 近似的 RGB（由蓝到白到橙红）
   function blackbody(t, out) {
@@ -123,6 +131,8 @@ export function createStarfield() {
       size: L.size, sizeAttenuation: false, vertexColors: true,
       transparent: true, opacity: L.op, depthWrite: false,
       blending: THREE.AdditiveBlending,
+      // 圆点星：径向渐变贴图（Additive 下黑色边缘自然消隐，无需 alphaTest）
+      map: glowTex || undefined,
     });
     const pts = new THREE.Points(geo, mat);
     pts.frustumCulled = false;

@@ -116,13 +116,14 @@ export function createCosmosRenderer(canvas, sim) {
 
   const cosmicSky = createCosmicSky();
   scene.add(cosmicSky);
-  const starfield = createStarfield();
-  scene.add(starfield);
 
-
-  // ---------- 大爆炸专用精灵 ----------
+  // ---------- 程序纹理（星空圆点星 / 星云 / 天体 / 大爆炸共用） ----------
   const glowTex = makeGlowTexture();
   const ringTex = makeRingTexture();
+  const starfield = createStarfield(glowTex);
+  scene.add(starfield);
+
+  // ---------- 大爆炸专用精灵 ----------
   function makeSprite(map, color) {
     return new THREE.Sprite(new THREE.SpriteMaterial({
       map, color, transparent: true, depthWrite: false,
