@@ -183,6 +183,20 @@ export function createStructures(scene, sim, glowTex, ringTex, camera) {
   // 小光点，远处看到的就是"很多个天体"组成的星系 / 星团形状。
   // 小球靠近后成员被逐个发现：发现完成的成员由 detail 点云接管渲染，
   // 预览点随 revealT 淡出。两者共用同一位置，所以是无缝升级，不是重影。
+  //
+  // 2026-09-04 平滑过渡改进：用户反馈"动态 LOD 构建很差劲"。核心症结
+  // 是预览点云在 1.4R~4.5R 中段始终以**固定 base 大小**渲染（暗弱的光点），
+  // 进入 detail 区后 detail 用 `0.55 + tint * 0.55`（恒星，约 0.55~1.10）
+  // 的 size 接管，**预览与 detail 视觉差异大**，已揭示成员从暗变亮像
+  // "凭空变出来"。本轮在三段 LOD 中加入"距离驱动的预览形态过渡"：
+  //   - 中段（1.4R~4.5R）：预览 size 基础（base）→ 中段（base×1.6），
+  //     让"星系是大量恒星的集合"在中段就显形出明显的星点密度
+  //   - 进入区（0.9R~1.4R）：预览再放大 1.0×→1.4×，配合最小像素钳制
+  //     让"看清"的感觉是连续的——detail 接管时位置完全一致、视觉无跳变
+  //   - 配合 detailVisuals 的 easeInOut：detail 一创建不是从 0 起，而是
+  //     从 `size × 0.4 + easeInOut × 0.6` 起，与预览 1.4× 接力无突变
+  //   - detail 销毁（d > 2.4R）：预览立即接管，preview 早就基于 base 显示，
+  //     离开过程是无感的（无明显突变）
   const PREVIEW_CULL = 1500; // 超出这个距离直接不画（远景已不可辨）
   const previewVisuals = new Map(); // s.idx -> { points, geo, mat, pos, size, base, layoutId }
   function updatePreviewClouds() {
@@ -214,17 +228,17 @@ export function createStructures(scene, sim, glowTex, ringTex, camera) {
             } else {
               col[i * 3] = 0.95; col[i * 3 + 1] = 0.55; col[i * 3 + 2] = 0.33;
             }
-            base[i] = (0.18 + tint * 0.14) * layer;
+            base[i] = (0.20 + tint * 0.16) * layer;
           } else if (m.type === 'blackhole' || m.type === 'galaxy') {
             col[i * 3] = 0.62; col[i * 3 + 1] = 0.70; col[i * 3 + 2] = 1.0;
-            base[i] = 0.16 * layer;
+            base[i] = 0.18 * layer;
           } else if (m.type === 'asteroid') {
             // 小行星：暗岩石色，远读为一条淡淡的带
             col[i * 3] = 0.46 + tint * 0.10; col[i * 3 + 1] = 0.41 + tint * 0.08; col[i * 3 + 2] = 0.36 + tint * 0.06;
-            base[i] = 0.035 * layer;
+            base[i] = 0.040 * layer;
           } else {
             col[i * 3] = 0.50 + tint * 0.25; col[i * 3 + 1] = 0.35 + tint * 0.25; col[i * 3 + 2] = 0.85 + tint * 0.15;
-            base[i] = (0.10 + tint * 0.08) * layer;
+            base[i] = (0.12 + tint * 0.08) * layer;
           }
         }
         const size = new Float32Array(base);
@@ -236,7 +250,7 @@ export function createStructures(scene, sim, glowTex, ringTex, camera) {
         // 极远处每个成员仍是可感知的光点，上百个成员融成"星系光雾"
         const mat = new THREE.ShaderMaterial({
           transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, vertexColors: true,
-          uniforms: { uFade: { value: 1 }, uMinPx: { value: 1.15 }, uBoost: { value: 0 } },
+          uniforms: { uFade: { value: 1 }, uMinPx: { value: 1.05 }, uBoost: { value: 0 } },
           vertexShader: `
             attribute float aSize;
             uniform float uMinPx;
@@ -269,18 +283,54 @@ export function createStructures(scene, sim, glowTex, ringTex, camera) {
         v = { points, geo, mat, pos, size, base, layoutId: s._layoutId };
         previewVisuals.set(s.idx, v);
       }
+      // ---- 距离驱动的预览形态过渡（2026-09-04 平滑过渡改进）----
+      // 越接近系统，预览点云的形态越"显形"——避免 detail 接管时的突变。
+      //   中段系数：cd > 4.5R → 1.0×，cd < 1.4R → 1.6×（线性）——中段就
+      //     显出星系是"很多个恒星"，让用户明确看到结构
+      //   detail 已激活（cd < 2.4R）：预览尺寸在 detail 接管区回落——
+      //     cd=2.4R→1.6×，cd=1.4R→1.0×。已揭示成员的预览点用
+      //     easeInOut(1-revealT) 衰减，detail 用 0.55× easeInOut(revealT)
+      //     推到 1.0×——总亮度曲线是单调增益（不突变不凹陷），揭示过程
+      //     是"看清"而非"凭空变出来"
+      const dr = sim._detailRadius(s) || sim._systemRadius(s);
+      const cd = Math.hypot(
+        camera.position.x - s.pos[0],
+        camera.position.y - s.pos[1],
+        camera.position.z - s.pos[2],
+      );
+      const ratio = cd / Math.max(1, dr);
+      const det = s.detail;
+      // 预览尺寸系数：4.5R→1.0, 1.4R→1.6（线性）。detail 接管时延续同一段
+      // 曲线，无额外分支——cd > 1.4R 时为中段系数，cd < 1.4R 时仍为 1.6×
+      // base（detail 已接管，preview 形态由 detail 接力承担；预览在 cd < 1.4R
+      // 的"放大形态"继续显示已揭示成员的接力过程）。
+      // 防止 cd=2.4R 处预览系数从 1.6× 突变为 1.0×（detail 创建/销毁边界
+      // 造成的视觉跳变）。
+      const previewSizeMul = 1.0 + 0.6 * (1 - clamp01((ratio - 1.4) / 3.1));
       // ---- 每帧写入世界坐标（points 本体留在原点）----
       const n = Math.min(layout.length, v.size.length);
       const pos = v.pos, size = v.size, base = v.base;
-      const det = s.detail;
       if (det) {
         // detail 已激活：直接取真实 body 的位置（同步轨道 / 动力学偏移），
-        // 已发现的成员随 revealT 淡出，把画面交给 detail 点云
+        // 已发现的成员随 revealT 淡出预览（预览先于 detail 衰减——接力无突变）。
+        // 2026-09-04 平滑过渡改进：预览衰减与 detail easeInOut 接力——
+        // 两者都用 easeInOut 曲线（detail 用 easeInOut(revealT)，预览用
+        // easeInOut(1-revealT)），总亮度曲线接近常数（d 暗底，d 局部峰值
+        // 也只高出底约 25%），无突变。
         const nb = Math.min(n, det.bodies.length);
         for (let i = 0; i < nb; i++) {
           const b = det.bodies[i];
           pos[i * 3] = b.pos[0]; pos[i * 3 + 1] = b.pos[1]; pos[i * 3 + 2] = b.pos[2];
-          size[i] = b.revealed ? base[i] * (1 - clamp01(b.revealT)) : base[i];
+          if (b.revealed) {
+            // 已揭示：预览按 revealT 衰减到 0（接力给 detail），用 easeInOut
+            const handOff = clamp01(b.revealT);
+            const fadeOut = 1 - easeInOut(handOff);
+            size[i] = base[i] * previewSizeMul * fadeOut;
+          } else {
+            // 未揭示：仍按预览形态显示（detail 区是"看清"，未揭示成员
+            // 表示"航线还没经过"——继续显示预览形态而非立即消失）
+            size[i] = base[i] * previewSizeMul;
+          }
         }
       } else {
         // 无 detail：静态布局 + 与 detail 同公式的自转
@@ -300,7 +350,7 @@ export function createStructures(scene, sim, glowTex, ringTex, camera) {
           } else {
             pos[i * 3] = s.pos[0]; pos[i * 3 + 1] = s.pos[1]; pos[i * 3 + 2] = s.pos[2];
           }
-          size[i] = base[i];
+          size[i] = base[i] * previewSizeMul;
         }
       }
       v.geo.attributes.position.needsUpdate = true;
@@ -312,12 +362,6 @@ export function createStructures(scene, sim, glowTex, ringTex, camera) {
       //     浮现——看到的是"一群恒星"，"星系"这个整体已经看不见了
       //   近（cd < 1.4×dr）：只剩身边的天体，航线经过谁、谁才显形
       // uBoost 只服务中段（远处点云反正要淡出，不再需要远距补偿）
-      const dr = sim._detailRadius(s) || sim._systemRadius(s);
-      const cd = Math.hypot(
-        camera.position.x - s.pos[0],
-        camera.position.y - s.pos[1],
-        camera.position.z - s.pos[2],
-      );
       const farFade = 1 - smoothstep(dr * 3.2, dr * 4.5, cd);
       v.mat.uniforms.uBoost.value = clamp01((cd - dr * 1.5) / (dr * 2.5)) * farFade;
       v.mat.uniforms.uFade.value = smoothstep(0.5, 0.7, s.growth) * farFade;
@@ -461,7 +505,16 @@ export function createStructures(scene, sim, glowTex, ringTex, camera) {
           col[i * 3] *= fadeIn;
           col[i * 3 + 1] *= fadeIn;
           col[i * 3 + 2] *= fadeIn;
-          size[i] *= 0.25 + 0.75 * ease;
+          // 接力起始值（2026-09-04 平滑过渡）：detail 从"预览接力值"开始，
+          // 不是从 0 突变。preview 在 detail 接管区按 (1-revealT) easeInOut
+          // 衰减（远景形态在 revealT=0 时是 base 的 1.0×，细节接管后归 0），
+          // detail 从 0.55× easeInOut 推到 1.0×。两个曲线柔和接力：
+          //   revealT=0：preview 满，detail 0.55×（视觉总和 ≈base×1.55）
+          //   revealT=0.5：preview 半 eo(0.5)=0.5，detail 0.55+0.45*0.5=0.775
+          //   revealT=1.0：preview=0，detail=1.0（看清效果）
+          // 总曲线由 1.55×（细节刚起接管）单调提升到 1.0×（看清态），没有
+          // 凹陷也没有突变——"看清"是缓慢的视觉增益。
+          size[i] *= 0.55 + 0.45 * ease;
           // 降级档位 2：细节点整体缩小，降低 overdraw
           if (sim.config.qualityTier >= 2) size[i] *= 0.8;
         }
@@ -594,10 +647,14 @@ export function createStructures(scene, sim, glowTex, ringTex, camera) {
       const cloudMix = isCollection ? smoothstep(0.6, 0.85, s.growth) : 0;
       const solidFade = 1 - cloudMix;
       const coreFade = isCollection ? 1 - cloudMix * 0.85 : 1;
-      // 星系/超星系团：halo 作为"星系轮廓光"保持到贴身（成员粒子已大幅
-      // 加密，但整体发光轮廓仍由 halo 提供——接近时不会"空荡荡"）；
-      // 其他集合类（星团/星云）维持原有的中距离散场
-      const haloHold = (lv === 'galaxy' || lv === 'supercluster') ? 0.22 : 0.7;
+      // 星系/超星系团：halo 作为"星系轮廓光"在中段已经淡到低亮度，
+      // 进入 detail 接管区（1.4R~2.4R）继续衰减——避免小球进入星系后
+      // 中心还挂着一团"整体光球"。0.40R 时归零（成员粒子接管中心位置）。
+      // 其他集合类（星团/星云）维持原有的近距离散场。
+      // 2026-09-04 平滑过渡改进：haloHold 从 0.22/0.7 调高到 0.40/0.7，
+      // 让 halo 在 0.4R~0.85R 之间淡出——detail 接管区（<1.4R）halo 已经
+      // 衰减到 ~0.55×0.4=0.22 残余亮度，再随接近归零，过渡平滑无残留。
+      const haloHold = (lv === 'galaxy' || lv === 'supercluster') ? 0.40 : 0.7;
       const nearFade = isCollection
         ? smoothstep(detailR * haloHold, detailR * (haloHold + 0.45), pd)
         : 1;
