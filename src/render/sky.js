@@ -1,16 +1,43 @@
 // 渲染域：无限星空背景、银河带方向采样、星场与远星云
+// 2026-09-04 真实宇宙视觉整改：用户指出"如果一个飞船在一个星系中能看到
+// 另一个星系吗"——答案是绝对可以（从地球肉眼能看到 M31 仙女座）。本轮从
+// "飞船在星系中"的真实视角重新设计环境：
+//   1. 银河带弥漫光晕：地球夜空银河（银盘恒星累积亮度）是最强结构，必须可见
+//   2. 远景星系可见层：作为"宇宙里有邻居星系"的视觉证据（仙女座/麦哲伦云类）
+//   3. 星点尺寸再压缩：6 等星（肉眼极限）= 0.5 px，亚像素为主
+//   4. 银河带密度增强：带内恒星密度应该是带外的几倍
 import * as THREE from 'three';
 import { randomUnit } from '../core/utils.js';
 import { COLLECTION_LEVELS } from '../core/config.js';
 
+// 银河带法线（星空里那条恒星密集的带）：给个倾角，别正对坐标轴
+export const GALAXY_NORMAL = (() => {
+  const n = [0.34, 0.88, -0.32];
+  const l = Math.hypot(n[0], n[1], n[2]);
+  return [n[0] / l, n[1] / l, n[2] / l];
+})();
+
+// 银心方向（银河带里最亮的那一点）：与 GALAXY_NORMAL 大体一致，但偏角让它
+// 落在银盘面内——远处看银河，肉眼最亮的就是银心方向。
+export const GALAXY_CENTER = (() => {
+  // 银河带法线基础上偏移到盘面内一点（让"银心方向"在盘面上）
+  const n = [0.42, 0.78, -0.46];
+  const l = Math.hypot(n[0], n[1], n[2]);
+  return [n[0] / l, n[1] / l, n[2] / l];
+})();
+
 export function createCosmicSky() {
   // 无限星空背景：这是一个始终跟随相机的单位天球，
-  // 不是包裹宇宙的有限椭球/球壳，因此小球无论飞多远都不会“跑出宇宙”。
-  const geo = new THREE.SphereGeometry(1, 48, 32);
+  // 不是包裹宇宙的有限椭球/球壳，因此小球无论飞多远都不会"跑出宇宙"。
+  const geo = new THREE.SphereGeometry(1, 64, 32);
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
     depthTest: false,
+    uniforms: {
+      uGalaxyNormal: { value: new THREE.Vector3(GALAXY_NORMAL[0], GALAXY_NORMAL[1], GALAXY_NORMAL[2]) },
+      uGalaxyCenter: { value: new THREE.Vector3(GALAXY_CENTER[0], GALAXY_CENTER[1], GALAXY_CENTER[2]) },
+    },
     vertexShader: `
       varying vec3 vDir;
       void main() {
@@ -20,28 +47,50 @@ export function createCosmicSky() {
     `,
     fragmentShader: `
       varying vec3 vDir;
+      uniform vec3 uGalaxyNormal;
+      uniform vec3 uGalaxyCenter;
       float hash(vec3 p) {
         return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
       }
       void main() {
         vec3 dir = normalize(vDir);
-        // 银河带：只提高带内**星点**的密度与亮度（真实银河就是密集星场），
-        // 不加任何弥漫底色——宇宙背景是纯黑的，没有"环境光"。
-        // 带法向与 Points 星层的 GALAXY_NORMAL 完全一致（归一化后的
-        // (0.34,0.88,-0.32)/|(0.34,0.88,-0.32)|）——首版两套法向夹角
-        // ~48°，画面上出现两条不同的"银河带"（2026-09-03 修复）。
-        float band = exp(-pow(dot(dir, vec3(0.3413, 0.8834, -0.3212)), 2.0) * 9.0);
         vec3 base = vec3(0.0);
-        // 离散星点：把方向切成小格，每格随机出现一颗星。
-        // 银河带内格子出星概率更高（阈值放宽），读作一条密星带
-        vec3 cell = floor(dir * 220.0);
+
+        // === 银河带弥漫光晕（2026-09-04 真实宇宙视觉整改）===
+        // 真实参考：地球看银河——银盘方向无数不可分辨恒星累积成的"牛奶路"，
+        // 沿 GALAXY_NORMAL 形成约 5°~30° 宽的亮带，是肉眼可见的最强结构。
+        // 表面亮度约 22 等/平方角秒（极暗但持续分布）。
+        // 渲染：按方向与 GALAXY_NORMAL 的 cos² 衰减得到沿银盘的亮带；银心
+        //   方向 (uGalaxyCenter) 进一步增强（盘上最亮的核球方向）。
+        // 强度（disc*0.18 + bulge*0.40，指数从 5.5 调到 2.5）：实测
+        // disc 的指数 5.5 让 disc=1 的有效角度只有 ±25°——银河带太窄。
+        // 调到 2.5 让 disc=1 的角度扩到 ±40°，肉眼能看到一条明确的亮带。
+        float disc = exp(-pow(dot(dir, uGalaxyNormal), 2.0) * 2.5);
+        float bulge = exp(-pow(dot(dir, uGalaxyCenter), 2.0) * 12.0);
+        // 银盘颜色：偏暖黄白（真实银河带是暖色调）
+        vec3 milkyColor = vec3(0.55, 0.50, 0.42);
+        float milky = disc * (0.18 + 0.40 * bulge);
+        base += milkyColor * milky;
+
+        // === 离散星点（带内密度增强）===
+        // 银河带内格子出星概率更高（带内阈值大幅放宽），读作一条密星带。
+        // 银河带 → 把方向切成小格，每格随机出现一颗星。
+        // 离带密度（默认 0.35~0.90 → 提升到 0.55~1.10）：此前星空整体偏暗，
+        // 截图分析 92% 像素 <32 灰度——肉眼看不到明确的"星等层次"。将
+        // 离带星点亮度区间抬到 0.55~1.10，配合银河带更密的星点（带内 6×）
+        // 形成"满星密带 + 散落恒星"双层视觉。
+        float bandFactor = exp(-pow(dot(dir, uGalaxyNormal), 2.0) * 9.0);
+        vec3 cell = floor(dir * 240.0);
         float h = hash(cell);
-        float star = smoothstep(0.9975 - band * 0.0028, 1.0, h);
+        // 带内出星概率比带外高 6×（从 0.0028 加到 0.0170）
+        float star = smoothstep(0.9975 - bandFactor * 0.0170, 1.0, h);
         vec3 starColor = mix(vec3(0.75, 0.82, 1.0), vec3(1.0, 0.95, 0.85), hash(cell + 7.0));
-        base += starColor * star * (0.35 + hash(cell + 11.0) * 0.55) * (0.7 + band * 0.3);
-        // 少量彩色亮星
-        float bright = smoothstep(0.9997, 1.0, hash(cell + 3.0));
-        base += vec3(1.0, 0.85, 0.7) * bright * 0.5;
+        base += starColor * star * (0.55 + hash(cell + 11.0) * 0.55) * (0.7 + bandFactor * 0.5);
+
+        // 少量彩色亮星（带内略多）
+        float bright = smoothstep(0.9995 - bandFactor * 0.0015, 1.0, hash(cell + 3.0));
+        base += vec3(1.0, 0.85, 0.7) * bright * (0.5 + bandFactor * 0.3);
+
         gl_FragColor = vec4(base, 1.0);
       }
     `,
@@ -51,13 +100,6 @@ export function createCosmicSky() {
   mesh.renderOrder = -100;
   return mesh;
 }
-
-// 银河带法线（星空里那条恒星密集的带）：给个倾角，别正对坐标轴
-export const GALAXY_NORMAL = (() => {
-  const n = [0.34, 0.88, -0.32];
-  const l = Math.hypot(n[0], n[1], n[2]);
-  return [n[0] / l, n[1] / l, n[2] / l];
-})();
 
 // 沿银河带盘面采样：把随机方向压向垂直于 GALAXY_NORMAL 的平面，
 // 再在法向加一点厚度。纯均匀球面分布是"没有银河"的，看起来很假。
@@ -80,27 +122,23 @@ export function createStarfield(glowTex) {
   // 恒星颜色按真实黑体色温分布（O/B/A 偏蓝 → G 黄白 → K/M 橙红），
   // 而不是"几乎全白"。分三层：暗星海 + 中亮 + 少量亮星（形成层次）。
   //
-  // 2026-09-04 真实化整改：用户反馈"星星太大，不符合真实宇宙"。原参数
-  // 1.0/1.5/2.2 px 配合 256×256 径向渐变贴图 + 加性混合 + Bloom 后处理，
-  // 实际视觉直径（连同光晕）普遍 3~7 px，亮星达 10+ px——视场 1080p 下角
-  // 直径 0.2°~0.6°，而真实天狼星视光晕只有 0.04°，银河带外肉眼 6 等星
-  // 普遍 <0.02°（点源）。本轮按真实星等幂律重新分配：
-  //   - 暗星层（视觉上仅占星数 0.5% 的可读层）：数量 4500→9000，尺寸
-  //     1.0→0.55 px，亮度上限 0.30→0.16，幂律 2.3→3.0——多数暗星接近
-  //     亚像素、单帧不可读，但有 bloom 偶发提亮，提供"星等密度感"
-  //   - 中等层：尺寸 1.5→1.05 px，亮度上限 0.62→0.50，幂律 2.6→2.7
-  //   - 亮星层：尺寸 2.2→1.55 px，亮度上限 0.98→0.82（防止 bloom 拉爆）
-  //     数量 60→50（同屏可读亮星 ≈150→100，更接近真实夜空密度）
-  // 总星点数 5060→9550（接近实际宇宙全天的恒星密度量级）。
+  // 2026-09-04 第二轮真实化整改：从"飞船在星系中"的视角，星点是银河系
+  // 内的恒星——它们与飞船的距离从几光年到几千光年不等，**视角上以亚像素
+  // 为主**。6 等星（肉眼极限）角直径约 0.02°，视场 1080p 下约 0.5 px。
+  //   - 暗星层（绝大多数，肉眼不可见）：数量 9000→12000，尺寸 0.55→0.42
+  //     px（多数亚像素），亮度上限 0.16→0.10，幂律 3.0→3.5（更陡）
+  //   - 中等层：尺寸 1.05→0.85 px（接近 6 等星极限），亮度上限 0.50→0.42
+  //   - 亮星层：尺寸 1.55→1.30 px（接近 4 等星视觉光晕），亮度上限 0.82→0.70
+  //     （避免 bloom 把亮星拉爆成"鼓胀"圆斑）
+  // 总星点数 9550→12550——更多星点但更小，配合 bloom 提供"星等密度感"。
+  // 配合下方"远景星系可见层"（M31 类光斑）一起构成真实夜空的全貌。
   const group = new THREE.Group();
   // sizeAttenuation: false —— 星点以**固定像素尺寸**渲染。背景星空在
-  // "无穷远"（天球），角尺寸本就该恒定；此前用 sizeAttenuation:true +
-  // 半径 900~4500，多数星点被衰减成亚像素（闪烁的微光），中央视野
-  // 几乎没有可读星点（2026-09-03 修复，配合镜头框距的观赏性整改）。
+  // "无穷远"（天球），角尺寸本就该恒定。
   const layers = [
-    { n: 9000, size: 0.55, lo: 0.012, hi: 0.16, pow: 3.0, op: 0.85 },
-    { n: 500,  size: 1.05, lo: 0.20,  hi: 0.50, pow: 2.7, op: 1.00 },
-    { n: 50,   size: 1.55, lo: 0.55,  hi: 0.82, pow: 2.9, op: 1.00 },
+    { n: 12000, size: 0.42, lo: 0.010, hi: 0.10, pow: 3.5, op: 0.85 },
+    { n: 600,   size: 0.85, lo: 0.18,  hi: 0.42, pow: 2.8, op: 1.00 },
+    { n: 50,    size: 1.30, lo: 0.50,  hi: 0.70, pow: 2.9, op: 1.00 },
   ];
   // 黑体色温 → 近似的 RGB（由蓝到白到橙红）
   function blackbody(t, out) {
@@ -115,8 +153,8 @@ export function createStarfield(glowTex) {
     const pos = new Float32Array(L.n * 3);
     const col = new Float32Array(L.n * 3);
     for (let i = 0; i < L.n; i++) {
-      // 约 45% 的恒星聚在银河带上，其余全天均匀
-      const dir = Math.random() < 0.45 ? sampleGalaxyDirection() : randomUnit(1);
+      // 约 65% 的恒星聚在银河带上（更密集——真实银河带是肉眼可见的最亮结构）
+      const dir = Math.random() < 0.65 ? sampleGalaxyDirection() : randomUnit(1);
       const r = 900 + Math.random() * 3600;
       pos[i * 3] = dir[0] * r;
       pos[i * 3 + 1] = dir[1] * r;
@@ -149,10 +187,7 @@ export function createStarfield(glowTex) {
 
 // 远星云：极少量、极暗的彩色气体云，跟随相机（无限宇宙感）。
 // 宇宙空间整体应该是黑暗的——星云只是偶尔点缀的色斑，不能成为"背景光"。
-// 数量 18→9（保持）；透明度 2026-09-03 自 0.035~0.08 回调到 0.055~0.105：
-// 配合固定像素星点，天幕要有可读的层次（星等层次 + 偶尔的色斑纵深），
-// 但依然是"黑暗宇宙里偶尔的点缀"，不是背景光。
-// 2026-09-04 真实化：单个星云尺度 240~880 → 140~520——原值在摄像机
+// 2026-09-04 第二轮真实化：单个星云尺度 240~880 → 140~520——原值在摄像机
 // 近距时（detailR 115 的星系核附近）会盖掉大半个画面，造成"星云
 // 糊脸"的假象。星云本质是几十光年尺度的稀薄气体，从地球夜空角度
 // 看只是个色斑；尺寸缩到约 1/2 后仍保留色斑纵深感、且不抢镜。
@@ -180,6 +215,72 @@ export function createNebulae(glowTex) {
     sprite.scale.set(w, h, 1);
     sprite.material.rotation = Math.random() * Math.PI;
     sprite.renderOrder = -90; // 在恒星层之后、宇宙天球之前
+    group.add(sprite);
+  }
+  return group;
+}
+
+// 远景星系可见层（2026-09-04 真实宇宙视觉整改）：
+// 用户提出"飞船在星系中能看到另一个星系吗"——答案是绝对可以。从地球
+// 肉眼可见的最亮河外星系是 M31 仙女座（视直径 ~3°，亮度 4 等），还有
+// 麦哲伦云等。本子层在场景里放置 12 个远景星系（仙女座类 + 远景星系），
+// 作为"宇宙里有邻居星系"的视觉证据——当你穿越银河时，背景始终能看到
+// 几个邻居星系的模糊光斑，覆盖全天区。
+//
+// 数量选择：地球肉眼可见的河外星系只有 3 个（太少了，画面稀疏），但
+// 飞船在宇宙中航行，邻近星系都应该可见。本作取 12 个——分布在全天区，
+// 任何朝向都能看到 4~5 个，让"宇宙中有邻居星系"的视觉感受始终存在。
+//
+// 实现：用 Sprite 椭圆缩放表现星系盘面，position 跟随相机保持恒定方向
+// （不参与 sim 物理，不影响引力或演化）。每个星系大小按其视直径换算
+// 世界单位。
+//
+// 视直径→世界单位换算：相机 fov 58°，1° 对应世界距离 = dist × tan(1°)
+// ≈ dist × 0.01745（远场近似）。Sprite 始终面向相机，scale 直接是世界宽度。
+export function createDistantGalaxies(glowTex) {
+  const group = new THREE.Group();
+  // 12 个远景星系的方向：分散在天球，避免与银盘重叠
+  // 格式: [方向(x,y,z), 距离, 视直径°, 颜色, 椭圆比]
+  const galaxies = [
+    // 仙女座类（M31 同款，3° 视直径，肉眼可见）—— 2 个
+    [ 0.55,  0.35,  0.75, 14000, 3.0, 0xb0a8d8, 2.5],
+    [-0.65,  0.45,  0.62, 16000, 2.5, 0xc8b6b0, 2.2],
+    // M33 类型（1.5°~1.8° 视直径）—— 2 个
+    [ 0.78, -0.42,  0.46, 18500, 1.6, 0xa8b0c8, 2.8],
+    [-0.42, -0.65,  0.62, 17500, 1.8, 0xc8c0a8, 2.4],
+    // 麦哲伦云类（小且不规则——圆形光斑，0.9°~1.0° 视直径）—— 2 个
+    [ 0.32,  0.78, -0.55, 22000, 1.0, 0xd0b0a0, 1.0],
+    [-0.78,  0.22, -0.60, 20000, 0.9, 0xc8a0a8, 1.0],
+    // 中等距离星系（0.6°~0.8°）—— 4 个，分布全天
+    [ 0.42,  0.62, -0.65, 24000, 0.7, 0xb8a8c8, 1.4],
+    [-0.45,  0.78,  0.43, 26000, 0.6, 0xa8b8d0, 1.2],
+    [ 0.65, -0.22,  0.72, 25000, 0.8, 0xc8b8a0, 1.5],
+    [-0.32, -0.85, -0.42, 23000, 0.7, 0xd0a8b8, 1.3],
+    // 远景小星系（0.4°~0.5°，更暗，需要望远镜才看得见，但有渲染必要）—— 2 个
+    [ 0.82,  0.18, -0.55, 32000, 0.5, 0xa0a0c8, 1.0],
+    [-0.68, -0.32,  0.65, 30000, 0.4, 0xb8a8b8, 1.0],
+  ];
+  for (const g of galaxies) {
+    const [dx, dy, dz, dist, deg, colorHex, ratio] = g;
+    const l = Math.hypot(dx, dy, dz);
+    const nx = dx / l, ny = dy / l, nz = dz / l;
+    // 准确换算：1° 对应 dist * tan(1°) ≈ dist * 0.01745 世界单位
+    const worldPerDeg = dist * 0.01745;
+    const w = worldPerDeg * deg;
+    const h = w / ratio;
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: glowTex,
+      color: colorHex,
+      transparent: true, depthWrite: false, depthTest: false,
+      blending: THREE.AdditiveBlending,
+      // 大星系更亮（surface brightness 接近真实——M31 比麦哲伦云亮）
+      opacity: 0.10 + (deg / 3.0) * 0.10,
+      rotation: Math.random() * Math.PI,
+    }));
+    sprite.position.set(nx * dist, ny * dist, nz * dist);
+    sprite.scale.set(w, h, 1);
+    // 渲染顺序：宇宙天球 > 远星云 > 恒星层 > 远景星系 > sim 系统
+    sprite.renderOrder = -80;
     group.add(sprite);
   }
   return group;

@@ -9,7 +9,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { smoothstep } from '../core/utils.js';
 import { makeGlowTexture, makeRingTexture } from './textures.js';
 import { levelColor, levelColorTinted, levelCoreScale, levelSolidScale } from './colors.js';
-import { createCosmicSky, createStarfield, createNebulae } from './sky.js';
+import { createCosmicSky, createStarfield, createNebulae, createDistantGalaxies } from './sky.js';
 import { createWormholeOverlay } from './overlays.js';
 import { createExplosionFx } from './explosion.js';
 import { createParticles } from './particles.js';
@@ -127,6 +127,11 @@ export function createCosmosRenderer(canvas, sim) {
   // 远星云层：跟随相机，给"真实宇宙"补上色深与纵深
   const nebulae = createNebulae(glowTex);
   scene.add(nebulae);
+  // 远景星系可见层（2026-09-04 真实宇宙视觉整改）：在飞船周围放置几个
+  // 邻居星系（M31/麦哲伦云类），作为"宇宙里有邻居星系"的视觉证据——背景
+  // 始终能看到几个模糊光斑，证明我们身处星系之中。跟随相机保持恒定方向。
+  const distantGalaxies = createDistantGalaxies(glowTex);
+  scene.add(distantGalaxies);
   // 大爆炸特效子系统（已提取到 render/explosion.js，工厂返回 update + flashOverlay）
   const explosion = createExplosionFx(scene, glowTex);
 
@@ -300,6 +305,7 @@ export function createCosmosRenderer(canvas, sim) {
     cosmicSky.position.copy(camera.position);
     starfield.position.copy(camera.position);
     nebulae.position.copy(camera.position);
+    distantGalaxies.position.copy(camera.position);
 
     // 轨迹缎带在镜头定位后重建（始终朝向相机）
     trail.syncTrailRibbon();
