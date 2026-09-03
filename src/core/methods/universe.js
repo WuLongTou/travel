@@ -11,7 +11,7 @@ import {
   CLASS_DEFS, PROBE_DRAG_LEGACY, PROBE_IGM_DRAG, PROBE_RESPAWN_SPEED, PROBE_MAX_SPEED,
 } from '../config.js';
 import { randomUnit, clamp01, smoothstep, easeInOut, orbitPolar, hash01 } from '../utils.js';
-import { levelForSeed, finalLevelFor, LEVEL_LABELS, DEATH_VERBS, EVENT_LEVELS, EVENT_MESSAGES } from '../sim-shared.js';
+import { levelForSeed, finalLevelFor, LEVEL_LABELS, DEATH_VERBS, EVENT_LEVELS, EVENT_MESSAGES, gravityParamsFor } from '../sim-shared.js';
 
 export const universeMethods = {
   _assignMembers(force = false) {
@@ -73,7 +73,10 @@ export const universeMethods = {
           const dz = sz - pos[2];
           const r2 = dx * dx + dy * dy + dz * dz;
           if (r2 < 1e-6) continue;
-          const f = gG * PROBE_GRAVITY_MULT * (s.mass * mS) / Math.pow(r2 + EPS2, 0.95) * gs;
+          // 衰减律与 _updateProbe 一致（gravityParamsFor 统一取参：
+          // 集合系统延展 1/r、单天体点质量）
+          const gp = gravityParamsFor(s.level);
+          const f = gG * PROBE_GRAVITY_MULT * (s.mass * gp.mult * mS) / Math.pow(r2 + gp.soft2, gp.invExp) * gs;
           ax += f * dx; ay += f * dy; az += f * dz;
         }
       }

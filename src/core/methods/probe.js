@@ -11,7 +11,7 @@ import {
   CLASS_DEFS, PROBE_DRAG_LEGACY, PROBE_IGM_DRAG, PROBE_RESPAWN_SPEED, PROBE_MAX_SPEED,
 } from '../config.js';
 import { randomUnit, clamp01, smoothstep, easeInOut, orbitPolar, hash01 } from '../utils.js';
-import { levelForSeed, finalLevelFor, LEVEL_LABELS, DEATH_VERBS, EVENT_LEVELS, EVENT_MESSAGES } from '../sim-shared.js';
+import { levelForSeed, finalLevelFor, LEVEL_LABELS, DEATH_VERBS, EVENT_LEVELS, EVENT_MESSAGES, gravityParamsFor } from '../sim-shared.js';
 
 export const probeMethods = {
   _beginDeath(killer, label, captureSeedIdx, deathType, launchR) {
@@ -263,24 +263,25 @@ export const probeMethods = {
           const dz = s.pos[2] - pr.pos[2];
           const r2 = dx * dx + dy * dy + dz * dz;
           if (r2 < 1e-6) continue;
-          // ---- 质点质量按系统类型区分（修正过的建模）----
-          // 单天体系统（星尘/行星/恒星）：种子就是那颗天体本身，质点**永不退场**。
-          //   此前一律按 detailRadius 平滑退场，导致小球飞向恒星时贴身引力归零
-          //   （剩下的行星成员质量太小），看起来像"引力算错了"——单天体没有
-          //   "质量展开给成员"这回事。
-          // 集合系统（星团/星系/超星系团/黑洞）：远场仍由质点承担（多极展开
-          //   单极项），进入系统后**保留 0.45 的底数**平滑退到 0.45×mass——
-          //   成员里"已发现"的只是一小部分，且几百个质点也代表不了
-          //   10^11 颗恒星 + 暗物质晕的连续引力场：星系内部的引力不该
-          //   凭空消失（未分辨质量就是连续分量）。总有效质量始终 ≤ s.mass，
-          //   与成员引力不重复计入。
-          let seedMass = s.mass;
+          // ---- 质点质量与衰减律按系统类型区分（2026-09-03 引力重做）----
+          // 单天体（星尘/行星/恒星）：点质量律 a ∝ 1/r^1.9（软化 EPS2），
+          //   质点永不退场。
+          // 集合系统（星团/星系/超星系团/星云/黑洞）：延展质量分布——
+          //   真实星系（恒星盘 + 暗物质晕）的旋转曲线在盘尺度内平坦，
+          //   对应 a ∝ 1/r（对数势），比点质量衰减慢——从 3~4 倍系统
+          //   半径外就持续弯曲小球航线（旧点质量律在 r=200 处仅
+          //   0.002/s²，"直接飞过去"毫无偏转）。参数标定见
+          //   sim-shared.js 的 gravityParamsFor（三处公式统一取用）。
+          //   进入系统后质点退到 0.45 底数（成员引力接管），总有效
+          //   质量 ≤ s.mass。
+          const gp = gravityParamsFor(s.level);
+          let seedMass = s.mass * gp.mult;
           if (s.detail && s.detail.radius > 0 && COLLECTION_LEVELS.has(s.level)) {
             const wIn = smoothstep(s.detail.radius * 0.6, s.detail.radius * 1.4, Math.sqrt(r2));
-            seedMass = s.mass * (0.45 + 0.55 * wIn);
+            seedMass = s.mass * gp.mult * (0.45 + 0.55 * wIn);
           }
           if (seedMass < 1e-6) continue;
-          const f = gG * PROBE_GRAVITY_MULT * (seedMass * mS) / Math.pow(r2 + EPS2, 0.95) * gs;
+          const f = gG * PROBE_GRAVITY_MULT * (seedMass * mS) / Math.pow(r2 + gp.soft2, gp.invExp) * gs;
           ax += f * dx; ay += f * dy; az += f * dz;
         }
       }
@@ -296,8 +297,11 @@ export const probeMethods = {
         }
         if (memberW <= 0.001) continue;
         for (const b of s.detail.bodies) {
-          // 未发现的天体不产生引力——它们还没"进入小球的宇宙"
-          if (b._hidden) continue;
+          // ---- 所有成员天体都产生引力（2026-09-03 修正）----
+          // "发现"只是视觉/交互概念，恒星物理上就在那里——未发现的
+          // 成员同样对小球施加引力（用户要求"所有天体都正常产生引力
+          // 作用"）。成员质量已归一化到 s.mass（§5.4），全部计入也不
+          // 超过系统总质量。碰撞捕获仍要求已发现（接近是交互前提）。
           const dx = b.pos[0] - pr.pos[0];
           const dy = b.pos[1] - pr.pos[1];
           const dz = b.pos[2] - pr.pos[2];
@@ -332,10 +336,17 @@ export const probeMethods = {
       // 30/s 巡航穿过恒星系只花 0.9s、行星系 0.3s，伴星/行星/小行星带
       // 根本来不及看清（实测小球速度是成员轨道速度的 17~60 倍）。
       // 现在：范围扩到 detailRadius（"可分辨细节"的边缘就开始减速），
-      // 强度按层级分级 + 深度平方（边缘弱、核心强）：
-      //   小型单天体（行星/恒星/星尘）3.0/s —— 贴近时降到可观察速度
-      //   中型集合（星团/黑洞）        1.6/s
-      //   大型集合（星系/超星系团）    1.0/s —— 宏观结构保持穿越节奏
+      // 强度按层级分级 + 深度线性（2026-09-03 引力重做配套再标定）：
+      //   小型单天体（行星/恒星/星尘）2.2/s —— 贴近时降到可观察速度
+      //   中型集合（星团/黑洞）        0.5/s
+      //   大型集合（星系/超星系团）    0 —— 完全无阻尼！
+      // 大系统阻尼必须为零：集合系统现在是延展 1/r 引力（对数势），
+      // 任何非零阻尼都会持续抽走轨道能量——小球被渐进拉入 detailR×0.75
+      // 阻尼圈、数圈减速后螺旋坠入星系核（实测 0.45 乃至 0.10 都会
+      // 捕获连 400 外的掠过）。真实宇宙里星际介质对穿越探测器无阻尼，
+      // 星系穿越是纯引力弹弓（能量守恒、出速=入速、轨迹弯曲）；
+      // "穿越星系看清结构"由显示层 envScale 自动慢放承担（接近系统
+      // 1.1R 内 ×0.35，2026-09-03 已实装）。
       let drag = 0;
       for (const s of this.seeds) {
         const R = Math.max(this._systemRadius(s), (this._detailRadius(s) || 0) * 0.75);
@@ -345,9 +356,11 @@ export const probeMethods = {
         const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
         if (d < R) {
           const depth = 1 - d / R;
-          const coeff = (s.level === 'planet' || s.level === 'star' || s.level === 'dust' || s.level === 'void') ? 2.2
-            : (s.level === 'cluster' || s.level === 'blackhole') ? 0.9
-            : 0.45;
+          // 星云（dust/void）归中档：它们也是延展引力的集合系统，
+          // 2.2 高阻尼 + 延展引力会把小球黏在云里数分钟（实测 141s）
+          const coeff = (s.level === 'planet' || s.level === 'star') ? 2.2
+            : (s.level === 'cluster' || s.level === 'blackhole' || s.level === 'dust' || s.level === 'void') ? 0.5
+            : 0;
           let k = coeff * depth;
           if (s.level === 'blackhole') {
             const cap = this._captureRadius(s);
@@ -412,6 +425,7 @@ export const probeMethods = {
 
     // 找出对小球施加最强引力的天体系统，供智能镜头聚焦（同时显示小球与它）。
     // 影响力 = 该源对小球造成的加速度大小，越近/质量越大越强。
+    // 衰减律与引力积分保持一致（gravityParamsFor 统一取参）。
     let bestInf = -1, bestStr = 0;
     if (gs > 0.001) {
       for (const s of this.seeds) {
@@ -421,7 +435,8 @@ export const probeMethods = {
         const r2 = dx * dx + dy * dy + dz * dz;
         if (r2 < 1e-6) continue;
         const d = Math.sqrt(r2);
-        const f = gG * PROBE_GRAVITY_MULT * (s.mass * mS) / Math.pow(r2 + EPS2, 0.95) * gs;
+        const gp = gravityParamsFor(s.level);
+        const f = gG * PROBE_GRAVITY_MULT * (s.mass * gp.mult * mS) / Math.pow(r2 + gp.soft2, gp.invExp) * gs;
         const strength = f * d;
         if (strength > bestStr) { bestStr = strength; bestInf = s.idx; }
       }
@@ -550,7 +565,8 @@ export const probeMethods = {
           const dy = body.pos[1] - pr.pos[1];
           const dz = body.pos[2] - pr.pos[2];
           const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-          const hitR = body.radius + 0.18;
+          // 碰撞半径 = 天体半径 + 小球半径（0.16，月亮级，与渲染一致）
+          const hitR = body.radius + 0.16;
           if (pr.respawnGrace <= 0 && d < hitR) {
             const parent = this.seeds[body.parent];
             const isChild = body !== b;

@@ -8,7 +8,10 @@ import * as THREE from 'three';
 
 export function createTrail(scene, sim, camera) {
   const TRAIL_MAX = 3000;
-  const TRAIL_HALF_WIDTH = 0.13;   // 头部（最新点）半宽，世界单位（细、不高光）
+  // 轨迹缎带半宽（2026-09-03 自 0.13 收细到 0.085）：轨迹是"细淡的
+  // 指示线"，加色混合 + bloom 后 0.13 会显粗；与小球（半径 0.16，
+  // 月亮级）同比例。
+  const TRAIL_HALF_WIDTH = 0.085;
   const trailPos = new Float32Array(TRAIL_MAX * 3);
   const trailCol = new Float32Array(TRAIL_MAX * 3); // 每个采样点的颜色（速度映射）
   // 缎带几何：每个采样点展开为左右两个顶点（2×N），用三角形条带连接
@@ -90,7 +93,9 @@ export function createTrail(scene, sim, camera) {
 
       const t = show > 1 ? i / (show - 1) : 1;
       const w = TRAIL_HALF_WIDTH;                      // 恒定宽度，近端不加粗
-      const fade = Math.pow(t, 1.5);                   // 消散只靠 alpha 淡出
+      // 消隐曲线（2026-09-03 自 t^1.5 调陡到 t^2.6）：尾部快速淡出、
+      // 头部保持——轨迹读作"最近航迹的余韵"而不是拖一条长鞭
+      const fade = Math.pow(t, 2.6);
       const cr = trailCol[s3] * fade;
       const cg = trailCol[s3 + 1] * fade;
       const cb = trailCol[s3 + 2] * fade;

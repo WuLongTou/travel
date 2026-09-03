@@ -13,16 +13,20 @@ export function createProbeFx(scene, sim, glowTex, ringTex, trail, camera) {
     blending: THREE.AdditiveBlending, depthTest: false,
   }));
 
-  // 主角小球：克制的能量球——淡白核心 + 轻微青蓝边缘 + 弱镜面高光。
-  // 能看到即可，不做过曝高光，配 bloom 也保持低调。
+  // 主角小球：月亮级尺寸（2026-09-03 自 0.5 缩到 0.16）——与天体比例
+  // "基本对上"：恒星本体 0.30~0.42、行星 0.16~0.28，小球 ≈ 行星的
+  // 1/2、恒星的 1/2~1/4（真实比例月亮:太阳 = 1:400 无法可视化，
+  // 取"明显小于恒星、与行星同级"的观赏性修正）。
+  // 克制的能量球——淡白核心 + 轻微青蓝边缘 + 弱镜面高光。
   const probeMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.5, 40, 32),
+    new THREE.SphereGeometry(0.16, 40, 32),
     new THREE.ShaderMaterial({
       depthTest: false,
       uniforms: {
         uCore: { value: new THREE.Color(0xd6e4ff) },
         uRim: { value: new THREE.Color(0x5a8fd0) },
         uSpec: { value: new THREE.Color(0xffffff) },
+        uPulse: { value: 0 },
       },
       vertexShader: `
         varying vec3 vN; varying vec3 vV;
@@ -36,6 +40,7 @@ export function createProbeFx(scene, sim, glowTex, ringTex, trail, camera) {
       fragmentShader: `
         varying vec3 vN; varying vec3 vV;
         uniform vec3 uCore; uniform vec3 uRim; uniform vec3 uSpec;
+        uniform float uPulse;
         void main() {
           vec3 n = normalize(vN);
           vec3 v = normalize(vV);
@@ -45,7 +50,8 @@ export function createProbeFx(scene, sim, glowTex, ringTex, trail, camera) {
           vec3 L = normalize(vec3(0.35, 1.0, 0.6));
           vec3 R = reflect(-L, n);
           float spec = pow(max(0.0, dot(R, v)), 42.0);
-          vec3 col = mix(uCore, uRim, fresnel);
+          // 信标脉冲：核心亮度随 uPulse 呼吸（信号灯）
+          vec3 col = mix(uCore, uRim, fresnel) * (0.82 + 0.36 * uPulse);
           col += uSpec * spec * 0.25;
           gl_FragColor = vec4(col, 1.0);
         }
@@ -56,9 +62,9 @@ export function createProbeFx(scene, sim, glowTex, ringTex, trail, camera) {
   scene.add(probeMesh);
 
   // 光冕（菲涅尔）：边缘泛蓝白光，给小球"体积光"的质感；作为小球子节点，
-  // 死亡演出（潮汐拉伸/汽化收缩）时自动同步缩放。
+  // 死亡演出（潮汐拉伸/汽化收缩）时自动同步缩放。半径与小球同比例缩小。
   const probeCorona = new THREE.Mesh(
-    new THREE.SphereGeometry(0.85, 32, 24),
+    new THREE.SphereGeometry(0.28, 32, 24),
     new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, depthTest: false,
       blending: THREE.AdditiveBlending,
@@ -290,11 +296,17 @@ export function createProbeFx(scene, sim, glowTex, ringTex, trail, camera) {
       }
     }
     // 小球光晕：远处仍是一颗可辨认的亮星，近处保持清晰但不炸白。
-    // 小球光晕：能看到即可，收敛到克制——远处是可辨的光点，近处不过曝
+    // 信标脉冲（2026-09-03）：周期 1.3s 的平滑呼吸（信号灯）——小球在
+    // 任何距离都"活着"：核心亮度 ×(0.82+0.36p)，glow 尺寸 ×(1+0.4p)、
+    // halo ×(1+0.55p)。p 用 sin² 整形（平滑起落、无跳变）。
     const camDist = camera.position.distanceTo(probeMesh.position);
     const glowScale = 1.6 * Math.max(0.5, Math.min(2.2, 15 / Math.max(camDist, 4)));
-    probeGlow.scale.setScalar(glowScale);
-    probeHalo.scale.setScalar(glowScale * 1.4);
+    const beacon = 0.5 - 0.5 * Math.cos(sim.time * Math.PI * 2 / 1.3); // 0..1 平滑脉冲
+    probeMesh.material.uniforms.uPulse.value = beacon;
+    probeGlow.scale.setScalar(glowScale * (1 + 0.4 * beacon));
+    probeGlow.material.opacity = 0.7 * (0.85 + 0.15 * beacon);
+    probeHalo.scale.setScalar(glowScale * 1.4 * (1 + 0.55 * beacon));
+    probeHalo.material.opacity = 0.22 * (0.8 + 0.2 * beacon);
     // ---- 死亡演出：潮汐拉伸（意大利面化）/ 汽化收缩 / 烧蚀压缩 + 配色跟随 ----
     if (pr.dying) {
       const k = 1 - Math.max(0, pr.dyingT) / Math.max(1e-4, pr.dyingDur);
