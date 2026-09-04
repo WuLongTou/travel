@@ -5,7 +5,7 @@
 // 但轨道半径、周期、相对顺序、数量严格用真实数据。
 import * as THREE from 'three';
 import { PLANETS, SOL, MOONS, ASTEROID_BELT, KUIPER_BELT, SOURCE_NOTE } from './data/solar.js';
-import { AU_KM } from '../util/units.js';
+import { AU_KM, GM_SUN_KM } from '../util/units.js';
 import { registerWorld } from './worlds.js';
 import { makeSphere, makeRing, makeOrbitLine, makeGlowSprite } from '../render/bodies.js';
 import { makeTextSprite, labelScaleFor } from '../render/labels.js';
@@ -243,12 +243,16 @@ export function buildSolarWorld() {
     id: 'solar', title: '太阳系', unitName: 'AU', kmPerUnit: AU_KM,
     intro: '尺度 ~120 AU。八大行星沿真实轨道公转，行星大小为教学缩放（真实比例仅约万分之一）。把时间调到 1月/秒，看行星、卫星转动起来。',
     worldRadius: 55,
+    // 轨道飞行模式：真实太阳引力参数 GM☉=1.327e11 km³/s²（IAU 标准值），
+    // 换算到 AU³/s²。轨道周期/速度均为真实值——切模式后把时间调到
+    // 1天/秒，即可按真实开普勒周期看行星际轨道运动。
+    gravity: { center: [0, 0, 0], GM: GM_SUN_KM / (AU_KM ** 3), minR: 0.06, name: '太阳' },
     spawn: [22, 7, 26],
     spawnLookAt: [0, 0, 0],
     viewDist: 30,
     maxSpeedWorldPerS: 2.2,
     thrustAccWorldPerS2: 1.2, dragPerSec: 0.4, timeScaleMax: 86400 * 365 * 2,
-    ambient: { starCount: 3000, starSpread: 600 },
+    ambient: { starCount: 1400, starSpread: 600 },
     group, entities, pickables,
     update(dtSim, clock, probe) {
       // 行星轨道动画：真实周期 → 时间倍率足够才明显

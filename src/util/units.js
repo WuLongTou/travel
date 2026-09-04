@@ -6,6 +6,7 @@ export const AU_KM = 149597870.7; // 1 天文单位 km（IAU 精确定义）
 export const LY_KM = 9460730472580.8; // 1 光年 km（IAU：光在真空中一年）
 export const PC_LY = 3.261563777; // 1 秒差距 ly
 export const YR_S = 365.25 * 86400; // 1 儒略年（天文年历标准）
+export const GM_SUN_KM = 1.32712440018e11; // 太阳引力参数 GM☉ km³/s²（IAU 标准值）
 
 export const AU = { km: AU_KM, m: AU_KM * 1000 };
 export const LY = { km: LY_KM, m: LY_KM * 1000 };

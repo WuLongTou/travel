@@ -29,7 +29,7 @@ export function starCloud(count, spread, colorFn = () => '#ffffff', size = 1.6) 
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   const mat = new THREE.PointsMaterial({
     size, sizeAttenuation: false, vertexColors: true,
-    transparent: true, opacity: 0.9, depthWrite: false,
+    transparent: true, opacity: 0.75, depthWrite: false,
   });
   const points = new THREE.Points(geo, mat);
   points.frustumCulled = false;
@@ -40,7 +40,7 @@ export function starCloud(count, spread, colorFn = () => '#ffffff', size = 1.6) 
 // 真实银河 = 盘面恒星密集 + 银心鼓包；教学简化用扁盘点云。
 export function milkyWayBand(thickness = 0.12) {
   const group = new THREE.Group();
-  const count = 26000;
+  const count = 12000;
   const positions = new Float32Array(count*3);
   const colors = new Float32Array(count*3);
   const rng = mulberry32(42);
@@ -67,7 +67,7 @@ export function milkyWayBand(thickness = 0.12) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  const mat = new THREE.PointsMaterial({ size: 2.2, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0.85, depthWrite: false });
+  const mat = new THREE.PointsMaterial({ size: 2.0, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0.62, depthWrite: false });
   const pts = new THREE.Points(geo, mat);
   group.add(pts);
   // 缩放为世界大尺度（跟随相机外很远）

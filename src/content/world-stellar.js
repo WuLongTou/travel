@@ -107,7 +107,7 @@ export function buildStellarWorld() {
     viewDist: 6,
     labelFadeDist: 14, // 60 ly 邻域内 featured 恒星标注保持可读
     maxSpeedWorldPerS: 1.6, thrustAccWorldPerS2: 0.7, dragPerSec: 0.4, timeScaleMax: 365 * 86400,
-    ambient: { starCount: 4000, starSpread: 260 },
+    ambient: { starCount: 1800, starSpread: 260 },
     group, entities,
     update() {},
   };

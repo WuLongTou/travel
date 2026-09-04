@@ -20,6 +20,8 @@ import { formatKm, lightTravelText, unitRulerText, C_KM_S } from './util/units.j
 import { ChaseCam } from './render/camera.js';
 import { updateLabelFades } from './render/labels.js';
 import { TrailRibbon } from './render/trail.js';
+import { makeSphere, makeGlowSprite } from './render/bodies.js';
+import { rockyTexture } from './render/textures.js';
 
 const canvas = document.getElementById('scene');
 const engine = new CosmicEngine(canvas);
@@ -29,6 +31,16 @@ const nav = new Navigator(engine, probe, clock);
 const chaseCam = new ChaseCam(engine.camera, probe);
 engine.chaseCam = chaseCam;
 const trailRibbon = new TrailRibbon(engine.scene);
+// 陨石本体（可视）：巡航/轨道飞行时都跟随探测球，跟拍视角下可见自己
+const meteorMesh = makeSphere({
+  radius: 1, color: '#9a8f80', roughness: 1,
+  // 微自发光：夜面朝向相机时仍可辨认（与行星同策略）
+  emissive: '#9a8f80', emissiveIntensity: 0.35,
+  map: rockyTexture({ base: '#8d7f70', dark: '#5c5045', light: '#b3a595', craterCount: 34, seed: 61, size: 256 }),
+});
+engine.scene.add(meteorMesh);
+const meteorGlow = makeGlowSprite(2.6, '#c9b8a0', 0.4);
+meteorMesh.add(meteorGlow);
 
 const input = new Input(canvas);
 const ui = new UI(engine, {
@@ -58,7 +70,7 @@ nav.onWorldChanged = (world, idx) => {
   ui.setCurrentRate(clock.rate);
   ui.setTimeState({ clockLabel: clock.timeLabel(), paused: clock.paused });
   // 键位提示同步刷新
-  ui.setDockHelp(curWorld.hint || 'WASD 飞行 · 鼠标拖拽转向 · 滚轮缩放 · F 下潜 · 空格 暂停');
+  ui.setDockHelp(curWorld.hint || '点击画面锁定鼠标转向 · WASD 飞行 · G 轨道飞行 · 滚轮缩放 · F 下潜');
   // 轨迹缎带重建 + 层介绍导览
   trailRibbon.reset();
   ui.showIntro(world);
@@ -68,6 +80,7 @@ nav.onWorldChanged = (world, idx) => {
 let lastFrame = performance.now();
 let frame = 0;
 let wheelAcc = 0;
+let prevG = false; // G 键边沿检测
 
 function simulate(dtReal) {
   if (!curWorld || !curWorld.update) return;
@@ -120,15 +133,39 @@ function renderFrame(now) {
   const steer = input.poll();
   const a = input.actions;
 
+  // G 键（边沿触发）：巡航 ⇄ 轨道飞行（陨石模式）
+  const gDown = input.keys.has('g');
+  if (gDown && !prevG && curWorld) {
+    if (probe.mode === 'ballistic') {
+      probe.exitBallistic();
+      ui.setDockHelp(curWorld.hint || '点击画面锁定鼠标转向 · WASD 飞行 · G 轨道飞行 · 滚轮缩放 · F 下潜');
+    } else {
+      probe.enterBallistic();
+      // 轨道物理以模拟时间积分：限制倍速保证轨道稳定可读（真实周期可见）
+      if (clock.rate > 2592000) { clock.setRate(2592000); ui.setCurrentRate(2592000); }
+      ui.setDockHelp('轨道飞行（陨石）：WASD 变轨 · 时间 1月/秒~1年/秒 观看开普勒轨道 · G 返回巡航');
+    }
+  }
+  prevG = gDown;
+
   if (curWorld) {
-    // 转向（鼠标拖拽）
+    // 转向：Pointer Lock 时移动即转向，未锁定按住拖拽
     probe.steer(steer.steerX * 0.0045, steer.steerY * 0.0045);
     // 飞行（只有推进键按下时才加速；Shift = 增推）
     const thrustKeys = a.fwd || a.bwd || a.left || a.right || a.up || a.down;
     probe.thrustOn = thrustKeys;
     const boost = input.keys.has('shift');
-    if (thrustKeys) probe.step(dtReal, a, boost ? 3 : 1);
-    else probe.step(dtReal, a, 0); // 仍应用阻尼/惯性
+    const dtSim = clock.paused ? 0 : dtReal * clock.rate;
+    if (thrustKeys) probe.step(dtReal, a, boost ? 3 : 1, dtSim);
+    else probe.step(dtReal, a, 0, dtSim); // 仍应用阻尼/惯性
+    // 陨石本体跟随 + 慢速翻滚
+    meteorMesh.position.set(probe.pos[0], probe.pos[1], probe.pos[2]);
+    const meteorSize = Math.max(chaseCam.followDist * 0.055, 1e-4);
+    // 三轴不等缩放：不规则"土豆形"更贴近真实小天体
+    meteorMesh.scale.set(meteorSize, meteorSize * 0.76, meteorSize * 0.88);
+    meteorMesh.children[0].scale.setScalar(2.6); // 相对父缩放：光晕直径 ≈ 2.6× 陨石半径
+    meteorMesh.rotation.y += dtReal * 0.6;
+    meteorMesh.rotation.x += dtReal * 0.23;
 
     // 下潜候选
     let best = null; let bestD = 1e18;
@@ -161,7 +198,10 @@ function renderFrame(now) {
         distText = `${h.name} · ${formatKm(dkm)} · 光 ${lightTravelText(dkm)}`;
       }
     }
-    ui.setHud({ speedText: spText, distText });
+    const modeText = probe.mode === 'ballistic'
+      ? `轨道飞行 · 引力源：${curWorld.gravity ? curWorld.gravity.name : '无（惯性直线）'}`
+      : '巡航';
+    ui.setHud({ speedText: spText, distText, modeText });
     ui.setTimeState({ clockLabel: clock.timeLabel(), paused: clock.paused });
   }
 

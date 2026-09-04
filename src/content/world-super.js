@@ -71,7 +71,7 @@ export function buildSuperWorld() {
     viewDist: 26,
     labelFadeDist: 110, // 全景下星系团名称仍可读
     maxSpeedWorldPerS: 3.2, thrustAccWorldPerS2: 1.4, dragPerSec: 0.35, timeScaleMax: 365 * 86400,
-    ambient: { starCount: 1500, starSpread: 120 },
+    ambient: { starCount: 700, starSpread: 120 },
     group, entities,
     update() {},
   };

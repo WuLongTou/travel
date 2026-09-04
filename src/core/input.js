@@ -1,17 +1,21 @@
 // 键盘/鼠标输入状态（探测球与 UI 共用）
+// 视角：Pointer Lock 惯例——点击画面锁定指针，移动鼠标即转向（无需按住），
+// ESC 释放；未锁定时保留「按住拖拽」兼容操作。
 export class Input {
   constructor(canvas) {
+    this.canvas = canvas;
     this.keys = new Set();
     // 探测球动作语义：每帧由 main 计算
     this.actions = { fwd: false, bwd: false, left: false, right: false, up: false, down: false, dive: false, boost: false };
-    this.steer = { dx: 0, dy: 0 }; // 每帧累计的视角拖拽（像素）
+    this.steer = { dx: 0, dy: 0 }; // 每帧累计的视角转向（像素）
     this.mouseDown = false;
     this.mouse = { x: 0, y: 0 };
-    this._bound = new Set();
+    this.pointerLocked = false;
+    this.onLockChange = null; // UI 提示回调
     const kd = (e) => {
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
       const k = e.key.toLowerCase();
-      if ([' ', 'w', 'a', 's', 'd', 'q', 'e', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift', 'f'].includes(k)) {
+      if ([' ', 'w', 'a', 's', 'd', 'q', 'e', 'g', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift', 'f'].includes(k)) {
         e.preventDefault();
         this.keys.add(k);
       }
@@ -21,23 +25,36 @@ export class Input {
     window.addEventListener('keydown', kd);
     window.addEventListener('keyup', ku);
     window.addEventListener('blur', blur);
-    const md = (e) => { this.mouseDown = true; this.mouse.x = e.clientX; this.mouse.y = e.clientY; };
+    const md = () => {
+      // 未锁定时：首次点击请求指针锁定（游戏惯例）；锁定状态下 mousedown 仅用于拾取
+      if (!this.pointerLocked && canvas.requestPointerLock) {
+        // 新版 Chrome 返回 Promise，拒绝时（如 headless/权限）静默降级为拖拽
+        const pr = canvas.requestPointerLock();
+        if (pr && pr.catch) pr.catch(() => {});
+      }
+      this.mouseDown = true;
+    };
     const mm = (e) => {
-      if (this.mouseDown) {
+      if (this.pointerLocked) {
+        // 锁定态：移动即转向（无需按住）
+        this.steer.dx += e.movementX || 0;
+        this.steer.dy += e.movementY || 0;
+      } else if (this.mouseDown) {
         this.steer.dx += e.clientX - this.mouse.x;
         this.steer.dy += e.clientY - this.mouse.y;
-        this.mouse.x = e.clientX; this.mouse.y = e.clientY;
-      } else {
-        this.mouse.x = e.clientX; this.mouse.y = e.clientY;
       }
+      if (!this.pointerLocked) { this.mouse.x = e.clientX; this.mouse.y = e.clientY; }
     };
     const mu = () => { this.mouseDown = false; };
+    const plc = () => {
+      this.pointerLocked = document.pointerLockElement === canvas;
+      if (this.onLockChange) this.onLockChange(this.pointerLocked);
+    };
     canvas.addEventListener('mousedown', md);
     window.addEventListener('mousemove', mm);
     window.addEventListener('mouseup', mu);
+    document.addEventListener('pointerlockchange', plc);
     this._clear = () => { this.steer.dx = 0; this.steer.dy = 0; };
-    this._bound.add(kd); this._bound.add(ku); this._bound.add(blur);
-    this._bound.add(md); this._bound.add(mm); this._bound.add(mu);
   }
 
   // 每帧开头调用：从 keys 合成动作，并消费 steer

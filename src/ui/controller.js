@@ -9,7 +9,7 @@ export class UI {
     this.el = {};
     const ids = ['crumb','ruler','nav-buttons','time-buttons','infocard','info-title','info-sub',
       'info-facts','info-text','info-actions','info-close','info-schematic','hud-speed','hud-dist',
-      'hud-clock','dive-hint','dive-text','btn-dive','fade','loading',
+      'hud-clock','hud-mode','dive-hint','dive-text','btn-dive','fade','loading',
       'world-intro','intro-title','intro-text'];
     for (const id of ids) this.el[id] = document.getElementById(id);
     this._buildNav();
@@ -109,9 +109,10 @@ export class UI {
   }
 
   // ---- HUD ----
-  setHud({ speedText, distText }) {
+  setHud({ speedText, distText, modeText }) {
     if (this.el['hud-speed']) this.el['hud-speed'].textContent = speedText;
     if (this.el['hud-dist']) this.el['hud-dist'].textContent = distText;
+    if (this.el['hud-mode'] && modeText !== undefined) this.el['hud-mode'].textContent = modeText;
   }
 
   // ---- 信息卡 ----

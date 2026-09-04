@@ -98,13 +98,17 @@ export function buildGalaxyWorld() {
     id: 'galaxy', title: '银河系', unitName: 'kpc', kmPerUnit: KPC_KM,
     intro: '直径约 10 万光年的棒旋星系。我们位于猎户臂，距银心约 2.6 万光年，正以约 220 km/s 绕银心运动（图中自转为演示速率）。',
     worldRadius: diskR,
+    // 教学引力（演示校准，与 solar 层的真实 GM 不同）：本层时间倍速上限为
+    // 实时，真实银心 GM 下轨道周期 ~2.3 亿年不可见，故取演示值让轨道运动
+    // 实时可看；引力平方律与圆轨道关系保持。
+    gravity: { center: [0, 0, 0], GM: 0.12, minR: 0.6, name: '银心' },
     spawn: [diskR * 0.75, diskR * 0.45, diskR * 0.75], // 斜上方观测位，看向银心
     spawnLookAt: [0, 0, 0],
     viewDist: 12,
     labelFadeDist: 40, // 全景下银心/太阳标注保持可读
     maxSpeedWorldPerS: 0.35, // kpc/真实秒（演示）
     thrustAccWorldPerS2: 0.12, dragPerSec: 0.35, timeScaleMax: 1,
-    ambient: { starCount: 3000, starSpread: 60 },
+    ambient: { starCount: 1500, starSpread: 60 },
     group, entities,
     update(dtSim, clock) {
       // 盘自转（演示速率）：恒星点云、银晕与太阳标签整体随盘

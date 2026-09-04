@@ -12,7 +12,8 @@
 
 | id | 层 | 世界单位 | 内容 | 渲染要点 |
 |---|---|---|---|---|
-| solar | 太阳系 | AU | 太阳+八大行星（真实半长轴/周期）+主要卫星+小行星带+柯伊伯带 | 实体球+点光源+轨道线+标签 |
+| solar | 太阳系 | AU | 太阳+八大行星（真实半长轴/周期）+主要卫星+小行星带+柯伊伯带 | 实体球（程序化贴图+自转）+点光源+轨道线；轨道飞行用真实太阳 GM |
+| galaxy | 银河系 | kpc | 程序化棒旋星系（140k 星点）+银心 Sgr A*+太阳位置 | 参数化点云+HII 区+盘自转（演示速率）；轨道飞行用演示 GM |
 | stellar | 星际近邻 | ly | ≤25 ly 验证近邻恒星（RA/Dec/距离→3D） | 色温点+光晕 sprite+标签 |
 | galaxy | 银河系 | kpc | 程序化棒旋星系（140k 星点）+银心 Sgr A*+太阳位置 | 参数化点云+HII 区+银心辉光 |
 | local | 本星系群 | Mpc | 银河、M31（可下潜）、M33、矮星系（真实方位） | 螺旋小盘+标签 |
@@ -29,8 +30,11 @@ src/
   core/
     engine.js        # (render/) 场景/相机/EffectComposer(Bloom)/背景组
     clock.js         # 模拟钟：倍速 ×实时…×千年/秒、暂停
-    input.js         # 键鼠输入（WASD/QE 推进、拖拽转向、滚轮缩放）
-    probe.js         # 探测球：推力/阻尼/速度↔km-s 换算（各层 kmPerUnit）
+    input.js         # 键鼠输入：Pointer Lock 自由鼠标视角（点击锁定、移动即
+                     # 转向，ESC 释放），未锁定时保留按住拖拽；WASD/QE 推进
+    probe.js         # 探测球双模式：cruise 巡航（推力+阻尼，演示倍速）/
+                     # ballistic 轨道飞行（陨石：引力+dtSim 子步进积分，
+                     # 真实 GM[solar] 或演示 GM[galaxy]，切入自动给圆轨道速度）
     navigator.js     # 层级导航：enter/zoomIn/zoomOut/diveInto，锚点记忆
   render/
     engine.js        # CosmicEngine：contentGroup + backgroundGroup + Bloom
@@ -49,7 +53,17 @@ src/
   util/              # units（AU/ly/pc/km 换算、色温→hex）、math（mulberry32）
 ```
 
-## 3. 渲染约定
+## 3. 飞行模式（G 键切换）
+
+- **巡航 cruise**：WASD 推进 + 阻尼滑行，速度为教学演示倍率（HUD 标注）。
+- **轨道飞行 ballistic（陨石）**：仅受引力源作用（`world.gravity` 声明），
+  以模拟时间（dtSim）子步进积分——把时间调快即可观看开普勒轨道；
+  切入时自动获得当前点的圆轨道速度，WASD 为小推力变轨。
+  solar 层用真实太阳 GM（13 km/s @5.2 AU 等真实数值，HUD 直接显示），
+  galaxy 层时间倍速上限为实时故用演示 GM；无 gravity 的层退化为惯性直线。
+  探测球渲染为不规则陨石本体（三轴不等缩放+翻滚），轨迹缎带实时描绘航迹。
+
+## 4. 渲染约定
 
 - **背景星空是球壳**：`starCloud` 把星点分布在 0.9–1.0 × spread 的球壳上
   并跟随相机平移——星点永远是"远方天球"，不会散布到世界内容附近形成颗粒噪声。
@@ -62,14 +76,14 @@ src/
 - **Bloom**：UnrealBloomPass 全局开启；发光体（太阳/HII 区）靠 glow sprite
   控制溢出，emissive 强度保持克制避免过曝糊屏。
 
-## 4. 数据与示意边界
+## 5. 数据与示意边界
 
 - 太阳系轨道半长轴/周期、近邻恒星坐标/色温、本星系群成员方位、星系团距离：
   全部来自 `src/content/data/*` 核实数据（来源标注见 CONTENT.md）。
 - 视觉放大（行星尺寸、星系盘半径在 Mpc 尺度的可见性、宇宙网拓扑）为教学示意，
   实体 `schematic: true` 并在信息卡中说明，不与真实数据混淆。
 
-## 5. 验证
+## 6. 验证
 
 - `npm run build`：vite 产物构建。
 - `npm run smoke`：无头冒烟——起 dev server → agent-browser（Chrome for
