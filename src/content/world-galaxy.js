@@ -1,0 +1,104 @@
+// 银河系层构建器：程序化螺旋星系「从外看」+ 位置标签 + 可下潜目标
+// 世界单位：kpc（银河盘半径约 15-20 kpc）
+// 教学：展示银河系旋臂/核球/银晕结构；太阳系位于猎户臂(约 8.2-8.3 kpc 处，
+// 数据待 research 回表校准)。
+import * as THREE from 'three';
+import { registerWorld } from './worlds.js';
+import { buildGalaxy, buildStarSwarm } from './galaxy-gen.js';
+import { makeTextSprite, labelScaleFor } from '../render/labels.js';
+
+const KPC_KM = 3.0857e16; // 1 kpc km
+
+// 世界内容构造（engine 渲染），返回：group / entities / update
+export function buildGalaxyWorld() {
+  const group = new THREE.Group();
+  const entities = [];
+  const clockHandles = [];
+
+  // 星系主体：盘半径 = 15 kpc 单位（可视半径设为 15，便于标尺）
+  const diskR = 15; // world units = kpc
+  const gal = buildGalaxy({
+    rCore: 0.16, rDisk: 1, arms: 4, armWinding: 1.9,
+    countStars: 150000, armFraction: 0.55, flatten: 0.035,
+    tilt: 0, seed: 2024,
+  });
+  gal.scale.set(diskR, diskR, diskR);
+  // 银河盘整体旋转使盘面与 XZ 平面略呈角度（可读 3D 感）
+  group.add(gal);
+
+  // 银晕（球状星团与老星）
+  const halo = buildStarSwarm(26000, diskR * 0.9, { seed: 9, flatten: 1, color: '#ffd8ae', size: 1.5 });
+  group.add(halo);
+
+  // 可见的位置标注：太阳（猎户臂/本地泡），银心 Sgr A*（可下潜）
+  const sunPos = [diskR * 0.55, 0, 0]; // 8.2kpc/15kpc ≈ 0.55 盘半径
+  const centerPos = [0, 0, 0];
+
+  // 太阳系位置标签
+  const sunLabel = makeTextSprite('太阳系（猎户臂）', { color: '#7fe8ff' });
+  sunLabel.position.set(sunPos[0], sunPos[1] + 0.15, sunPos[2]);
+  group.add(sunLabel);
+  // 银心标签
+  const coreLabel = makeTextSprite('银心 · 人马座 A*', { color: '#ffcf7f' });
+  coreLabel.position.set(0, 0.25, 0);
+  group.add(coreLabel);
+
+  // 银心发光点
+  const coreGlow = new THREE.Mesh(
+    new THREE.SphereGeometry(0.12, 16, 16),
+    new THREE.MeshBasicMaterial({ color: 0xffcf7f }),
+  );
+  group.add(coreGlow);
+
+  // 可下潜实体：银河系（下潜到本星系群视角看它？不——本世界就是银河；下潜应到
+  // 太阳系/星际层。我们把「下潜」交给子世界导航，由导航器提供）。这里只放两个
+  // 点选目标：银心与太阳系（无下潜，展示 info）。
+
+  const coreEntity = {
+    id: 'sgrA', name: '人马座 A*', en: 'Sagittarius A*', type: 'blackhole',
+    pos: centerPos, pickRadius: 0.5,
+    info: {
+      kind: '超大质量黑洞', sub: '银河系中心',
+      facts: [['质量', '约 430 万倍太阳质量'], ['距离', '约 26000 光年'], ['视直径', '极小（事件视界约 0.1 AU 级）']],
+      text: '人马座 A* 是银河系中心的超大质量黑洞，位于人马座方向约 2.6 万光年处。2022 年事件视界望远镜(EHT)发布了它的首张影像。',
+    },
+    visual: { color: '#ffcf7f' },
+  };
+  entities.push(coreEntity);
+  coreGlow.userData.entity = coreEntity;
+
+  // 银河系本体（点选显示银河信息）
+  const galEntity = {
+    id: 'milkyway', name: '银河系', en: 'Milky Way', type: 'galaxy',
+    pos: [0, 0, 0], pickRadius: diskR,
+    info: {
+      kind: '棒旋星系（SBbc）', sub: '我们所在的星系',
+      facts: [
+        ['直径', '约 10 万光年（盘）'],
+        ['恒星', '约 2000–4000 亿颗'],
+        ['太阳位置', '距银心约 2.6 万光年'],
+        ['绕银心一周', '约 2.2–2.5 亿年（银河年）'],
+      ],
+      text: '银河系是一个棒旋星系，直径约 10 万光年，包含数千亿颗恒星。太阳带着整个太阳系以约 220 km/s 绕银心公转。图中为程序化示意。',
+      source: 'research 回表后标注',
+    },
+    visual: { color: '#cfe0ff' },
+  };
+  entities.push(galEntity);
+
+  // 世界返回（group 用于 engine 装载）
+  return {
+    id: 'galaxy', title: '银河系', unitName: 'kpc', kmPerUnit: KPC_KM,
+    worldRadius: diskR,
+    spawn: [diskR * 0.9, diskR * 0.55, diskR * 0.9], // 从斜上方看盘
+    viewDist: 16,
+    maxSpeedWorldPerS: 0.35, // kpc/真实秒（演示）
+    thrustAccWorldPerS2: 0.12, dragPerSec: 0.35, timeScaleMax: 1,
+    ambient: { starCount: 3000, starSpread: 60 },
+    group, entities,
+    update() {},
+  };
+}
+
+// 自注册工厂
+registerWorld('galaxy', buildGalaxyWorld);

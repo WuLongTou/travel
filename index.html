@@ -3,83 +3,62 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>宇宙大爆炸 · 音乐可视化</title>
+  <title>宇宙漫游 · 教育向可交互宇宙</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 </head>
 <body>
   <canvas id="scene"></canvas>
 
-  <!-- 标题 -->
-  <div class="title">
-    <h1>宇宙大爆炸</h1>
-    <p class="sub">暴胀 · 宇宙网 · 恒星与星系 —— 一颗探测球的被动航行</p>
+  <!-- 顶栏：当前尺度面包屑 + 光速尺 -->
+  <header class="topbar" id="topbar">
+    <div class="crumb" id="crumb"></div>
+    <div class="ruler" id="ruler"></div>
+  </header>
+
+  <!-- 底部控制台：尺度导航 / 时间倍率 / 操作提示 -->
+  <div class="dock" id="dock">
+    <div class="dock-nav">
+      <div class="dock-title">宇宙尺度</div>
+      <div class="nav-buttons" id="nav-buttons"></div>
+    </div>
+    <div class="dock-time">
+      <div class="dock-title">时间</div>
+      <div class="time-buttons" id="time-buttons"></div>
+    </div>
+    <div class="dock-help" id="dock-help"></div>
   </div>
 
-  <!-- 控制面板（默认折叠，点标题栏展开，避免遮挡宇宙） -->
-  <div class="panel" id="panel">
-    <button type="button" class="panel-head" id="panel-toggle" title="展开 / 收起控制面板">
-      <span class="panel-title">控制</span>
-      <span class="chevron">▸</span>
-    </button>
-    <div class="panel-body">
-    <div class="btn-row">
-      <button id="btn-play" title="播放 / 暂停。首次点击启动内置合成示例音轨；播放中点击暂停，再次点击继续。若当前是麦克风模式，则重新开启麦克风。">▶ 播放音乐</button>
-      <button id="btn-file" title="选择本地音频文件（mp3 / wav / flac 等）播放，用你自己的音乐驱动宇宙演化。">📁 上传</button>
-      <button id="btn-mic" title="改用麦克风输入：用环境声或外放音乐实时驱动可视化。需要浏览器麦克风授权。">🎤 麦克风</button>
-      <input type="file" id="file-input" accept="audio/*" hidden />
+  <!-- 目标信息卡 -->
+  <aside class="infocard hidden" id="infocard">
+    <div class="info-head">
+      <span class="info-title" id="info-title">—</span>
+      <span class="info-schematic hidden" id="info-schematic">示意</span>
+      <button class="info-close" id="info-close" title="关闭">✕</button>
     </div>
-    <div class="btn-row">
-      <button id="btn-follow" title="轨迹跟拍开关。开启：稳定上帝视角——方位/俯角恒定不旋转，自动框住最近一段航行轨迹，绕行天体时缓慢拉远看整圈轨迹。关闭：自由观察，左键旋转 / 右键平移 / 滚轮沿视线推进，全程无限移动。">🎥 跟拍：开</button>
-      <button id="btn-thrust" title="推进器开关。开启后用键盘控制小球：W/S 前后、A/D 左右、Q/E 上下（方向键同义），推力方向始终基于当前摄像机视角。关闭时小球只受引力（默认）。">🚀 推进器：关</button>
-      <button id="btn-event-log" title="展开 / 收起事件日志：按时间线回放宇宙里发生过的所有事件，可导出 JSON。">📜 日志</button>
-      <button id="btn-regen" title="重新生成一个全新的宇宙（新的随机种子分布），小球从大爆炸重新出发。">🎲 重开宇宙</button>
-    </div>
-    <div class="slider-row">
-      <label title="航行节奏：空旷航段以本系数全速推进，接近天体系统时自动慢放约 3 倍（从容看清天体交互），无需手动切换。开局大爆炸自带短暂快进。">航行节奏 <span id="time-scale-val"></span></label>
-      <input type="range" id="time-scale" min="0.05" max="2" step="0.01" value="0.42" />
-    </div>
-    <div class="slider-row">
-      <label title="音乐驱动幅度（0～2.5×）：缩放节拍与能量对画面（粒子尺寸、发光、涟漪）的影响强度。0 = 完全不受音乐影响。">音乐强度 <span id="intensity-val"></span></label>
-      <input type="range" id="intensity" min="0" max="2.5" step="0.1" value="1" />
-    </div>
+    <div class="info-sub" id="info-sub"></div>
+    <dl class="info-facts" id="info-facts"></dl>
+    <div class="info-text" id="info-text"></div>
+    <div class="info-actions" id="info-actions"></div>
+  </aside>
 
-    <div class="status" id="status">正在初始化…</div>
-    </div>
+  <!-- 左下 HUD -->
+  <div class="hud" id="hud">
+    <div class="hud-row"><span class="hud-k">速度</span><span class="hud-v" id="hud-speed">—</span></div>
+    <div class="hud-row"><span class="hud-k">距选择</span><span class="hud-v" id="hud-dist">—</span></div>
+    <div class="hud-row"><span class="hud-k">模拟钟</span><span class="hud-v" id="hud-clock">—</span></div>
   </div>
 
-  <!-- 图例：宇宙结构尺度 -->
-  <div class="legend">
-    <div class="legend-item"><span class="dot" style="background:#8f9bb8"></span>星尘</div>
-    <div class="legend-item"><span class="dot" style="background:#b3d1ff"></span>行星</div>
-    <div class="legend-item"><span class="dot" style="background:#ffe6b8"></span>恒星</div>
-    <div class="legend-item"><span class="dot" style="background:#9fb4ff"></span>星团</div>
-    <div class="legend-item"><span class="dot" style="background:#6c8cff"></span>星系</div>
-    <div class="legend-item"><span class="dot" style="background:#8e6bff"></span>超星系团</div>
-    <div class="legend-item"><span class="dot" style="background:#ff9a3c"></span>黑洞</div>
-    <div class="legend-item"><span class="dot" style="background:#fff"></span>探测球</div>
+  <!-- 下潜提示 -->
+  <div class="dive-hint hidden" id="dive-hint">
+    <div class="dive-text" id="dive-text"></div>
+    <button id="btn-dive">下潜（F）</button>
   </div>
 
-  <div class="hint">🎥 跟拍自动框住轨迹 · 接近系统时自动慢放、逐个发现天体 · 被持续捕获时经虫洞跃迁逃逸 · 关闭跟拍后自由观察</div>
+  <!-- 全屏转场遮罩 -->
+  <div class="fade hidden" id="fade"></div>
 
-  <!-- 航行信息：小球 / 最近系统 / 宇宙实时状态 -->
-  <div class="hud">
-    <div class="hud-row"><span class="hud-k">小球</span><span class="hud-v" id="hud-probe">—</span></div>
-    <div class="hud-row" title="由速率与逃逸速度之比 κ 判定的运动状态：κ&lt;0.85 被捕获束缚、0.85~1.0 临界、≥1.0 逃逸甩出；结合切向占比区分环绕与坠落。"><span class="hud-k">状态</span><span class="hud-v" id="hud-grav">—</span></div>
-    <div class="hud-row"><span class="hud-k">最近系统</span><span class="hud-v" id="hud-near">—</span></div>
-    <div class="hud-row"><span class="hud-k">宇宙</span><span class="hud-v" id="hud-cosmos">—</span></div>
-  </div>
-
-  <!-- 事件日志面板：可回放的完整事件时间线，默认折叠 -->
-  <div class="event-panel" id="event-panel">
-    <div class="event-panel-head">
-      <span class="panel-title">事件日志</span>
-      <button id="btn-export-log" title="导出完整日志 JSON（含事件与周期快照）">⬇ 导出</button>
-    </div>
-    <div class="event-list" id="event-list"></div>
-  </div>
-
-  <!-- 大事件提示 -->
-  <div class="event-toast" id="event-toast">💥 奇点爆发：物质以极高速度向四面八方喷射</div>
+  <!-- 加载提示 -->
+  <div class="loading hidden" id="loading">载入宇宙…</div>
 
   <script type="module" src="/src/main.js"></script>
 </body>
