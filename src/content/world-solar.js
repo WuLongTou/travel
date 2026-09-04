@@ -50,6 +50,7 @@ export function buildSolarWorld() {
   const entities = [];
   const pickables = [];
   const moonAnims = []; // 卫星公转动画：{ mesh(相对行星), aAU, periodS, phase }
+  const spins = []; // 行星自转：{ tex, rotPeriodS }（贴图 offset 驱动，不带动卫星/标签）
 
   // ---- 太阳 ----
   // 真实半径 ~0.005 AU，渲染放大 80 倍便于看见；米粒组织 emissiveMap
@@ -114,6 +115,9 @@ export function buildSolarWorld() {
       roughness: 0.95,
       map: PLANET_TEXTURES[p.id]?.(),
     });
+    if (mesh.material.map) {
+      spins.push({ tex: mesh.material.map, rotPeriodS: Math.abs(p.rotH) * 3600 });
+    }
     // 真实自转轴倾角（度）：金星 177（近似逆转）、天王星 97.8"躺着"
     const axialTiltDeg = { mercury: 0.03, venus: 177.4, earth: 23.4, mars: 25.2, jupiter: 3.1, saturn: 26.7, uranus: 97.8, neptune: 28.3 }[p.id] ?? 0;
     if (axialTiltDeg) mesh.rotation.z = THREE.MathUtils.degToRad(axialTiltDeg);
@@ -237,6 +241,7 @@ export function buildSolarWorld() {
 
   return {
     id: 'solar', title: '太阳系', unitName: 'AU', kmPerUnit: AU_KM,
+    intro: '尺度 ~120 AU。八大行星沿真实轨道公转，行星大小为教学缩放（真实比例仅约万分之一）。把时间调到 1月/秒，看行星、卫星转动起来。',
     worldRadius: 55,
     spawn: [22, 7, 26],
     spawnLookAt: [0, 0, 0],
@@ -257,6 +262,10 @@ export function buildSolarWorld() {
       for (const ma of moonAnims) {
         const ang = ma.phase + (clock.t / ma.periodS) * Math.PI * 2;
         ma.mesh.position.set(Math.cos(ang) * ma.aAU, 0, Math.sin(ang) * ma.aAU);
+      }
+      // 行星自转：贴图经度偏移 = 真实自转周期（木星 9.9h、金星 -5832h 逆行…）
+      for (const sp of spins) {
+        sp.tex.offset.x = (clock.t / sp.rotPeriodS) % 1;
       }
     },
   };

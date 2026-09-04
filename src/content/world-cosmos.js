@@ -77,6 +77,7 @@ export function buildCosmosWorld() {
 
   return {
     id: 'cosmos', title: '可观测宇宙', unitName: 'Gpc', kmPerUnit: GPC_KM,
+    intro: '半径约 465 亿光年。橙色边界是宇宙微波背景——大爆炸后 38 万年的余晖；网中的每一个亮点都是一整个星系。',
     worldRadius: OBSERVABLE_RADIUS_GPC * 1.4,
     spawn: [19, 7, 24], // 壳外观测位（半径 ~31.6 Gpc）看全景
     spawnLookAt: [0, 0, 0],

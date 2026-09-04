@@ -221,6 +221,34 @@ export function sunTexture({ seed = 7, size = 512 } = {}) {
   return toTexture(c);
 }
 
+// 亮星光晕（带衍射芒）：径向柔光 + 十字四芒（望远镜观星的亮星特征）
+export function spikeGlowTexture(size = 128) {
+  const [c, g] = makeCanvas(size);
+  const R = size / 2;
+  // 底层：径向柔光（与 glowTexture 同分布）
+  const grad = g.createRadialGradient(R, R, 0, R, R, R);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.25, 'rgba(255,255,255,0.8)');
+  grad.addColorStop(0.6, 'rgba(255,255,255,0.18)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, size, size);
+  // 四芒：细长渐变（中央亮、尖端透明），水平+垂直
+  for (const rot of [0, Math.PI / 2]) {
+    g.save();
+    g.translate(R, R);
+    g.rotate(rot);
+    const lg = g.createLinearGradient(-R, 0, R, 0);
+    lg.addColorStop(0, 'rgba(255,255,255,0)');
+    lg.addColorStop(0.5, 'rgba(255,255,255,0.9)');
+    lg.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = lg;
+    g.fillRect(-R, -size * 0.022, size, size * 0.044);
+    g.restore();
+  }
+  return toTexture(c);
+}
+
 // 行星环贴图：同心条纹（RingGeometry 的 UV 为平面映射，条纹须画成同心圆）
 // f0 = innerR/outerR 与几何一致；卡西尼缝为一条透明环缝
 export function ringTexture({ color = '#d9cbb0', dark = '#b0a080', innerOverOuter = 0.625, seed = 11, size = 512 } = {}) {

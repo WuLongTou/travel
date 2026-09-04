@@ -19,6 +19,7 @@ import './content/world-cosmos.js';
 import { formatKm, lightTravelText, unitRulerText, C_KM_S } from './util/units.js';
 import { ChaseCam } from './render/camera.js';
 import { updateLabelFades } from './render/labels.js';
+import { TrailRibbon } from './render/trail.js';
 
 const canvas = document.getElementById('scene');
 const engine = new CosmicEngine(canvas);
@@ -27,6 +28,7 @@ const clock = new SimClock();
 const nav = new Navigator(engine, probe, clock);
 const chaseCam = new ChaseCam(engine.camera, probe);
 engine.chaseCam = chaseCam;
+const trailRibbon = new TrailRibbon(engine.scene);
 
 const input = new Input(canvas);
 const ui = new UI(engine, {
@@ -57,6 +59,9 @@ nav.onWorldChanged = (world, idx) => {
   ui.setTimeState({ clockLabel: clock.timeLabel(), paused: clock.paused });
   // 键位提示同步刷新
   ui.setDockHelp(curWorld.hint || 'WASD 飞行 · 鼠标拖拽转向 · 滚轮缩放 · F 下潜 · 空格 暂停');
+  // 轨迹缎带重建 + 层介绍导览
+  trailRibbon.reset();
+  ui.showIntro(world);
 };
 
 // 每帧：更新探测球（飞行/转向/时间）
@@ -161,6 +166,7 @@ function renderFrame(now) {
   }
 
   chaseCam.update(dtReal);
+  trailRibbon.update(probe);
   // 标签距离淡出+屏幕避让：远景标签降透明度，重叠标签只保留最近者
   if (curWorld) {
     updateLabelFades(curWorld.group, engine.camera, curWorld.labelFadeDist || curWorld.viewDist * 1.6);

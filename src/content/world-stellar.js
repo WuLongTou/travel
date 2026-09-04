@@ -52,7 +52,8 @@ export function buildStellarWorld() {
     // 恒星观感 = 小亮核 + 柔光晕（真实星光是点源 + 衍射/散射晕，不是大球）
     const lum = s.lumFactor ?? 0.4;
     const hex = tempToHex(s.tempK || 5800);
-    const glow = makeGlowSprite(0.55 + lum * 0.9, hex, 0.85);
+    // 亮星带十字衍射芒（望远镜观星特征），暗星保持圆晕
+    const glow = makeGlowSprite(0.55 + lum * 1.1, hex, 0.85, { spikes: lum > 0.45 });
     glow.position.set(p[0], p[1], p[2]);
     group.add(glow);
     const core = new THREE.Mesh(
@@ -99,6 +100,7 @@ export function buildStellarWorld() {
 
   return {
     id: 'stellar', title: '星际近邻', unitName: 'ly', kmPerUnit: LY_KM,
+    intro: '半径约 60 光年。这里是太阳的邻居圈：比邻星 4.2 光年、天狼星 8.6 光年……每颗恒星按真实方位与表面色温呈现，点选可查看详情。',
     worldRadius: 40,
     spawn: [3, 1.2, 3],
     spawnLookAt: [0, 0, 0], // 兴趣中心：太阳（本层原点）

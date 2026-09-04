@@ -9,7 +9,8 @@ export class UI {
     this.el = {};
     const ids = ['crumb','ruler','nav-buttons','time-buttons','infocard','info-title','info-sub',
       'info-facts','info-text','info-actions','info-close','info-schematic','hud-speed','hud-dist',
-      'hud-clock','dive-hint','dive-text','btn-dive','fade','loading'];
+      'hud-clock','dive-hint','dive-text','btn-dive','fade','loading',
+      'world-intro','intro-title','intro-text'];
     for (const id of ids) this.el[id] = document.getElementById(id);
     this._buildNav();
     this._buildTime();
@@ -155,6 +156,23 @@ export class UI {
     this.el['dive-hint'].classList.remove('hidden');
   }
   hideDiveHint() { this.el['dive-hint'].classList.add('hidden'); }
+
+  // ---- 层介绍卡：进入新尺度时的导览（5 秒后自动淡出） ----
+  showIntro(world) {
+    if (!this.el['world-intro']) return;
+    this.el['intro-title'].textContent = world.title;
+    this.el['intro-text'].textContent = world.intro || '';
+    const el = this.el['world-intro'];
+    el.classList.remove('hidden');
+    requestAnimationFrame(() => el.classList.add('show'));
+    clearTimeout(this._introTimer);
+    this._introTimer = setTimeout(() => this.hideIntro(), 5200);
+  }
+  hideIntro() {
+    if (!this.el['world-intro']) return;
+    this.el['world-intro'].classList.remove('show');
+    clearTimeout(this._introTimer);
+  }
 
   // ---- 转场 ----
   fadeOut(done) {

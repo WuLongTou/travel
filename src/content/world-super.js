@@ -64,6 +64,7 @@ export function buildSuperWorld() {
 
   return {
     id: 'super', title: '室女·宇宙网', unitName: 'Mpc', kmPerUnit: MPC_KM,
+    intro: '尺度上亿光年。星系并非均匀散布，而是沿暗物质丝状结构聚集成「宇宙网」，节点处富集为星系团（丝的走向为示意）。',
     worldRadius: 90,
     spawn: [20, 10, 20],
     spawnLookAt: [0, 0, 0], // 兴趣中心：本地群（原点，丝网交汇近端）
