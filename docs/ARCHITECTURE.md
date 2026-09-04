@@ -1,0 +1,78 @@
+# 宇宙漫游 · 架构说明
+
+教育向可交互宇宙：从太阳系到可观测宇宙的六层尺度世界，探测球自由航行、
+层级跃迁、点选天体查看真实数据信息卡。本项目由"三体音乐可视化"完全重写而来，
+旧架构（大爆炸模拟/自由物理小球/按需生成星体系统）已全部移除，
+其文档见 git 历史（`docs/SIMULATION.md` @ main 旧版本）。
+
+## 1. 六层尺度世界
+
+每层是一个独立构建的 three.js 场景组，世界单位自洽、渲染策略各自最优。
+跨层移动 = Navigator 切换世界（转场镜头重置到该层观测位）。
+
+| id | 层 | 世界单位 | 内容 | 渲染要点 |
+|---|---|---|---|---|
+| solar | 太阳系 | AU | 太阳+八大行星（真实半长轴/周期）+主要卫星+小行星带+柯伊伯带 | 实体球+点光源+轨道线+标签 |
+| stellar | 星际近邻 | ly | ≤25 ly 验证近邻恒星（RA/Dec/距离→3D） | 色温点+光晕 sprite+标签 |
+| galaxy | 银河系 | kpc | 程序化棒旋星系（140k 星点）+银心 Sgr A*+太阳位置 | 参数化点云+HII 区+银心辉光 |
+| local | 本星系群 | Mpc | 银河、M31（可下潜）、M33、矮星系（真实方位） | 螺旋小盘+标签 |
+| super | 室女·宇宙网 | Mpc | 室女团/后发团等真实星系团方位+宇宙网丝（示意） | 节点+丝点云+团辉光 |
+| cosmos | 可观测宇宙 | Gpc | 宇宙网全景（示意）+CMB 边界壳+红移色 | 网点云+稀疏壳点云 |
+
+尺度不真实处一律 `schematic: true`，信息卡标注"示意"（见 CONTENT.md）。
+
+## 2. 模块划分
+
+```
+src/
+  main.js            # 装配：引擎→世界工厂→导航→探测球→UI→输入→主循环
+  core/
+    engine.js        # (render/) 场景/相机/EffectComposer(Bloom)/背景组
+    clock.js         # 模拟钟：倍速 ×实时…×千年/秒、暂停
+    input.js         # 键鼠输入（WASD/QE 推进、拖拽转向、滚轮缩放）
+    probe.js         # 探测球：推力/阻尼/速度↔km-s 换算（各层 kmPerUnit）
+    navigator.js     # 层级导航：enter/zoomIn/zoomOut/diveInto，锚点记忆
+  render/
+    engine.js        # CosmicEngine：contentGroup + backgroundGroup + Bloom
+    background.js    # 星空球壳点云/银河带/CMB 壳（跟随相机，无界天球）
+    bodies.js        # makeSphere/makeGlowSprite/makeRing/makeOrbitLine
+    labels.js        # 文本 sprite + updateLabelFades（距离淡出）
+    camera.js        # ChaseCam 第三人称跟拍
+    textures.js      # 程序化纹理（glow 径向渐变等）
+  content/
+    schema.js        # 世界定义元数据（层级链、标题、单位）
+    worlds.js        # 工厂注册表 + LAYER_CHAIN
+    world-*.js       # 六个世界构建器（每层一个文件）
+    galaxy-gen.js    # buildGalaxy（棒旋点云）/buildStarSwarm/buildCosmicWeb
+    data/*.js        # 核实数据：solar/stars/local-group/super-structures/cosmos
+  ui/controller.js   # 层级栏/时间栏/HUD/信息卡
+  util/              # units（AU/ly/pc/km 换算、色温→hex）、math（mulberry32）
+```
+
+## 3. 渲染约定
+
+- **背景星空是球壳**：`starCloud` 把星点分布在 0.9–1.0 × spread 的球壳上
+  并跟随相机平移——星点永远是"远方天球"，不会散布到世界内容附近形成颗粒噪声。
+- **点大小策略**：星系/宇宙网点云用 `sizeAttenuation: false`（固定屏幕尺寸），
+  保证远景形态可读；太阳系内的实体颗粒（小行星带）用衰减尺寸。
+- **恒星观感 = 小亮核 + 柔光晕**（`makeGlowSprite`，AdditiveBlending），
+  不用大实心球。
+- **标签淡出**：主循环每帧调 `updateLabelFades(group, camPos, world.labelFadeDist)`，
+  超出衰减距离的标签线性降到 0.35 透明度（教育场景保留可辨认性）。
+- **Bloom**：UnrealBloomPass 全局开启；发光体（太阳/HII 区）靠 glow sprite
+  控制溢出，emissive 强度保持克制避免过曝糊屏。
+
+## 4. 数据与示意边界
+
+- 太阳系轨道半长轴/周期、近邻恒星坐标/色温、本星系群成员方位、星系团距离：
+  全部来自 `src/content/data/*` 核实数据（来源标注见 CONTENT.md）。
+- 视觉放大（行星尺寸、星系盘半径在 Mpc 尺度的可见性、宇宙网拓扑）为教学示意，
+  实体 `schematic: true` 并在信息卡中说明，不与真实数据混淆。
+
+## 5. 验证
+
+- `npm run build`：vite 产物构建。
+- `npm run smoke`：无头冒烟——起 dev server → agent-browser（Chrome for
+  Testing 独立 session）逐层 `nav.enter` → 断言实体/场景对象/探测球位置/update
+  不抛错 → 页面 error 检查 → 自动清理。
+- 视觉验收：agent-browser 截六层画面人工比对（迭代记录见 git log）。

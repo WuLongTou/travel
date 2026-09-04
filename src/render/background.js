@@ -6,15 +6,21 @@ import { tempToHex } from '../util/units.js';
 
 // 生成一颗恒星点云：count 个点，spread 半径（世界单位），
 // colorFn(rng) -> hex。固定尺寸衰减关（点即星点）。
+// 分布 = 远距离球壳（0.9–1.0 × spread）：星点永远是"远方天球"，
+// 不会散布到世界内容（太阳/星系）附近形成颗粒噪声。
 export function starCloud(count, spread, colorFn = () => '#ffffff', size = 1.6) {
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
   const rng = mulberry32((Math.random() * 1e9) | 0);
   const c = new THREE.Color();
   for (let i = 0; i < count; i++) {
-    positions[i*3] = (rng()*2-1)*spread;
-    positions[i*3+1] = (rng()*2-1)*spread;
-    positions[i*3+2] = (rng()*2-1)*spread;
+    const z = rng() * 2 - 1;
+    const phi = rng() * Math.PI * 2;
+    const rr = Math.sqrt(Math.max(0, 1 - z * z));
+    const r = spread * (0.9 + rng() * 0.1);
+    positions[i*3] = Math.cos(phi) * rr * r;
+    positions[i*3+1] = z * r;
+    positions[i*3+2] = Math.sin(phi) * rr * r;
     c.set(colorFn(rng));
     colors[i*3] = c.r; colors[i*3+1] = c.g; colors[i*3+2] = c.b;
   }
@@ -72,7 +78,8 @@ export function milkyWayBand(thickness = 0.12) {
 }
 
 // CMB 壳：遥远各向同性“火墙”球面点云（宇宙微波背景的视觉近似）
-export function cmbShell(radius, count = 22000) {
+export function cmbShell(radius, count = 22000, opts = {}) {
+  const { size = 3, opacity = 0.28 } = opts;
   const positions = new Float32Array(count*3);
   const colors = new Float32Array(count*3);
   const rng = mulberry32(7);
@@ -91,7 +98,7 @@ export function cmbShell(radius, count = 22000) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  const mat = new THREE.PointsMaterial({ size: 3, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0.28, depthWrite: false });
+  const mat = new THREE.PointsMaterial({ size, sizeAttenuation: false, vertexColors: true, transparent: true, opacity, depthWrite: false });
   const pts = new THREE.Points(geo, mat);
   pts.frustumCulled = false;
   return pts;

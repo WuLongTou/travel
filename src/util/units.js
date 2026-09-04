@@ -62,6 +62,19 @@ export function lightTravelText(km) {
 
 export function kmToKmText(km) { return formatKm(km); }
 
+// 标尺文本：1 世界单位的真实换算。专用函数——不能走 formatKm 的自适应单位，
+// 否则换算结果会落回同单位（如 "1 AU ≈ 1.00 AU"）形成自指。
+export function unitRulerText(unitName) {
+  switch (unitName) {
+    case 'AU': return `1 AU ≈ ${(AU_KM / 1e8).toFixed(2)} 亿 km（光走 ${lightTravelText(AU_KM)}）`;
+    case 'ly': return `1 光年 ≈ ${(LY_KM / 1e12).toFixed(2)} 万亿 km`;
+    case 'kpc': return `1 kpc ≈ ${(1000 * PC_LY).toFixed(0)} 光年`;
+    case 'Mpc': return `1 Mpc ≈ ${((1e6 * PC_LY) / 1e4).toFixed(0)} 万光年`;
+    case 'Gpc': return `1 Gpc ≈ ${((1e9 * PC_LY) / 1e8).toFixed(1)} 亿光年`;
+    default: return '';
+  }
+}
+
 // 颜色工具（渲染用）：黑体色温 → sRGB hex（按 K 分段插值近似）
 // 依据：黑体辐射色度近似（Planckian locus 常用查找表线性化）
 const TBL = [

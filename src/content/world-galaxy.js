@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { registerWorld } from './worlds.js';
 import { buildGalaxy, buildStarSwarm } from './galaxy-gen.js';
+import { makeGlowSprite } from '../render/bodies.js';
 import { makeTextSprite, labelScaleFor } from '../render/labels.js';
 
 const KPC_KM = 3.0857e16; // 1 kpc km
@@ -13,22 +14,27 @@ const KPC_KM = 3.0857e16; // 1 kpc km
 export function buildGalaxyWorld() {
   const group = new THREE.Group();
   const entities = [];
-  const clockHandles = [];
 
   // 星系主体：盘半径 = 15 kpc 单位（可视半径设为 15，便于标尺）
+  // 银河系实为棒旋星系：两条主臂（盾牌-半人马臂/英仙臂）+ 中央棒 + 次级碎臂
   const diskR = 15; // world units = kpc
   const gal = buildGalaxy({
-    rCore: 0.16, rDisk: 1, arms: 4, armWinding: 1.9,
-    countStars: 150000, armFraction: 0.55, flatten: 0.035,
+    rCore: 0.14, rDisk: 1, arms: 2, pitch: 3.2, barLength: 0.2,
+    countStars: 140000, armFraction: 0.62, flatten: 0.032,
     tilt: 0, seed: 2024,
   });
   gal.scale.set(diskR, diskR, diskR);
   // 银河盘整体旋转使盘面与 XZ 平面略呈角度（可读 3D 感）
   group.add(gal);
 
-  // 银晕（球状星团与老星）
-  const halo = buildStarSwarm(26000, diskR * 0.9, { seed: 9, flatten: 1, color: '#ffd8ae', size: 1.5 });
+  // 银晕（球状星团与老星）——真实银晕恒星极稀疏，只作低亮度点缀
+  const halo = buildStarSwarm(5200, diskR * 0.95, { seed: 9, flatten: 1, color: '#e8c8a0', size: 1.1 });
+  halo.material.opacity = 0.5;
   group.add(halo);
+
+  // 银心辉光：核球中心的暖色柔光（类比核球恒星密集区）
+  const coreGlow = makeGlowSprite(3.2, '#ffd9a8', 0.85);
+  group.add(coreGlow);
 
   // 可见的位置标注：太阳（猎户臂/本地泡），银心 Sgr A*（可下潜）
   const sunPos = [diskR * 0.55, 0, 0]; // 8.2kpc/15kpc ≈ 0.55 盘半径
@@ -36,19 +42,16 @@ export function buildGalaxyWorld() {
 
   // 太阳系位置标签
   const sunLabel = makeTextSprite('太阳系（猎户臂）', { color: '#7fe8ff' });
-  sunLabel.position.set(sunPos[0], sunPos[1] + 0.15, sunPos[2]);
+  const sunLs = labelScaleFor(sunLabel, 0.85);
+  sunLabel.scale.set(sunLs[0], sunLs[1], 1);
+  sunLabel.position.set(sunPos[0], sunPos[1] + 0.5, sunPos[2]);
   group.add(sunLabel);
   // 银心标签
   const coreLabel = makeTextSprite('银心 · 人马座 A*', { color: '#ffcf7f' });
-  coreLabel.position.set(0, 0.25, 0);
+  const coreLs = labelScaleFor(coreLabel, 0.85);
+  coreLabel.scale.set(coreLs[0], coreLs[1], 1);
+  coreLabel.position.set(0, 0.7, 0);
   group.add(coreLabel);
-
-  // 银心发光点
-  const coreGlow = new THREE.Mesh(
-    new THREE.SphereGeometry(0.12, 16, 16),
-    new THREE.MeshBasicMaterial({ color: 0xffcf7f }),
-  );
-  group.add(coreGlow);
 
   // 可下潜实体：银河系（下潜到本星系群视角看它？不——本世界就是银河；下潜应到
   // 太阳系/星际层。我们把「下潜」交给子世界导航，由导航器提供）。这里只放两个

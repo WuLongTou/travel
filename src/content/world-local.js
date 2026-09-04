@@ -4,8 +4,7 @@
 import * as THREE from 'three';
 import { registerWorld } from './worlds.js';
 import { mpcToLy } from '../util/units.js';
-import { buildGalaxy, buildStarSwarm } from './galaxy-gen.js';
-import { makeTextSprite, labelScaleFor } from '../render/labels.js';
+import { buildGalaxy, buildStarSwarm } from './galaxy-gen.js';import { makeTextSprite, labelScaleFor } from '../render/labels.js';
 import { LOCAL_GROUP } from './data/local-group.js';
 
 const MPC_KM = 3.0857e19;
@@ -13,37 +12,36 @@ const MPC_KM = 3.0857e19;
 // 星系渲染：M31 与银河是对等的棒旋；远近不同给大小/倾斜。简化：全部用一个
 // 可配置盘。视觉示意：真实半径 ~kpc 级，但在 Mpc 尺度不可见 → 用「示意大小」
 // （视觉可读的弥散光斑），并标注 schematic。
+  // 本星系群坐标：银河在原点；成员位置 = ra/dec 方向 × 距离。
+  // 旋涡星系渲染为程序化螺旋小盘（真实感），矮星系为松散点云；
+  // 尺寸为教学示意（真实 8kpc 在 Mpc 尺度不可见，schematic 标注）。
 export function buildLocalWorld() {
   const group = new THREE.Group();
   const entities = [];
   const members = LOCAL_GROUP; // [{id,name,en,distMpc(距银河),raDeg,decDeg,type,sizeKpc,note}]
-  const rng = Math.random;
-
-  // 麦哲伦云作为银盘旁边的点云；M31/M33 作为独立小星系
+  let tiltSeed = 0;
   for (const m of members) {
-    // 本星系群坐标：银河在原点；成员位置 = ra/dec 方向 × 距离
     const p = direction3d(m.raDeg, m.decDeg, m.distMpc); // Mpc
-    // 视觉示意大小：转换为可读光斑（实际 Mpc 尺度不可见）
-    const visKpc = m.sizeKpc || 8; // 实际半径 kpc
-    const visWorldR = (visKpc / 1000) * 4; // Mpc 尺度下把 8kpc → 0.032 Mpc（仍太小）
-    // 由于 1 Mpc 世界里 8kpc = 0.008 —— 完全不可见。所以视觉用「点精灵/小型点云」。
-    // 教学简化：用 1 个单位点云 = 星系示意，大小按类型：
-    //  M31/银河 = 稍大椭球，矮星系 = 小点。附标签。
     let obj;
     if (m.type === 'spiral') {
-      const g = buildStarSwarm(m.id === 'm31' ? 9000 : 6000, 1, { seed: m.seed || 12, flatten: 0.3, color: '#dce6ff', size: 1.8 });
-      obj = g;
-      obj.scale.set(0.06, 0.06, 0.06);
+      // 螺旋小盘：M31 更大更亮；每家给不同的盘倾角（视觉可区分）
+      tiltSeed += 1;
+      obj = buildGalaxy({
+        rCore: 0.2, rDisk: 1, arms: 2, pitch: 3.0, barLength: m.id === 'milkyway' ? 0.2 : 0.12,
+        countStars: m.id === 'm31' ? 14000 : 9000, armFraction: 0.6,
+        flatten: 0.12, tilt: (tiltSeed - 1) * 0.5 - 0.35, seed: m.seed || 12,
+      });
+      const s = m.id === 'm31' ? 0.075 : 0.055;
+      obj.scale.set(s, s, s);
     } else {
-      const g = buildStarSwarm(2000, 1, { seed: m.seed || 5, flatten: 0.8, color: '#d9d2ff', size: 1.2 });
-      obj = g;
-      obj.scale.set(0.025, 0.025, 0.025);
+      obj = buildStarSwarm(2200, 1, { seed: m.seed || 5, flatten: 0.75, color: '#d9d2ff', size: 1.2 });
+      obj.scale.set(0.022, 0.022, 0.022);
     }
     obj.position.set(p[0], p[1], p[2]);
     group.add(obj);
-    // 标签
-    const lbl = makeTextSprite(m.name, { color: '#d4e3ff' });
-    const ls = labelScaleFor(lbl, 0.09);
+    // 标签（星系盘半径量级，避免大标签糊满屏；大星系优先占位）
+    const lbl = makeTextSprite(m.name, { color: '#d4e3ff', priority: m.id === 'm31' ? 2 : (m.id === 'm33' ? 1 : 0) });
+    const ls = labelScaleFor(lbl, 0.042);
     lbl.scale.set(ls[0], ls[1], 1);
     lbl.position.set(p[0], p[1] + 0.05, p[2]);
     group.add(lbl);
@@ -69,15 +67,18 @@ export function buildLocalWorld() {
     }
     entities.push(e);
   }
-  // 银河系（原点）用发光的原点标出
-  const mw = buildStarSwarm(9000, 1, { seed: 2024, flatten: 0.28, color: '#e8eeff', size: 1.8 });
+  // 银河系（原点）——同螺旋小盘（带中央棒）
+  const mw = buildGalaxy({
+    rCore: 0.2, rDisk: 1, arms: 2, pitch: 3.2, barLength: 0.2,
+    countStars: 14000, armFraction: 0.6, flatten: 0.12, tilt: 0.4, seed: 2024,
+  });
   mw.scale.set(0.07, 0.07, 0.07);
   mw.position.set(0, 0, 0);
   group.add(mw);
-  const mwLbl = makeTextSprite('银河系（我们）', { color: '#9fe6ff' });
-  const mws = labelScaleFor(mwLbl, 0.11);
+  const mwLbl = makeTextSprite('银河系（我们）', { color: '#9fe6ff', priority: 2 });
+  const mws = labelScaleFor(mwLbl, 0.05);
   mwLbl.scale.set(mws[0], mws[1], 1);
-  mwLbl.position.set(0, 0.08, 0);
+  mwLbl.position.set(0, 0.09, 0);
   group.add(mwLbl);
   entities.push({
     id: 'milkyway', name: '银河系', en: 'Milky Way', type: 'galaxy',
@@ -96,6 +97,7 @@ export function buildLocalWorld() {
     worldRadius: 1.2,
     spawn: [0.9, 0.3, 0.9],
     viewDist: 0.6,
+    labelFadeDist: 2.4, // 本星系群全景下成员标签可见
     maxSpeedWorldPerS: 0.02, thrustAccWorldPerS2: 0.008, dragPerSec: 0.4, timeScaleMax: 365 * 86400 * 100,
     ambient: { starCount: 2500, starSpread: 4 },
     group, entities,

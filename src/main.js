@@ -16,8 +16,9 @@ import './content/world-galaxy.js';
 import './content/world-local.js';
 import './content/world-super.js';
 import './content/world-cosmos.js';
-import { formatKm, lightTravelText, C_KM_S } from './util/units.js';
+import { formatKm, lightTravelText, unitRulerText, C_KM_S } from './util/units.js';
 import { ChaseCam } from './render/camera.js';
+import { updateLabelFades } from './render/labels.js';
 
 const canvas = document.getElementById('scene');
 const engine = new CosmicEngine(canvas);
@@ -47,8 +48,8 @@ nav.onWorldChanged = (world, idx) => {
   engine.loadWorld(world, world.group, []);
   // 面包屑 = 完整尺度阶梯（当前高亮）
   ui.setCrumb(idx);
-  // ruler：直接显示「1 世界单位 = 多少 km = 多少光年」，不再做二次换算（避免 kpc/kpc 自指）
-  ui.setRuler(`1 ${world.unitName} ≈ ${formatKm(world.kmPerUnit)} · 当前尺度：${world.title}`);
+  // ruler：1 世界单位的真实换算（unitRulerText 避免同单位自指）
+  ui.setRuler(`${unitRulerText(world.unitName)} · 当前尺度：${world.title}`);
   ui.hideDiveHint();
   selected = null;
   ui.hideInfo();
@@ -160,6 +161,10 @@ function renderFrame(now) {
   }
 
   chaseCam.update(dtReal);
+  // 标签距离淡出+屏幕避让：远景标签降透明度，重叠标签只保留最近者
+  if (curWorld) {
+    updateLabelFades(curWorld.group, engine.camera, curWorld.labelFadeDist || curWorld.viewDist * 1.6);
+  }
   engine.render(dtReal);
 }
 

@@ -1,6 +1,19 @@
 // 渲染原语：程序化星球（含大气/环），真实数据的可视化近似
 import * as THREE from 'three';
-import { bodyTexture } from './textures.js';
+import { bodyTexture, glowTexture } from './textures.js';
+
+// 柔光晕 sprite：恒星/星系核心的辉光（billboard，永远面向相机）
+// worldSize = 世界单位直径；中心亮核 + 指数衰减晕
+export function makeGlowSprite(worldSize, color = '#ffffff', opacity = 1) {
+  const tex = glowTexture(128);
+  const mat = new THREE.SpriteMaterial({
+    map: tex, color: new THREE.Color(color), transparent: true,
+    opacity, depthWrite: false, blending: THREE.AdditiveBlending,
+  });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(worldSize, worldSize, 1);
+  return sprite;
+}
 
 // 生成一颗行星/恒星/月球：
 // opts: { radiusKm, textureSeed(可选), color, emissive(恒星), ring?, atmosphere? }

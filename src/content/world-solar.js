@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { PLANETS, SOL, MOONS, ASTEROID_BELT, KUIPER_BELT, SOURCE_NOTE } from './data/solar.js';
 import { AU_KM } from '../util/units.js';
 import { registerWorld } from './worlds.js';
-import { makeSphere, makeRing, makeOrbitLine } from '../render/bodies.js';
+import { makeSphere, makeRing, makeOrbitLine, makeGlowSprite } from '../render/bodies.js';
 import { makeTextSprite, labelScaleFor } from '../render/labels.js';
 
 // 实体球显示半径（km → 世界单位=AU 不可读，故取对数分级放大）。
@@ -36,24 +36,22 @@ export function buildSolarWorld() {
     radius: sunVis,
     color: '#fff3cf',
     emissive: '#ffd27f',
-    emissiveIntensity: 1.4,
+    emissiveIntensity: 1.0,
     roughness: 0.4,
   });
   sunMesh.position.set(0, 0, 0);
   group.add(sunMesh);
-  // 太阳外晕（视觉柔光，避免硬边缘）
-  const sunHalo = makeSphere({
-    radius: sunVis * 1.6,
-    color: '#ffd27f',
-    emissive: '#ffd27f',
-    emissiveIntensity: 0.4,
-    roughness: 1,
-  });
-  sunHalo.position.set(0, 0, 0);
-  sunHalo.material.transparent = true;
-  sunHalo.material.opacity = 0.25;
-  sunHalo.material.depthWrite = false;
+  // 太阳光晕：内圈炽白 + 外圈暖黄柔光（真实太阳的辉光观感）
+  const sunHalo = makeGlowSprite(sunVis * 4.5, '#fff7dd', 0.95);
   group.add(sunHalo);
+  const sunOuter = makeGlowSprite(sunVis * 11, '#ffd9a0', 0.28);
+  group.add(sunOuter);
+
+  // 光照：太阳作为唯一点光源（无衰减，教学场景全层照亮）+ 微弱环境光提亮背光面
+  const sunLight = new THREE.PointLight(0xfff2dd, 3.0);
+  sunLight.decay = 0;
+  group.add(sunLight);
+  group.add(new THREE.AmbientLight(0x405066, 0.55));
 
   const sunEntity = {
     id: 'sun', name: '太阳', en: 'Sun', type: 'sun',
@@ -75,7 +73,7 @@ export function buildSolarWorld() {
   };
   entities.push(sunEntity);
   const sunLabel = makeTextSprite('太阳 · Sun');
-  const sunLs = labelScaleFor(sunLabel, sunVis * 3.2);
+  const sunLs = labelScaleFor(sunLabel, 0.7);
   sunLabel.scale.set(sunLs[0], sunLs[1], 1);
   sunLabel.position.set(0, sunVis * 2.6, 0);
   group.add(sunLabel);
@@ -87,8 +85,9 @@ export function buildSolarWorld() {
     const mesh = makeSphere({
       radius: rVis,
       color: p.color,
-      emissive: isGas ? p.color : '#000000',
-      emissiveIntensity: isGas ? 0.15 : 0,
+      // 轻微自发光（同色 0.18）让背光面仍可辨认——教学场景避免"黑半球"
+      emissive: p.color,
+      emissiveIntensity: 0.18,
       roughness: 0.95,
     });
     // 起始角随机；轨道半径严格用真实数据
@@ -162,13 +161,13 @@ export function buildSolarWorld() {
       positions[i*3] = Math.cos(th) * a;
       positions[i*3+1] = y;
       positions[i*3+2] = Math.sin(th) * a;
-      const b = 0.35 + Math.random() * 0.3;
+      const b = 0.18 + Math.random() * 0.16;
       colors[i*3] = b * 0.85; colors[i*3+1] = b * 0.8; colors[i*3+2] = b * 0.68;
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    const mat = new THREE.PointsMaterial({ size: 0.004, vertexColors: true, transparent: true, opacity: 0.85, depthWrite: false });
+    const mat = new THREE.PointsMaterial({ size: 0.0016, vertexColors: true, transparent: true, opacity: 0.5, depthWrite: false });
     const pts = new THREE.Points(geo, mat);
     pts.frustumCulled = false;
     group.add(pts);
@@ -191,13 +190,13 @@ export function buildSolarWorld() {
       positions[i*3] = Math.cos(th) * a;
       positions[i*3+1] = y;
       positions[i*3+2] = Math.sin(th) * a;
-      const b = 0.2 + Math.random() * 0.2;
+      const b = 0.12 + Math.random() * 0.12;
       colors[i*3] = b * 0.65; colors[i*3+1] = b * 0.75; colors[i*3+2] = b * 0.9;
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    const mat = new THREE.PointsMaterial({ size: 0.006, vertexColors: true, transparent: true, opacity: 0.7, depthWrite: false });
+    const mat = new THREE.PointsMaterial({ size: 0.004, vertexColors: true, transparent: true, opacity: 0.5, depthWrite: false });
     const pts = new THREE.Points(geo, mat);
     pts.frustumCulled = false;
     group.add(pts);

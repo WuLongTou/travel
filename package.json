@@ -1,5 +1,5 @@
 {
-  "name": "three-body-music-visualizer",
+  "name": "universe-roam",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -7,12 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "smoke": "node scripts/smoke-discovery.mjs"
+    "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
-    "pngjs": "^7.0.0",
-    "three": "^0.185.1",
-    "ws": "^8.21.3"
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "vite": "^8.2.2"

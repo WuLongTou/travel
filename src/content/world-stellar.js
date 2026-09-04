@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { registerWorld } from './worlds.js';
 import { LY_KM, tempToHex } from '../util/units.js';
 import { mulberry32 } from '../util/math.js';
-import { makeSphere } from '../render/bodies.js';
+import { makeGlowSprite } from '../render/bodies.js';
 import { makeTextSprite, labelScaleFor } from '../render/labels.js';
 import { STAR_CATALOG } from './data/stars.js';
 
@@ -49,18 +49,24 @@ export function buildStellarWorld() {
     all.push({ s, p });
   });
   for (const { s, p } of all) {
-    // 可见尺寸：亮星大一点（点视觉由 size 决定，这里 mesh 仅用于可读的选中体）
-    const glow = new THREE.Mesh(
-      new THREE.SphereGeometry(0.22 + (s.lumFactor || 0.4) * 0.3, 12, 12),
-      new THREE.MeshBasicMaterial({ color: tempToHex(s.tempK || 5800), transparent: true, opacity: 0.9 }),
-    );
+    // 恒星观感 = 小亮核 + 柔光晕（真实星光是点源 + 衍射/散射晕，不是大球）
+    const lum = s.lumFactor ?? 0.4;
+    const hex = tempToHex(s.tempK || 5800);
+    const glow = makeGlowSprite(0.55 + lum * 0.9, hex, 0.85);
     glow.position.set(p[0], p[1], p[2]);
     group.add(glow);
+    const core = new THREE.Mesh(
+      new THREE.SphereGeometry(0.045 + lum * 0.05, 10, 8),
+      new THREE.MeshBasicMaterial({ color: hex }),
+    );
+    core.position.set(p[0], p[1], p[2]);
+    group.add(core);
     if (s.showLabel) {
       const lbl = makeTextSprite(s.name, { color: '#cfe6ff' });
-      const ls = labelScaleFor(lbl, 0.7);
+      const ls = labelScaleFor(lbl, 0.55);
       lbl.scale.set(ls[0], ls[1], 1);
-      lbl.position.set(p[0], p[1] + 0.5, p[2]);
+      // 标签放在光晕外缘上方（亮星光晕直径最大 ~1.45），避免文字糊进亮核
+      lbl.position.set(p[0], p[1] + 0.55 + lum * 0.55, p[2]);
       group.add(lbl);
     }
     const facts = [
@@ -82,11 +88,12 @@ export function buildStellarWorld() {
       },
       visual: { color: tempToHex(s.tempK || 5800) },
     });
-    glow.userData.entity = entities[entities.length - 1];
   }
 
   // 太阳位置标签（原点）
-  const sunLabel = makeTextSprite('太阳（本层原点）', { color: '#ffd27f' });
+  const sunLabel = makeTextSprite('太阳（本层原点）', { color: '#ffd27f', priority: 1 });
+  const sunLs2 = labelScaleFor(sunLabel, 0.5);
+  sunLabel.scale.set(sunLs2[0], sunLs2[1], 1);
   sunLabel.position.set(0, 0.8, 0);
   group.add(sunLabel);
 
@@ -95,6 +102,7 @@ export function buildStellarWorld() {
     worldRadius: 40,
     spawn: [3, 1.2, 3],
     viewDist: 6,
+    labelFadeDist: 14, // 60 ly 邻域内 featured 恒星标注保持可读
     maxSpeedWorldPerS: 1.6, thrustAccWorldPerS2: 0.7, dragPerSec: 0.4, timeScaleMax: 365 * 86400,
     ambient: { starCount: 4000, starSpread: 260 },
     group, entities,
