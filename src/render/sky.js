@@ -1,11 +1,10 @@
 // 渲染域：无限星空背景、银河带方向采样、星场与远星云
-// 2026-09-04 真实宇宙视觉整改：用户指出"如果一个飞船在一个星系中能看到
-// 另一个星系吗"——答案是绝对可以（从地球肉眼能看到 M31 仙女座）。本轮从
-// "飞船在星系中"的真实视角重新设计环境：
-//   1. 银河带弥漫光晕：地球夜空银河（银盘恒星累积亮度）是最强结构，必须可见
-//   2. 远景星系可见层：作为"宇宙里有邻居星系"的视觉证据（仙女座/麦哲伦云类）
-//   3. 星点尺寸再压缩：6 等星（肉眼极限）= 0.5 px，亚像素为主
-//   4. 银河带密度增强：带内恒星密度应该是带外的几倍
+// 2026-09-04 第三轮真实宇宙整改：用户指出银河带弥漫亮带"太亮、没必要"
+// ——移除 disc/bulge 弥漫光晕。本轮从"真实飞船视角"重定星空观感：
+//   1. 银河带只由"带内星点更密"构成，无任何弥漫底色（宇宙背景纯黑）
+//   2. 天球 shader 星点细化：格子 4.4px 大方块 → ~1.5px 真实角尺寸星点
+//   3. 恒星颜色-星等联动：暗星偏橙红（M/K 型占银河系约 3/4）、亮星偏蓝白
+//   4. 远景星系可见层保留（上一轮新增，作为"宇宙里有邻居星系"的证据）
 import * as THREE from 'three';
 import { randomUnit } from '../core/utils.js';
 import { COLLECTION_LEVELS } from '../core/config.js';
@@ -13,15 +12,6 @@ import { COLLECTION_LEVELS } from '../core/config.js';
 // 银河带法线（星空里那条恒星密集的带）：给个倾角，别正对坐标轴
 export const GALAXY_NORMAL = (() => {
   const n = [0.34, 0.88, -0.32];
-  const l = Math.hypot(n[0], n[1], n[2]);
-  return [n[0] / l, n[1] / l, n[2] / l];
-})();
-
-// 银心方向（银河带里最亮的那一点）：与 GALAXY_NORMAL 大体一致，但偏角让它
-// 落在银盘面内——远处看银河，肉眼最亮的就是银心方向。
-export const GALAXY_CENTER = (() => {
-  // 银河带法线基础上偏移到盘面内一点（让"银心方向"在盘面上）
-  const n = [0.42, 0.78, -0.46];
   const l = Math.hypot(n[0], n[1], n[2]);
   return [n[0] / l, n[1] / l, n[2] / l];
 })();
@@ -36,7 +26,6 @@ export function createCosmicSky() {
     depthTest: false,
     uniforms: {
       uGalaxyNormal: { value: new THREE.Vector3(GALAXY_NORMAL[0], GALAXY_NORMAL[1], GALAXY_NORMAL[2]) },
-      uGalaxyCenter: { value: new THREE.Vector3(GALAXY_CENTER[0], GALAXY_CENTER[1], GALAXY_CENTER[2]) },
     },
     vertexShader: `
       varying vec3 vDir;
@@ -48,48 +37,33 @@ export function createCosmicSky() {
     fragmentShader: `
       varying vec3 vDir;
       uniform vec3 uGalaxyNormal;
-      uniform vec3 uGalaxyCenter;
       float hash(vec3 p) {
         return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
       }
       void main() {
         vec3 dir = normalize(vDir);
-        vec3 base = vec3(0.0);
-
-        // === 银河带弥漫光晕（2026-09-04 真实宇宙视觉整改）===
-        // 真实参考：地球看银河——银盘方向无数不可分辨恒星累积成的"牛奶路"，
-        // 沿 GALAXY_NORMAL 形成约 5°~30° 宽的亮带，是肉眼可见的最强结构。
-        // 表面亮度约 22 等/平方角秒（极暗但持续分布）。
-        // 渲染：按方向与 GALAXY_NORMAL 的 cos² 衰减得到沿银盘的亮带；银心
-        //   方向 (uGalaxyCenter) 进一步增强（盘上最亮的核球方向）。
-        // 强度（disc*0.18 + bulge*0.40，指数从 5.5 调到 2.5）：实测
-        // disc 的指数 5.5 让 disc=1 的有效角度只有 ±25°——银河带太窄。
-        // 调到 2.5 让 disc=1 的角度扩到 ±40°，肉眼能看到一条明确的亮带。
-        float disc = exp(-pow(dot(dir, uGalaxyNormal), 2.0) * 2.5);
-        float bulge = exp(-pow(dot(dir, uGalaxyCenter), 2.0) * 12.0);
-        // 银盘颜色：偏暖黄白（真实银河带是暖色调）
-        vec3 milkyColor = vec3(0.55, 0.50, 0.42);
-        float milky = disc * (0.18 + 0.40 * bulge);
-        base += milkyColor * milky;
-
-        // === 离散星点（带内密度增强）===
-        // 银河带内格子出星概率更高（带内阈值大幅放宽），读作一条密星带。
-        // 银河带 → 把方向切成小格，每格随机出现一颗星。
-        // 离带密度（默认 0.35~0.90 → 提升到 0.55~1.10）：此前星空整体偏暗，
-        // 截图分析 92% 像素 <32 灰度——肉眼看不到明确的"星等层次"。将
-        // 离带星点亮度区间抬到 0.55~1.10，配合银河带更密的星点（带内 6×）
-        // 形成"满星密带 + 散落恒星"双层视觉。
+        // 真实宇宙背景是纯黑的：银河带的可读结构只来自"带内恒星更密"，
+        // 不加任何弥漫底色/环境光（2026-09-04 第三轮：上一轮的
+        // disc/bulge 弥漫光晕把银盘方向抬到 80~150 灰度，过亮，已移除）。
         float bandFactor = exp(-pow(dot(dir, uGalaxyNormal), 2.0) * 9.0);
-        vec3 cell = floor(dir * 240.0);
+        vec3 base = vec3(0.0);
+        // 离散星点：把方向切成小格，每格随机出现一颗星。
+        // 格子角尺寸 1/720 rad ≈ 0.08°：1080p/58° 视场下约 1.5 CSS px
+        // （与渲染 pixelRatio 无关——dpr 只增加物理像素密度），和 Points
+        // 星层"暗星 0.42px / 亮星 1.30px"的真实角尺寸同量级。上一轮的
+        // 240 格子是 4.4px 大方块且亮度 0.55~1.10（画面最亮元素），
+        // 在带内 6× 密度下与弥漫光晕一起被读成"糊亮带"——本轮一并修正。
+        vec3 cell = floor(dir * 720.0);
         float h = hash(cell);
-        // 带内出星概率比带外高 6×（从 0.0028 加到 0.0170）
-        float star = smoothstep(0.9975 - bandFactor * 0.0170, 1.0, h);
+        // 出星概率随格子数（∝频率²）重标定，全天星数守恒在 ~5000 颗
+        // （真实夜空肉眼可见星的数量级）；带内出星概率仍比带外高 ~6×。
+        float star = smoothstep(0.99972 - bandFactor * 0.00162, 1.0, h);
         vec3 starColor = mix(vec3(0.75, 0.82, 1.0), vec3(1.0, 0.95, 0.85), hash(cell + 7.0));
-        base += starColor * star * (0.55 + hash(cell + 11.0) * 0.55) * (0.7 + bandFactor * 0.5);
-
-        // 少量彩色亮星（带内略多）
-        float bright = smoothstep(0.9995 - bandFactor * 0.0015, 1.0, hash(cell + 3.0));
-        base += vec3(1.0, 0.85, 0.7) * bright * (0.5 + bandFactor * 0.3);
+        base += starColor * star * (0.30 + hash(cell + 11.0) * 0.50) * (0.7 + bandFactor * 0.5);
+        // 少量亮星：从已出星点中按幂律抽亮（pow(u,12) 连续分布，避免
+        // 窄 smoothstep 阈值在高频格子下的 hash 精度问题）。
+        float lift = pow(hash(cell + 3.0), 12.0);
+        base += vec3(1.0, 0.85, 0.7) * star * lift * (0.5 + bandFactor * 0.3);
 
         gl_FragColor = vec4(base, 1.0);
       }
@@ -136,9 +110,9 @@ export function createStarfield(glowTex) {
   // sizeAttenuation: false —— 星点以**固定像素尺寸**渲染。背景星空在
   // "无穷远"（天球），角尺寸本就该恒定。
   const layers = [
-    { n: 12000, size: 0.42, lo: 0.010, hi: 0.10, pow: 3.5, op: 0.85 },
-    { n: 600,   size: 0.85, lo: 0.18,  hi: 0.42, pow: 2.8, op: 1.00 },
-    { n: 50,    size: 1.30, lo: 0.50,  hi: 0.70, pow: 2.9, op: 1.00 },
+    { n: 12000, size: 0.42, lo: 0.010, hi: 0.10, pow: 3.5, op: 0.85, tilt: 0.60 },
+    { n: 600,   size: 0.85, lo: 0.18,  hi: 0.42, pow: 2.8, op: 1.00, tilt: 1.00 },
+    { n: 50,    size: 1.30, lo: 0.50,  hi: 0.70, pow: 2.9, op: 1.00, tilt: 2.20 },
   ];
   // 黑体色温 → 近似的 RGB（由蓝到白到橙红）
   function blackbody(t, out) {
@@ -153,7 +127,8 @@ export function createStarfield(glowTex) {
     const pos = new Float32Array(L.n * 3);
     const col = new Float32Array(L.n * 3);
     for (let i = 0; i < L.n; i++) {
-      // 约 65% 的恒星聚在银河带上（更密集——真实银河带是肉眼可见的最亮结构）
+      // 约 65% 的恒星聚在银河带上——真实银盘方向的恒星投影密度远高于带外，
+      // 银河带的可读结构只来自密星带本身，不靠弥漫底色
       const dir = Math.random() < 0.65 ? sampleGalaxyDirection() : randomUnit(1);
       const r = 900 + Math.random() * 3600;
       pos[i * 3] = dir[0] * r;
@@ -161,8 +136,11 @@ export function createStarfield(glowTex) {
       pos[i * 3 + 2] = dir[2] * r;
       // 幂律星等：pow>1 让亮度集中在暗端
       const b = L.lo + Math.pow(Math.random(), L.pow) * (L.hi - L.lo);
-      // 色温在蓝白(0.1)~橙红(0.9)之间，随亮度略偏：亮星偏蓝白，暗星偏暖
-      const t = 0.1 + Math.random() * 0.8;
+      // 色温-星等联动（2026-09-04 第三轮真实化）：银河系约 3/4 恒星是
+      // M/K 型红矮星（暗、红）；而肉眼亮星由 A/F 型主导（亮、蓝白）。
+      // tilt<1 的幂律分布偏红端、>1 偏蓝端：暗星层 0.60（E[t]≈0.60，
+      // 橙红为主）、中等层 1.00（均匀）、亮星层 2.20（E[t]≈0.37，蓝白为主）。
+      const t = 0.1 + Math.pow(Math.random(), L.tilt) * 0.8;
       blackbody(t, _bb);
       col[i * 3] = b * _bb[0];
       col[i * 3 + 1] = b * _bb[1];
