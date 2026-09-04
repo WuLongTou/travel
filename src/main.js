@@ -81,6 +81,7 @@ let lastFrame = performance.now();
 let frame = 0;
 let wheelAcc = 0;
 let prevG = false; // G 键边沿检测
+let prevR = false; // R 键边沿检测
 
 function simulate(dtReal) {
   if (!curWorld || !curWorld.update) return;
@@ -141,12 +142,20 @@ function renderFrame(now) {
       ui.setDockHelp(curWorld.hint || '点击画面锁定鼠标转向 · WASD 飞行 · G 轨道飞行 · 滚轮缩放 · F 下潜');
     } else {
       probe.enterBallistic();
-      // 轨道物理以模拟时间积分：限制倍速保证轨道稳定可读（真实周期可见）
-      if (clock.rate > 2592000) { clock.setRate(2592000); ui.setCurrentRate(2592000); }
-      ui.setDockHelp('轨道飞行（陨石）：WASD 变轨 · 时间 1月/秒~1年/秒 观看开普勒轨道 · G 返回巡航');
+      // 轨道物理为实时：倍速会让行星狂奔而无法建立引力遭遇，回到实时
+      if (clock.rate !== 1) { clock.setRate(1); ui.setCurrentRate(1); }
+      ui.setDockHelp('轨道飞行（陨石）：低速贴近行星切入可被捕获 · WASD 变轨 · G 返回巡航 · R 挣脱捕获');
     }
   }
   prevG = gDown;
+
+  // R 键：被引力完全捕获后，在系统边缘重生继续航行
+  const rDown = input.keys.has('r');
+  if (rDown && !prevR && probe.mode === 'ballistic' && curWorld) {
+    probe.respawn();
+    ui.setDockHelp('已脱离引力捕获，在系统边缘重新出发 · G 轨道飞行 · WASD 飞行');
+  }
+  prevR = rDown;
 
   if (curWorld) {
     // 转向：Pointer Lock 时移动即转向，未锁定按住拖拽
@@ -156,8 +165,10 @@ function renderFrame(now) {
     probe.thrustOn = thrustKeys;
     const boost = input.keys.has('shift');
     const dtSim = clock.paused ? 0 : dtReal * clock.rate;
-    if (thrustKeys) probe.step(dtReal, a, boost ? 3 : 1, dtSim);
-    else probe.step(dtReal, a, 0, dtSim); // 仍应用阻尼/惯性
+    // 轨道飞行物理用实时（dtReal，演示 GM），巡航用阻尼惯性
+    const dtPhys = probe.mode === 'ballistic' ? dtReal : dtSim;
+    if (thrustKeys) probe.step(dtReal, a, boost ? 3 : 1, dtPhys);
+    else probe.step(dtReal, a, 0, dtPhys); // 仍应用阻尼/惯性
     // 陨石本体跟随 + 慢速翻滚
     meteorMesh.position.set(probe.pos[0], probe.pos[1], probe.pos[2]);
     const meteorSize = Math.max(chaseCam.followDist * 0.055, 1e-4);
@@ -187,9 +198,11 @@ function renderFrame(now) {
     // HUD
     const spKmS = probe.speedKmS();
     const cfrac = spKmS / C_KM_S;
+    // 轨道飞行用教学 GM（演示速度可超光速）：超光速时明示"演示速度"
+    const demoTag = probe.mode === 'ballistic' && cfrac >= 1 ? ' · 演示速度' : '';
     const spText = spKmS < C_KM_S
       ? Math.max(spKmS, 0).toLocaleString('zh-CN', { maximumFractionDigits: 0 }) + ' km/s'
-      : '≈' + cfrac.toFixed(1) + ' c';
+      : '≈' + cfrac.toFixed(1) + ' c' + demoTag;
     let distText = '—';
     if (hoveredId) {
       const h = curWorld.entities.find((e) => e.id === hoveredId);
@@ -198,9 +211,31 @@ function renderFrame(now) {
         distText = `${h.name} · ${formatKm(dkm)} · 光 ${lightTravelText(dkm)}`;
       }
     }
-    const modeText = probe.mode === 'ballistic'
-      ? `轨道飞行 · 引力源：${curWorld.gravity ? curWorld.gravity.name : '无（惯性直线）'}`
-      : '巡航';
+    let modeText = probe.mode === 'ballistic' ? '轨道飞行' : '巡航';
+    if (probe.mode === 'ballistic') {
+      const gname = probe.dominantWell ? probe.dominantWell.name
+        : (curWorld.gravity ? curWorld.gravity.name : '无（惯性直线）');
+      // 束缚/逃逸：比能量 E = v²/2 - GM/r 相对主导井
+      if (probe.dominantWell) {
+        const c = probe.dominantWell.ref ? probe.dominantWell.ref.pos : probe.dominantWell.center;
+        const r = Math.hypot(probe.pos[0]-c[0], probe.pos[1]-c[1], probe.pos[2]-c[2]) || 1;
+        const E = (probe.vel[0]**2 + probe.vel[1]**2 + probe.vel[2]**2) / 2 - probe.dominantWell.GM / r;
+        modeText = `轨道飞行 · ${probe.dominantWell.name} · ${E < 0 ? '束缚轨道' : '逃逸轨道'}`;
+      } else {
+        modeText = `轨道飞行 · ${gname}`;
+      }
+      // 完全捕获提示（深入引力阱且束缚轨道持续 → 引导按 R 重生）；
+      // 解除捕获后恢复常规提示（捕获时 probe.step 会清除 captureState）
+      const helpEl = document.getElementById('dock-help');
+      if (helpEl) {
+        if (probe.captureState && performance.now() / 1000 - probe.captureState.since > 1.2) {
+          helpEl.innerHTML = `<b style="color:#ffd27f">已被 ${probe.captureState.name} 的引力完全捕获</b> —— 按 R 在系统边缘重生继续航行`;
+        } else if (!probe.captureState && helpEl.dataset.captured === '1') {
+          helpEl.textContent = '点击画面锁定鼠标转向 · WASD 飞行 · G 轨道飞行 · 滚轮缩放 · F 下潜';
+        }
+        helpEl.dataset.captured = probe.captureState ? '1' : '';
+      }
+    }
     ui.setHud({ speedText: spText, distText, modeText });
     ui.setTimeState({ clockLabel: clock.timeLabel(), paused: clock.paused });
   }

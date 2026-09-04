@@ -5,7 +5,8 @@
 // 但轨道半径、周期、相对顺序、数量严格用真实数据。
 import * as THREE from 'three';
 import { PLANETS, SOL, MOONS, ASTEROID_BELT, KUIPER_BELT, SOURCE_NOTE } from './data/solar.js';
-import { AU_KM, GM_SUN_KM } from '../util/units.js';
+import { AU_KM } from '../util/units.js';
+import { mulberry32, clamp } from '../util/math.js';
 import { registerWorld } from './worlds.js';
 import { makeSphere, makeRing, makeOrbitLine, makeGlowSprite } from '../render/bodies.js';
 import { makeTextSprite, labelScaleFor } from '../render/labels.js';
@@ -51,6 +52,7 @@ export function buildSolarWorld() {
   const pickables = [];
   const moonAnims = []; // 卫星公转动画：{ mesh(相对行星), aAU, periodS, phase }
   const spins = []; // 行星自转：{ tex, rotPeriodS }（贴图 offset 驱动，不带动卫星/标签）
+  const clockHandles = []; // 额外模拟回调（彗星轨道等），update 时以 (dtSim, clock.t) 调用
 
   // ---- 太阳 ----
   // 真实半径 ~0.005 AU，渲染放大 80 倍便于看见；米粒组织 emissiveMap
@@ -181,6 +183,108 @@ export function buildSolarWorld() {
     entities.push(entity);
   }
 
+  // ---- 教学彗星：哈雷彗星（真实轨道，数值积分）----
+  // 根数（NASA/JPL）：近日点 q=0.586 AU，e=0.967，周期 75.3 年；
+  // 近日点速度 √(GM☉(1+e)/q) ≈ 54.6 km/s（真实值）。与探测球同一套
+  // 引力积分（太阳井 GM），时间倍速下可见"近日加速-弯转-远离"与背阳彗尾。
+  {
+    const cometGM = 0.47; // 与太阳井一致的教学 GM（实时可见的轨道运动）
+    const q = 0.586, eH = 0.967;
+    const vP = Math.sqrt(cometGM * (1 + eH) / q);
+    const cState = { pos: [q, 0, 0], vel: [0, 0, -vP] };
+    const coreVis = 0.05;
+    const cometCore = makeSphere({
+      radius: coreVis, color: '#cfe0ea', emissive: '#9fc4d8', emissiveIntensity: 0.5, roughness: 0.8,
+    });
+    cometCore.position.set(...cState.pos);
+    group.add(cometCore);
+    const comaGlow = makeGlowSprite(coreVis * 9, '#bfe0f4', 0.55);
+    cometCore.add(comaGlow);
+    // 彗尾：背阳锥形点云（离子尾观感），长度随日距变化
+    const TAIL_N = 260;
+    const tPos = new Float32Array(TAIL_N * 3);
+    const tailRng = mulberry32(97);
+    const tailPts = [];
+    for (let i = 0; i < TAIL_N; i++) {
+      const u = Math.pow(tailRng(), 0.8);          // 沿尾 0..1（近核密）
+      const ang = tailRng() * Math.PI * 2;
+      const rad = (0.03 + tailRng() * 0.10) * u;  // 锥形张开
+      const ph = tailRng() * Math.PI * 2;
+      tailPts.push({ u, ang, rad, ph, w: 0.4 + tailRng() * 0.8 });
+    }
+    const tGeo = new THREE.BufferGeometry();
+    tGeo.setAttribute('position', new THREE.BufferAttribute(tPos, 3));
+    const tMat = new THREE.PointsMaterial({
+      size: 2.2, sizeAttenuation: false, color: '#9fd0ff',
+      transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const tail = new THREE.Points(tGeo, tMat);
+    tail.frustumCulled = false;
+    group.add(tail);
+
+    entities.push({
+      id: 'halley', name: '哈雷彗星', en: "Halley's Comet", type: 'comet',
+      pos: cState.pos.slice(), pickRadius: 0.3,
+      info: {
+        kind: '短周期彗星', sub: '1P/Halley',
+        facts: [
+          ['近日点', '0.586 AU（金星轨道内侧）'],
+          ['远日点', '35.1 AU（海王星轨道外）'],
+          ['偏心率', '0.967'],
+          ['周期', '约 75.3 年'],
+          ['上次回归', '1986 年'],
+          ['下次回归', '2061 年'],
+        ],
+        text: '哈雷彗星是首颗被预言回归的彗星（哈雷 1705 年计算其周期）。彗尾由太阳风与辐射压把冰升华后的尘埃与离子推向背阳方向形成——图中彗尾始终背离太阳，越近日越长。',
+        source: 'NASA/JPL 标准值',
+      },
+      schematic: false,
+      visual: { color: '#9fd0ff' },
+    });
+
+    // 彗星运动与彗尾刷新（挂在 world.update，时间倍速驱动）
+    clockHandles.push((dtSim, clockT) => {
+      // 与探测球同一套引力积分（仅太阳井）：子步进
+      const STEP_MAX = 400;
+      let remain = Math.min(dtSim, 2.7e6);
+      do {
+        const h = Math.min(STEP_MAX, remain);
+        const dx = -cState.pos[0], dy = -cState.pos[1], dz = -cState.pos[2];
+        const r = Math.hypot(dx, dy, dz) || 1;
+        const a = cometGM / (r * r);
+        cState.vel[0] += dx / r * a * h;
+        cState.vel[1] += dy / r * a * h;
+        cState.vel[2] += dz / r * a * h;
+        cState.pos[0] += cState.vel[0] * h;
+        cState.pos[1] += cState.vel[1] * h;
+        cState.pos[2] += cState.vel[2] * h;
+        remain -= h;
+      } while (remain > 0);
+      cometCore.position.set(...cState.pos);
+      const e = entities.find((x) => x.id === 'halley');
+      if (e) e.pos = [...cState.pos];
+      // 彗尾：方向 = 背阳；长度随日距反比（近日壮观）
+      const r = Math.hypot(...cState.pos);
+      const L = clamp(0.5 / r, 0.12, 1.6);
+      const ux = cState.pos[0] / r, uy = cState.pos[1] / r, uz = cState.pos[2] / r;
+      // 尾向垂直基向量
+      const px = -uz, py = 0, pz = ux;
+      const pl = Math.hypot(px, py, pz) || 1;
+      const nx = px / pl, ny = py / pl, nz = pz / pl;
+      const qx = uy * nz - uz * ny, qy = uz * nx - ux * nz, qz = ux * ny - uy * nx;
+      for (let i = 0; i < TAIL_N; i++) {
+        const t = tailPts[i];
+        const sway = Math.sin(clockT * t.w + t.ph) * t.rad * t.u;
+        const along = t.u * L;
+        const spread = t.rad * t.u * L;
+        tPos[i * 3] = cState.pos[0] + ux * along + nx * spread * Math.cos(t.ang) + qx * sway;
+        tPos[i * 3 + 1] = cState.pos[1] + uy * along + ny * spread * Math.cos(t.ang) + qy * sway;
+        tPos[i * 3 + 2] = cState.pos[2] + uz * along + nz * spread * Math.cos(t.ang) + qz * sway;
+      }
+      tGeo.attributes.position.needsUpdate = true;
+    });
+  }
+
   // ---- 小行星带（示意点云）----
   {
     const count = ASTEROID_BELT.count;
@@ -243,10 +347,27 @@ export function buildSolarWorld() {
     id: 'solar', title: '太阳系', unitName: 'AU', kmPerUnit: AU_KM,
     intro: '尺度 ~120 AU。八大行星沿真实轨道公转，行星大小为教学缩放（真实比例仅约万分之一）。把时间调到 1月/秒，看行星、卫星转动起来。',
     worldRadius: 55,
-    // 轨道飞行模式：真实太阳引力参数 GM☉=1.327e11 km³/s²（IAU 标准值），
-    // 换算到 AU³/s²。轨道周期/速度均为真实值——切模式后把时间调到
-    // 1天/秒，即可按真实开普勒周期看行星际轨道运动。
-    gravity: { center: [0, 0, 0], GM: GM_SUN_KM / (AU_KM ** 3), minR: 0.06, name: '太阳' },
+    // 轨道飞行模式的多引力井（教学校准，实时积分）：主井=太阳（木星轨道
+    // 圆速度 ≈0.3 AU/s，实时约 35 秒绕一圈）；行星井 GM ∝ 可视半径²——
+    // 飞近行星轨迹明显偏转，贴太近会被行星引力捕获（HUD 提示，R 重生）。
+    // 真实 GM☉=1.327e11 km³/s² 在演示速度尺度下偏转不可见，故取教学值；
+    // 真实轨道周期数据见各天体信息卡。
+    gravityWells: (() => {
+      const sunGM = 0.47;
+      const wells = [{ center: [0, 0, 0], GM: sunGM, minR: 0.1, capR: 0.16, name: '太阳' }];
+      for (const e of entities) {
+        if (e.type !== 'planet') continue;
+        const R = e.pickRadius || 0.06;
+        // GM=3R²：飞掠 b~0.15 AU 明显偏转；贴近（<0.1R·AU 量级）且低速
+        // 切入可形成绕行星轨道（有 ~30% 太阳潮汐摆动，如真实地月系），
+        // 高速飞掠则被太阳潮汐带走——捕获与否取决于玩家切入姿态
+        wells.push({
+          ref: e, GM: 3 * R * R,
+          minR: R * 1.15, capR: R * 2.4, name: e.name,
+        });
+      }
+      return wells;
+    })(),
     spawn: [22, 7, 26],
     spawnLookAt: [0, 0, 0],
     viewDist: 30,
@@ -271,6 +392,8 @@ export function buildSolarWorld() {
       for (const sp of spins) {
         sp.tex.offset.x = (clock.t / sp.rotPeriodS) % 1;
       }
+      // 彗星等附加模拟
+      for (const fn of clockHandles) fn(dtSim, clock.t);
     },
   };
 }
