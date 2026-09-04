@@ -92,7 +92,7 @@ export function buildStellarWorld() {
 
   // 太阳位置标签（原点）
   const sunLabel = makeTextSprite('太阳（本层原点）', { color: '#ffd27f', priority: 1 });
-  const sunLs2 = labelScaleFor(sunLabel, 0.5);
+  const sunLs2 = labelScaleFor(sunLabel, 0.35);
   sunLabel.scale.set(sunLs2[0], sunLs2[1], 1);
   sunLabel.position.set(0, 0.8, 0);
   group.add(sunLabel);
@@ -101,6 +101,7 @@ export function buildStellarWorld() {
     id: 'stellar', title: '星际近邻', unitName: 'ly', kmPerUnit: LY_KM,
     worldRadius: 40,
     spawn: [3, 1.2, 3],
+    spawnLookAt: [0, 0, 0], // 兴趣中心：太阳（本层原点）
     viewDist: 6,
     labelFadeDist: 14, // 60 ly 邻域内 featured 恒星标注保持可读
     maxSpeedWorldPerS: 1.6, thrustAccWorldPerS2: 0.7, dragPerSec: 0.4, timeScaleMax: 365 * 86400,

@@ -22,7 +22,15 @@ export class Probe {
     this.pos = this._spawn.slice();
     this.vel = [0, 0, 0];
     this.trail.length = 0;
-    // 朝向恢复“层默认视角”由 engine 设定
+    // 朝向由 Navigator.enter 的 lookTowards 设定（看向该层兴趣中心）
+  }
+
+  // 转动朝向使其看向目标点（层进入时用，保证构图稳定不依赖上一层朝向）
+  lookTowards(target) {
+    const dx = target[0] - this.pos[0], dy = target[1] - this.pos[1], dz = target[2] - this.pos[2];
+    const l = Math.hypot(dx, dy, dz) || 1;
+    this.pitch = Math.asin(dy / l);
+    this.yaw = Math.atan2(-dx, -dz);
   }
 
   // 前向/右/上（yaw/pitch 球坐标；与引擎 chase 相机约定一致：初始朝 -Z）

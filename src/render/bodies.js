@@ -1,6 +1,6 @@
 // 渲染原语：程序化星球（含大气/环），真实数据的可视化近似
 import * as THREE from 'three';
-import { bodyTexture, glowTexture } from './textures.js';
+import { glowTexture, ringTexture } from './textures.js';
 
 // 柔光晕 sprite：恒星/星系核心的辉光（billboard，永远面向相机）
 // worldSize = 世界单位直径；中心亮核 + 指数衰减晕
@@ -16,34 +16,38 @@ export function makeGlowSprite(worldSize, color = '#ffffff', opacity = 1) {
 }
 
 // 生成一颗行星/恒星/月球：
-// opts: { radiusKm, textureSeed(可选), color, emissive(恒星), ring?, atmosphere? }
+// opts: { radius, color, emissive, emissiveIntensity, roughness, metalness,
+//         map(颜色贴图), emissiveMap(自发光贴图,恒星) }
 export function makeSphere(opts) {
-  const { radius, color = '#8fa3bd', emissive = '#000000', emissiveIntensity = 0, roughness = 0.9, metalness = 0.0 } = opts;
+  const { radius, color = '#8fa3bd', emissive = '#000000', emissiveIntensity = 0,
+    roughness = 0.9, metalness = 0.0, map = null, emissiveMap = null } = opts;
   const geo = new THREE.SphereGeometry(radius, 48, 32);
   const mat = new THREE.MeshStandardMaterial({
     color: new THREE.Color(color),
     roughness,
     metalness,
   });
+  if (map) mat.map = map;
   if (emissive) {
     mat.emissive = new THREE.Color(emissive);
     mat.emissiveIntensity = emissiveIntensity;
   }
+  if (emissiveMap) mat.emissiveMap = emissiveMap;
   const mesh = new THREE.Mesh(geo, mat);
   mesh.castShadow = false;
   mesh.receiveShadow = false;
   return mesh;
 }
 
-// 行星环（土星式平面环带）
-export function makeRing(innerKm, outerKm, color = 'rgba(200,190,170,0.85)') {
-  // three RingGeometry 需要世界半径；用透明贴图渐晕（稍后统一调整透明度）
-  const geo = new THREE.RingGeometry(innerKm, outerKm, 96, 1);
+// 行星环（土星式）：径向条纹渐晕贴图（卡西尼缝示意）+ 真实倾角由调用方设置
+export function makeRing(innerWorld, outerWorld, color = '#d9cbb0') {
+  const geo = new THREE.RingGeometry(innerWorld, outerWorld, 96, 1);
+  // RingGeometry 的 UV 沿径向分布：把条纹贴图画成径向明暗 + 内外缘透明
   const mat = new THREE.MeshBasicMaterial({
-    color: new THREE.Color(color),
+    map: ringTexture(color),
+    color: 0xffffff,
     side: THREE.DoubleSide,
     transparent: true,
-    opacity: 0.55,
     depthWrite: false,
   });
   const ring = new THREE.Mesh(geo, mat);

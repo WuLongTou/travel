@@ -66,6 +66,7 @@ export function buildSuperWorld() {
     id: 'super', title: '室女·宇宙网', unitName: 'Mpc', kmPerUnit: MPC_KM,
     worldRadius: 90,
     spawn: [20, 10, 20],
+    spawnLookAt: [0, 0, 0], // 兴趣中心：本地群（原点，丝网交汇近端）
     viewDist: 26,
     labelFadeDist: 110, // 全景下星系团名称仍可读
     maxSpeedWorldPerS: 3.2, thrustAccWorldPerS2: 1.4, dragPerSec: 0.35, timeScaleMax: 365 * 86400,

@@ -39,6 +39,9 @@ export class Navigator {
     this.engine.chaseCam.followDist = dist;
     // 相机：从观测位看向「该层的兴趣中心」（多数世界 spawn 即兴趣点附近）
     const lookAt = opts.lookAt || world.spawnLookAt || spawn;
+    // 探测球朝向必须同步看向兴趣中心：chase 相机每帧由探测球朝向推导，
+    // 否则会沿用上一层离开时的朝向，进入构图随机
+    this.probe.lookTowards(lookAt);
     this.engine.chaseCam.snapTo(
       [spawn[0], spawn[1], spawn[2]],
       [lookAt[0], lookAt[1], lookAt[2]],

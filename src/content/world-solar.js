@@ -9,6 +9,9 @@ import { AU_KM } from '../util/units.js';
 import { registerWorld } from './worlds.js';
 import { makeSphere, makeRing, makeOrbitLine, makeGlowSprite } from '../render/bodies.js';
 import { makeTextSprite, labelScaleFor } from '../render/labels.js';
+import {
+  sunTexture, gasGiantTexture, rockyTexture, earthTexture, venusTexture, iceGiantTexture,
+} from '../render/textures.js';
 
 // 实体球显示半径（km → 世界单位=AU 不可读，故取对数分级放大）。
 // 真实比例中地球半径 6371 km ≈ 4.25e-5 AU，肉眼无法分辨。
@@ -24,13 +27,32 @@ function visRadiusKm(rKm) {
   return Math.max(0.06, Math.log10(r / 1500) * 0.06 + 0.06);
 }
 
+// 每颗行星的程序化贴图（真实色彩观感：条纹/陨石坑/海洋大陆）
+const PLANET_TEXTURES = {
+  mercury: () => rockyTexture({ base: '#b5a396', dark: '#6e6056', light: '#d0c4b6', craterCount: 40, seed: 21 }),
+  venus: () => venusTexture({ seed: 22 }),
+  earth: () => earthTexture({ seed: 23 }),
+  mars: () => rockyTexture({ base: '#d2824a', dark: '#8f4f28', light: '#e8ab74', craterCount: 30, seed: 24 }),
+  jupiter: () => gasGiantTexture({
+    base: '#e0b88e', bands: ['#c89868', '#f0e0c0', '#a87850', '#e8cc9e'],
+    bandCount: 14, spot: { x: 0.32, y: 0.63, rx: 0.06, color: '#c25a3a' }, seed: 25,
+  }),
+  saturn: () => gasGiantTexture({
+    base: '#e6d3a8', bands: ['#d8c090', '#f2e6c4', '#c8ae7c'],
+    bandCount: 10, seed: 26,
+  }),
+  uranus: () => iceGiantTexture({ base: '#9ad9dc', seed: 27 }),
+  neptune: () => iceGiantTexture({ base: '#5f86d6', band: 'rgba(40,70,140,0.25)', seed: 28 }),
+};
+
 export function buildSolarWorld() {
   const group = new THREE.Group();
   const entities = [];
   const pickables = [];
+  const moonAnims = []; // 卫星公转动画：{ mesh(相对行星), aAU, periodS, phase }
 
   // ---- 太阳 ----
-  // 真实半径 ~0.005 AU，渲染放大 80 倍便于看见
+  // 真实半径 ~0.005 AU，渲染放大 80 倍便于看见；米粒组织 emissiveMap
   const sunVis = 0.42;
   const sunMesh = makeSphere({
     radius: sunVis,
@@ -38,6 +60,7 @@ export function buildSolarWorld() {
     emissive: '#ffd27f',
     emissiveIntensity: 1.0,
     roughness: 0.4,
+    emissiveMap: sunTexture({ seed: 7 }),
   });
   sunMesh.position.set(0, 0, 0);
   group.add(sunMesh);
@@ -85,11 +108,15 @@ export function buildSolarWorld() {
     const mesh = makeSphere({
       radius: rVis,
       color: p.color,
-      // 轻微自发光（同色 0.18）让背光面仍可辨认——教学场景避免"黑半球"
+      // 轻微自发光（同色 0.35）让背光面仍可辨认——教学场景避免"黑剪影"
       emissive: p.color,
-      emissiveIntensity: 0.18,
+      emissiveIntensity: 0.35,
       roughness: 0.95,
+      map: PLANET_TEXTURES[p.id]?.(),
     });
+    // 真实自转轴倾角（度）：金星 177（近似逆转）、天王星 97.8"躺着"
+    const axialTiltDeg = { mercury: 0.03, venus: 177.4, earth: 23.4, mars: 25.2, jupiter: 3.1, saturn: 26.7, uranus: 97.8, neptune: 28.3 }[p.id] ?? 0;
+    if (axialTiltDeg) mesh.rotation.z = THREE.MathUtils.degToRad(axialTiltDeg);
     // 起始角随机；轨道半径严格用真实数据
     const orbitA = p.aAU;
     const startAngle = Math.random() * Math.PI * 2;
@@ -108,20 +135,21 @@ export function buildSolarWorld() {
     const lbl = makeTextSprite(p.name, { color: '#dbe7ff' });
     const ls = labelScaleFor(lbl, Math.max(rVis * 2.4, 0.06));
     lbl.scale.set(ls[0], ls[1], 1);
-    lbl.position.set(0, 0, 0); // 跟随 mesh：mesh.add(lbl) 让标签随行星公转
+    // 跟随 mesh 且悬于行星上方（放在中心会遮挡行星本体）
+    lbl.position.set(0, rVis * 1.8 + 0.02, 0);
     mesh.add(lbl);
 
-    // 卫星（随行星平移；mesh 作为父节点，moon 作为子节点）
+    // 卫星（随行星平移；mesh 作为父节点）。真实卫星轨道（如月球 0.0026 AU）
+    // 小于示意行星半径，故轨道半径做教学缩放到行星半径外（schematic），
+    // 公转周期严格用真实数据（periodD），时间倍速下可见运动。
     const moons = MOONS[p.id] || [];
-    for (const m of moons) {
-      const moonOrbitAU = m.aKm / AU_KM; // 真实距离 AU
-      const moonVis = Math.max(visRadiusKm(m.rKm), rVis * 0.22);
+    moons.forEach((m, mi) => {
+      const moonOrbitAU = Math.max(m.aKm / AU_KM, rVis * (1.9 + mi * 0.55));
+      const moonVis = Math.max(visRadiusKm(m.rKm) * 0.5, rVis * 0.14);
       const mm = makeSphere({ radius: moonVis, color: m.color, roughness: 1 });
-      // 用随机方位摆放（教学简化：不做卫星轨道动画，仅作为附属点）
-      const ma = Math.random() * Math.PI * 2;
-      mm.position.set(Math.cos(ma) * moonOrbitAU, 0, Math.sin(ma) * moonOrbitAU);
       mesh.add(mm);
-    }
+      moonAnims.push({ mesh: mm, aAU: moonOrbitAU, periodS: m.periodD * 86400, phase: (mi * 2.399) % (Math.PI * 2) });
+    });
 
     const entity = {
       id: p.id, name: p.name, en: p.en, type: 'planet',
@@ -224,6 +252,11 @@ export function buildSolarWorld() {
         const ang = e.orbit.startAngle + (clock.t / e.orbit.periodS) * Math.PI * 2;
         e.mesh.position.set(Math.cos(ang) * e.orbit.aAU, 0, Math.sin(ang) * e.orbit.aAU);
         e.pos = [e.mesh.position.x, e.mesh.position.y, e.mesh.position.z];
+      }
+      // 卫星公转：真实周期（月 27.3 天、火卫一 0.32 天…），倍速下可见
+      for (const ma of moonAnims) {
+        const ang = ma.phase + (clock.t / ma.periodS) * Math.PI * 2;
+        ma.mesh.position.set(Math.cos(ang) * ma.aAU, 0, Math.sin(ang) * ma.aAU);
       }
     },
   };

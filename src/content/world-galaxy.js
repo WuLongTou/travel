@@ -18,40 +18,44 @@ export function buildGalaxyWorld() {
   // 星系主体：盘半径 = 15 kpc 单位（可视半径设为 15，便于标尺）
   // 银河系实为棒旋星系：两条主臂（盾牌-半人马臂/英仙臂）+ 中央棒 + 次级碎臂
   const diskR = 15; // world units = kpc
+  // 盘组件放入 diskGroup：自转时星点、银晕、太阳标签整体随盘旋转
+  const diskGroup = new THREE.Group();
   const gal = buildGalaxy({
     rCore: 0.14, rDisk: 1, arms: 2, pitch: 3.2, barLength: 0.2,
     countStars: 140000, armFraction: 0.62, flatten: 0.032,
     tilt: 0, seed: 2024,
   });
   gal.scale.set(diskR, diskR, diskR);
-  // 银河盘整体旋转使盘面与 XZ 平面略呈角度（可读 3D 感）
-  group.add(gal);
+  diskGroup.add(gal);
 
   // 银晕（球状星团与老星）——真实银晕恒星极稀疏，只作低亮度点缀
   const halo = buildStarSwarm(5200, diskR * 0.95, { seed: 9, flatten: 1, color: '#e8c8a0', size: 1.1 });
   halo.material.opacity = 0.5;
-  group.add(halo);
+  diskGroup.add(halo);
 
   // 银心辉光：核球中心的暖色柔光（类比核球恒星密集区）
   const coreGlow = makeGlowSprite(3.2, '#ffd9a8', 0.85);
-  group.add(coreGlow);
+  diskGroup.add(coreGlow);
+  group.add(diskGroup);
+  // 演示速率自转：~11 分钟一圈（真实银河年 ~2.3 亿年，教学用慢速演示）
+  const GALAXY_SPIN_RATE = 0.0095; // rad/真实秒
 
   // 可见的位置标注：太阳（猎户臂/本地泡），银心 Sgr A*（可下潜）
   const sunPos = [diskR * 0.55, 0, 0]; // 8.2kpc/15kpc ≈ 0.55 盘半径
   const centerPos = [0, 0, 0];
 
-  // 太阳系位置标签
-  const sunLabel = makeTextSprite('太阳系（猎户臂）', { color: '#7fe8ff' });
+  // 太阳系位置标签（随盘自转——太阳在猎户臂上绕银心公转）
+  const sunLabel = makeTextSprite('太阳系（猎户臂）', { color: '#7fe8ff', priority: 1 });
   const sunLs = labelScaleFor(sunLabel, 0.85);
   sunLabel.scale.set(sunLs[0], sunLs[1], 1);
   sunLabel.position.set(sunPos[0], sunPos[1] + 0.5, sunPos[2]);
-  group.add(sunLabel);
+  diskGroup.add(sunLabel);
   // 银心标签
-  const coreLabel = makeTextSprite('银心 · 人马座 A*', { color: '#ffcf7f' });
+  const coreLabel = makeTextSprite('银心 · 人马座 A*', { color: '#ffcf7f', priority: 2 });
   const coreLs = labelScaleFor(coreLabel, 0.85);
   coreLabel.scale.set(coreLs[0], coreLs[1], 1);
   coreLabel.position.set(0, 0.7, 0);
-  group.add(coreLabel);
+  diskGroup.add(coreLabel);
 
   // 可下潜实体：银河系（下潜到本星系群视角看它？不——本世界就是银河；下潜应到
   // 太阳系/星际层。我们把「下潜」交给子世界导航，由导航器提供）。这里只放两个
@@ -93,13 +97,18 @@ export function buildGalaxyWorld() {
   return {
     id: 'galaxy', title: '银河系', unitName: 'kpc', kmPerUnit: KPC_KM,
     worldRadius: diskR,
-    spawn: [diskR * 0.9, diskR * 0.55, diskR * 0.9], // 从斜上方看盘
-    viewDist: 16,
+    spawn: [diskR * 0.75, diskR * 0.45, diskR * 0.75], // 斜上方观测位，看向银心
+    spawnLookAt: [0, 0, 0],
+    viewDist: 12,
+    labelFadeDist: 40, // 全景下银心/太阳标注保持可读
     maxSpeedWorldPerS: 0.35, // kpc/真实秒（演示）
     thrustAccWorldPerS2: 0.12, dragPerSec: 0.35, timeScaleMax: 1,
     ambient: { starCount: 3000, starSpread: 60 },
     group, entities,
-    update() {},
+    update(dtSim, clock) {
+      // 盘自转（演示速率）：恒星点云、银晕与太阳标签整体随盘
+      diskGroup.rotation.y = clock.t * GALAXY_SPIN_RATE;
+    },
   };
 }
 

@@ -63,6 +63,9 @@ export function labelScaleFor(sprite, worldHeight) {
 // 标签距离淡出 + 屏幕空间避让：每帧按「标签到相机距离」调整透明度，
 // 并做贪心矩形避让——近处标签优先占位，与之重叠的远处标签隐藏。
 // fadeDist 内保持全亮，超出后线性衰减到 floor（教育场景保留 0.35 可辨认性）。
+// 过近保护：标签屏幕高度超过 MAX_PH 时按比例淡出——特写时行星本体已清晰，
+// 巨大化标签只会遮挡主体。
+const MAX_PH = 110; // px
 const _v = new THREE.Vector3();
 export function updateLabelFades(group, camera, fadeDist, floor = 0.35) {
   const H = window.innerHeight || 800;
@@ -74,13 +77,15 @@ export function updateLabelFades(group, camera, fadeDist, floor = 0.35) {
     o.getWorldPosition(_v);
     const d = _v.distanceTo(camera.position);
     const t = d / Math.max(fadeDist, 1e-6);
-    const op = Math.max(floor, Math.min(1, 1.25 - t));
-    if (op <= 0.02) { o.visible = false; return; }
+    let op = Math.max(floor, Math.min(1, 1.25 - t));
     const p = _v.clone().project(camera);
     if (p.z > 1) { o.visible = false; return; } // 在相机身后
     const cx = (p.x * 0.5 + 0.5) * W;
     const cy = (-p.y * 0.5 + 0.5) * H;
     const ph = Math.max(10, (o.scale.y / Math.max(d, 1e-6)) * focal); // 屏幕像素高
+    if (ph > MAX_PH * 1.7) { o.visible = false; return; }
+    if (ph > MAX_PH) op *= 1 - (ph - MAX_PH) / (MAX_PH * 0.7);
+    if (op <= 0.02) { o.visible = false; return; }
     const pw = ph * (o.scale.x / Math.max(o.scale.y, 1e-6));
     items.push({ o, d, op, rect: [cx - pw / 2, cy - ph / 2 - 6, cx + pw / 2, cy + ph / 2 + 6] });
   });

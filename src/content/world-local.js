@@ -96,6 +96,7 @@ export function buildLocalWorld() {
     id: 'local', title: '本星系群', unitName: 'Mpc', kmPerUnit: MPC_KM,
     worldRadius: 1.2,
     spawn: [0.9, 0.3, 0.9],
+    spawnLookAt: [0, 0, 0], // 兴趣中心：银河系（原点）
     viewDist: 0.6,
     labelFadeDist: 2.4, // 本星系群全景下成员标签可见
     maxSpeedWorldPerS: 0.02, thrustAccWorldPerS2: 0.008, dragPerSec: 0.4, timeScaleMax: 365 * 86400 * 100,
