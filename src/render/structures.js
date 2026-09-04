@@ -47,13 +47,48 @@ export function createStructures(scene, sim, glowTex, ringTex, camera) {
     halo.renderOrder = 3;
     group.add(halo);
 
-    const disk = new THREE.Mesh(
-      new THREE.RingGeometry(0.72, 1.55, 96),
-      new THREE.MeshBasicMaterial({
-        color: 0x6c8cff, transparent: true, opacity: 0.55,
-        side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending,
-      }),
-    );
+    // 旋涡星系盘（2026-09-04 真实化整改第三轮：从扁平 RingGeometry 改为扁椭球
+    // + 径向软化，给"圈"加上厚度感）。原本 RingGeometry 是 2D 平面圆环，从斜角
+    // 看上去永远是一根细线（用户在 9-04 截图里指出"宇宙应该是全方位的，
+    // 但看着只有一圈"——根因之一就是盘面没有立体厚度）。
+    // 改用 SphereGeometry 缩成扁盘（xz 方向盘面、y 方向厚度 0.18）：从盘面侧
+    // 看是一个有厚度的椭圆盘、从边缘看是一个短粗的"鼓"——任意视角都不再是
+    // 单层细线。配合 shader 径向亮带（中心最亮、向外渐暗），从正面看是经典
+    // 旋涡星系核球凸起的样貌，从斜角看是有厚度和层次的盘。
+    const diskGeo = new THREE.SphereGeometry(1, 96, 32);
+    const diskMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      uniforms: { uOpacity: { value: 1 } },
+      vertexShader: `
+        varying vec3 vLocal;
+        varying vec3 vNormal;
+        void main() {
+          vLocal = position;
+          vNormal = normalize(normalMatrix * normal);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float uOpacity;
+        varying vec3 vLocal;
+        varying vec3 vNormal;
+        void main() {
+          // 盘面坐标：x 是径向主轴、z 是次轴（赤道方向）；y 是厚度方向
+          float r = length(vec2(vLocal.x, vLocal.z));
+          // 径向亮带：中心 (r<0.55) 最亮、0.55~1.0 渐变到 0
+          float radial = smoothstep(1.0, 0.55, r) * smoothstep(0.10, 0.45, r);
+          // 厚度方向衰减：靠近赤道面（|y| 小）的更亮——形成"鼓起的核球"
+          float thick = smoothstep(0.85, 0.30, abs(vLocal.y));
+          float a = radial * thick * 0.50 * uOpacity;
+          if (a < 0.012) discard;
+          vec3 col = vec3(0.42, 0.55, 1.00) * (0.6 + 0.4 * radial);
+          gl_FragColor = vec4(col, a);
+        }
+      `,
+    });
+    const disk = new THREE.Mesh(diskGeo, diskMat);
+    disk.scale.set(1.0, 0.18, 0.65); // 盘面：x=径向主、y=厚度 0.18、z=次轴
     disk.renderOrder = 4;
     group.add(disk);
 
@@ -704,12 +739,17 @@ export function createStructures(scene, sim, glowTex, ringTex, camera) {
       g.bhAmt += ((isBH ? 1 : 0) - g.bhAmt) * k;
       g.nodeAmt += ((lv === 'supercluster' ? 1 : 0) - g.nodeAmt) * k;
 
-      // 旋涡星系盘（原星系阶段的过渡表达；成形后由成员粒子接管，退场）
+      // 旋涡星系盘（立体扁椭球，2026-09-04 第三轮真实化整改）：
+      // 改自扁平 RingGeometry → SphereGeometry 缩成盘（xz 方向盘面、y 厚度 0.18），
+      // 给"圈"加上厚度感。scale 仅缩放盘面尺寸，厚度比固定——避免 setScalar
+      // 把厚度也等比放大（那会让盘面变成球）。
       // 尺寸与本体尺度成比例：星系 detailR 115、超星系团 100
       const diskBase = lv === 'supercluster' ? 44 + s.mass * 5 : 30 + s.mass * 4;
-      g.disk.scale.setScalar(Math.max(0.001, diskBase * (0.22 + 0.78 * g.diskAmt) * pulse));
-      g.disk.material.opacity = (0.14 + 0.46 * g.diskAmt * (0.8 + audioLevels.bass * 0.3)) * mistFade * diskFade;
-      g.disk.material.color.copy(levelColorTinted(lv, g));
+      const diskSize = Math.max(0.001, diskBase * (0.22 + 0.78 * g.diskAmt) * pulse);
+      g.disk.scale.set(diskSize, diskSize * 0.18, diskSize * 0.65);
+      g.disk.material.uniforms.uOpacity = g.disk.material.uniforms.uOpacity || { value: 1 };
+      g.disk.material.uniforms.uOpacity.value = (0.14 + 0.46 * g.diskAmt * (0.8 + audioLevels.bass * 0.3)) * mistFade * diskFade;
+      // shader 自己配色（蓝白渐变），不再覆盖 color——保留类型色调偏移在 shader 内应用
       g.disk.visible = g.diskAmt > 0.01 && diskFade > 0.02 && mistFade > 0.02;
 
       // 黑洞：事件视界(黑球) + 吸积盘 + 光子环 + 喷流

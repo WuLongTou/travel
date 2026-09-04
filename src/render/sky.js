@@ -263,3 +263,87 @@ export function createDistantGalaxies(glowTex) {
   }
   return group;
 }
+
+// ---- 近邻星系层（2026-09-04 第三轮真实化整改）----
+// 用户反馈："宇宙应该是全方位的，但截图里只有一圈"——根因是当前视野里
+// 只有最靠近飞船的那一个天体系统（星系/超星系团）的 disk/halo 在画面里
+// 显著，其他方向的星云/远景星系 sprite 都很暗、不构成视觉上可识别的
+// "结构感"。
+//
+// 解决：在飞船周围半径 ~2500~4500 单位的全天球上放置 10 个"近邻星系
+// 轮廓"——它们用真实的 3D 扁椭球（不是 sprite），跟随相机保持恒定方向，
+// 每个有自己的倾角与盘面比例。从正面看是椭圆盘、从其他角度看是有厚度
+// 的椭圆体——任意视角都有立体感（这是用户对"圈立体"的核心诉求）。
+//
+// 距离选择：~2500~4500 单位 = 视场 58° 下约 7°~12° 视直径——大到足以
+// 在视野里形成可识别的"星系轮廓"，又远到不参与 sim 物理（与 detailR
+// ~115 的真实星系隔离半径 480 错开两个数量级，不会被误判为 sim 系统）。
+//
+// 视觉上覆盖全天球（10 个大致均匀分布）——任何朝向都能看到至少 3~4 个
+// 近邻星系轮廓 + 1 个当前最靠近的真实 sim 系统，"全方位有内容"的
+// 立体感由此建立。
+export function createNeighborGalaxies(glowTex) {
+  const group = new THREE.Group();
+  // 10 个近邻星系，分布全天球。格式: [方向(x,y,z), 距离, 视直径°,
+  // 颜色, 椭圆比, 自旋角度(rad)]
+  const neighbors = [
+    [ 0.62, -0.18,  0.78, 3000, 6.5, 0x8fa0d8, 2.2, 0.4],
+    [-0.55,  0.30, -0.78, 3400, 5.8, 0xa8b0d0, 2.5, -0.7],
+    [ 0.18,  0.85,  0.48, 2800, 7.2, 0xc0a8c8, 1.8, 0.9],
+    [-0.78,  0.42,  0.45, 3600, 5.0, 0xb8a8c0, 2.0, -0.3],
+    [ 0.35, -0.78,  0.52, 3200, 6.0, 0x9cb0d8, 2.4, 1.2],
+    [-0.42, -0.62, -0.66, 3800, 4.8, 0xb0a8d8, 1.9, -1.1],
+    [ 0.85,  0.32, -0.42, 4100, 4.2, 0xa8b8c8, 2.1, 0.6],
+    [-0.32,  0.72, -0.62, 3500, 5.5, 0xb8b0d0, 2.3, -0.5],
+    [ 0.72, -0.48, -0.50, 4200, 4.5, 0xc0b0d0, 2.0, 1.4],
+    [-0.85, -0.32,  0.42, 3900, 5.0, 0xb0c0d8, 2.4, -0.8],
+  ];
+  for (const n of neighbors) {
+    const [dx, dy, dz, dist, deg, colorHex, ratio, spin] = n;
+    const l = Math.hypot(dx, dy, dz);
+    const nx = dx / l, ny = dy / l, nz = dz / l;
+    // 视直径 → 世界单位。视场 58°，1° 对应 dist × tan(1°) ≈ dist × 0.01745
+    const worldPerDeg = dist * 0.01745;
+    const w = worldPerDeg * deg;
+    const h = w / ratio;
+    // 用真实扁椭球（SphereGeometry 缩成盘），不是 sprite——任意视角都有
+    // 厚度感，避免"圈还是 2D"的问题
+    const geo = new THREE.SphereGeometry(1, 64, 24);
+    const mat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      uniforms: { uOpacity: { value: 1 }, uColor: { value: new THREE.Color(colorHex) } },
+      vertexShader: `
+        varying vec3 vLocal;
+        void main() {
+          vLocal = position;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float uOpacity;
+        uniform vec3 uColor;
+        varying vec3 vLocal;
+        void main() {
+          float r = length(vec2(vLocal.x, vLocal.z));
+          // 径向亮带：中心最亮、外缘柔和衰减
+          float radial = smoothstep(1.0, 0.50, r) * smoothstep(0.10, 0.40, r);
+          // 厚度方向：赤道面附近最亮，y 方向（盘的厚度）渐暗——形成核球凸起感
+          float thick = smoothstep(0.85, 0.20, abs(vLocal.y));
+          float a = radial * thick * 0.55 * uOpacity;
+          if (a < 0.012) discard;
+          vec3 col = uColor * (0.6 + 0.5 * radial);
+          gl_FragColor = vec4(col, a);
+        }
+      `,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.scale.set(w * 0.5, w * 0.5 * 0.20, h * 0.5); // 半径=1 的球缩到 w/2；y 是厚度（0.20 比例）
+    mesh.position.set(nx * dist, ny * dist, nz * dist);
+    // 倾角：每个星系自旋一定角度，避免"全部正面对相机"导致看上去还是 2D
+    mesh.rotation.set(spin * 0.7, spin, spin * 0.4);
+    mesh.renderOrder = -78; // 在远景星系 sprite 之后
+    group.add(mesh);
+  }
+  return group;
+}
