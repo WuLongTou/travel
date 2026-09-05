@@ -7,7 +7,7 @@ export class UI {
     this.engine = engine;
     this.cb = callbacks || {};
     this.el = {};
-    const ids = ['crumb','ruler','nav-buttons','time-buttons','infocard','info-title','info-sub',
+    const ids = ['crumb','ruler','nav-buttons','time-buttons','dock-help','infocard','info-title','info-sub',
       'info-facts','info-text','info-actions','info-close','info-schematic','hud-speed','hud-dist',
       'hud-clock','hud-mode','dive-hint','dive-text','btn-dive','fade','loading',
       'world-intro','intro-title','intro-text'];

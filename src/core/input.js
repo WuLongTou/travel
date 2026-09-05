@@ -2,7 +2,8 @@
 // 游戏式视角：点击画面锁定指针（Pointer Lock），移动鼠标即转向（俯仰/偏航），
 // ESC 释放；未锁定时保留「按住拖拽」兼容操作。
 // 游戏标准键位：W/S 前进/后退 · A/D 左右平移 · Space/C 上浮/下沉 ·
-// Q/E 左右横滚 · Shift 加力 · X 刹车 · V 切换视角 · G 引力模式 · F 下潜
+// Q/E 左右横滚 · Shift 加力 · X 刹车 · V 切换视角 · G 引力模式 ·
+// H 自动驾驶（旁观） · F 下潜
 export class Input {
   constructor(canvas) {
     this.canvas = canvas;
@@ -17,7 +18,7 @@ export class Input {
     const kd = (e) => {
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
       const k = e.key.toLowerCase();
-      if ([' ', 'w', 'a', 's', 'd', 'q', 'e', 'c', 'g', 'r', 'x', 'v',
+      if ([' ', 'w', 'a', 's', 'd', 'q', 'e', 'c', 'g', 'r', 'x', 'v', 'h',
         'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift', 'f'].includes(k)) {
         e.preventDefault();
         this.keys.add(k);
