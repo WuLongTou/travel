@@ -84,6 +84,7 @@ export function buildStellarWorld() {
     const ent = {
       id: s.id, name: s.name, en: s.en, type: 'star',
       pos: p, pickRadius: 0.5,
+      mass: s.mass, // 太阳倍数（分层引力真实化：井 GM 按质量缩放）
       info: {
         kind: '恒星 · ' + (s.spec || ''),
         sub: (s.en || ''),
@@ -127,6 +128,16 @@ export function buildStellarWorld() {
   sunLabel.position.set(0, 0.8, 0);
   group.add(sunLabel);
 
+  // 分层引力真实化（LOD）：本层的「天体」= 恒星，每颗都有引力井——
+  // 教学演示 GM = 0.8 ly³/s² × 真实质量（太阳倍数）：圆轨道速度尺度
+  // v=√(GM/r)，2 ly 处 ~0.6 u/s（层速上限 1.6），实时约 20 秒一圈；
+  // 探测器掠过恒星即可看到轨道被偏折，低速贴近可被捕获。
+  // 太阳本身也一颗井（原点）。ref: entity → 双星互绕时井跟随移动。
+  const gravityWells = entities
+    .filter((e) => e.type === 'star')
+    .map((e) => ({ ref: e, GM: 0.8 * (e.mass ?? 1), minR: 0.6, capR: 2.5, name: e.name }));
+  gravityWells.push({ center: [0, 0, 0], GM: 0.8, minR: 0.6, capR: 2.5, name: '太阳' });
+
   return {
     id: 'stellar', title: '星际近邻', unitName: 'ly', kmPerUnit: LY_KM,
     intro: '半径约 60 光年。这里是太阳的邻居圈：比邻星 4.2 光年、天狼星 8.6 光年……每颗恒星按真实方位与表面色温呈现，点选可查看详情。',
@@ -137,6 +148,7 @@ export function buildStellarWorld() {
     labelFadeDist: 14, // 60 ly 邻域内 featured 恒星标注保持可读
     maxSpeedWorldPerS: 1.6, thrustAccWorldPerS2: 0.7, dragPerSec: 0.4, timeScaleMax: 365 * 86400,
     ambient: { starCount: 1800, starSpread: 260, milkyWay: true },
+    gravityWells,
     group, entities,
     update(dtSim, clock) {
       updateBinary(clock.t);

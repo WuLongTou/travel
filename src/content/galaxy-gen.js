@@ -17,6 +17,26 @@ function gauss(rng) {
 //  rCore 核球半径(归一) / rDisk 盘半径(归一) / arms 主臂数 / pitch 旋臂缠绕（每 e^1 半径的弧度）
 //  countStars 恒星总数 / armFraction 臂上星占比 / barLength 中央棒半长(归一)
 //  flatten 盘扁平度(0..1) / tilt 倾斜角 / seed
+// 平坦旋转曲线较差自转（shader 注入）：顶点着色器里按"到银心距离"给
+// 每颗星不同的角速度 ω(r) = uSpin/max(r, rFlat)——外围平坦曲线段呈
+// 差异剪切，内核（< rFlat，含棒）刚体旋转保住棒形（真实旋转曲线内区
+// 线性上升、外围平坦的简化）。14 万星点零 CPU 开销。
+export function applyFlatSpin(mat, spin, rFlat = 0.25) {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uSpin = spin;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uSpin;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+  float gRad = length(transformed.xz);
+  if (gRad > 1e-4) {
+    float gAng = atan(transformed.z, transformed.x) + uSpin / max(gRad, ${rFlat.toFixed(3)});
+    transformed.x = gRad * cos(gAng);
+    transformed.z = gRad * sin(gAng);
+  }`);
+  };
+  return mat;
+}
+
 export function buildGalaxy(opts) {
   const {
     rCore = 0.16, rDisk = 1.0, arms = 2, pitch = 3.1,
@@ -89,8 +109,12 @@ export function buildGalaxy(opts) {
     size: 1.4, sizeAttenuation: false, vertexColors: true,
     transparent: true, opacity: 0.95, depthWrite: false,
   });
+  // 差异自转：uniform 由 world.update 驱动（value = ω(rFlat)·t，本地单位）
+  const spin = { value: 0 };
+  applyFlatSpin(mat, spin, rCore * 1.6);
   const points = new THREE.Points(geo, mat);
   points.frustumCulled = false;
+  points.userData.spin = spin;
 
   const group = new THREE.Group();
   group.add(points);
@@ -113,11 +137,13 @@ export function buildGalaxy(opts) {
     transparent: true, opacity: 0.5, depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
+  applyFlatSpin(hmat, spin, rCore * 1.6); // HII 区跟随同一流场（旋臂示踪）
   const hii = new THREE.Points(hgeo, hmat);
   hii.frustumCulled = false;
   group.add(hii);
 
   if (tilt) group.rotation.z = tilt;
+  group.userData.spin = spin; // world.update 驱动差异自转（见 applyFlatSpin）
   return group;
 }
 

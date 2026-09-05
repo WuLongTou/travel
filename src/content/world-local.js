@@ -92,6 +92,16 @@ export function buildLocalWorld() {
     dive: { toWorld: 'galaxy', at: [0, 0, 0], dist: 0.35, targetName: '银河系内部' },
   });
 
+  // 分层引力真实化（LOD）：本层的「天体」= 星系。大质量星系给教学演示
+  // GM（Mpc³/s²，无逐星系质量数据）：银河系/仙女座 3e-5——圆轨道速度
+  // v=√(GM/r) 在 0.3 Mpc 处 ≈0.01 u/s（层速上限 0.02），实时约 3 分钟
+  // 一圈；三角座减半，矮星系忽略。探测器可绕仙女座弹弓/被俘获。
+  const gravityWells = entities
+    .filter((e) => e.id === 'milkyway' || e.id === 'm31')
+    .map((e) => ({ ref: e, GM: 3e-5, minR: 0.06, capR: 0.25, name: e.name }));
+  const m33Ent = entities.find((e) => e.id === 'm33');
+  if (m33Ent) gravityWells.push({ ref: m33Ent, GM: 6e-6, minR: 0.05, capR: 0.15, name: m33Ent.name });
+
   return {
     id: 'local', title: '本星系群', unitName: 'Mpc', kmPerUnit: MPC_KM,
     intro: '跨度的数百万光年。银河系与仙女座星系正以约 110 km/s 相互接近，预计约 45 亿年后合并。飞近星系可下潜进入。',
@@ -102,6 +112,7 @@ export function buildLocalWorld() {
     labelFadeDist: 2.4, // 本星系群全景下成员标签可见
     maxSpeedWorldPerS: 0.02, thrustAccWorldPerS2: 0.008, dragPerSec: 0.4, timeScaleMax: 365 * 86400 * 100,
     ambient: { starCount: 1200, starSpread: 4 },
+    gravityWells,
     group, entities,
     update() {},
   };

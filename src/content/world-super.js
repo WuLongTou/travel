@@ -62,6 +62,13 @@ export function buildSuperWorld() {
     if (s.dive) entities[entities.length - 1].dive = s.dive;
   }
 
+  // 分层引力真实化（LOD）：本层的「天体」= 星系团。数据无逐团质量，
+  // 给统一教学演示 GM = 10 Mpc³/s²：圆轨道速度 v=√(GM/r) 在 5 Mpc 处
+  // ≈1.4 u/s（层速上限 3.2）——掠过星系团可见轨道偏折，低速可被俘获。
+  const gravityWells = entities
+    .filter((e) => e.type === 'clusterMark')
+    .map((e) => ({ ref: e, GM: 10, minR: 1.5, capR: 8, name: e.name }));
+
   return {
     id: 'super', title: '室女·宇宙网', unitName: 'Mpc', kmPerUnit: MPC_KM,
     intro: '尺度上亿光年。星系并非均匀散布，而是沿暗物质丝状结构聚集成「宇宙网」，节点处富集为星系团（丝的走向为示意）。',
@@ -72,6 +79,7 @@ export function buildSuperWorld() {
     labelFadeDist: 110, // 全景下星系团名称仍可读
     maxSpeedWorldPerS: 3.2, thrustAccWorldPerS2: 1.4, dragPerSec: 0.35, timeScaleMax: 365 * 86400,
     ambient: { starCount: 700, starSpread: 120 },
+    gravityWells,
     group, entities,
     update() {},
   };

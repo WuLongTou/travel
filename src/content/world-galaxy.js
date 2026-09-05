@@ -37,11 +37,15 @@ export function buildGalaxyWorld() {
   const coreGlow = makeGlowSprite(3.2, '#ffd9a8', 0.85);
   diskGroup.add(coreGlow);
   group.add(diskGroup);
-  // 演示速率自转：~11 分钟一圈（真实银河年 ~2.3 亿年，教学用慢速演示）
-  const GALAXY_SPIN_RATE = 0.0095; // rad/真实秒
+  // 差异自转速率：平坦旋转曲线（shader 内 ω ∝ 1/r），太阳轨道处（0.55
+  // 盘半径）保持原演示自转 0.0095 rad/s ≈ 11 分钟一圈（真实银河年
+  // ~2.3 亿年，教学用慢速演示）；内核（< rFlat）刚体旋转保住棒形
+  const GALAXY_FLOW_RATE = 0.0095 * 0.55; // spin.value 速率（1/本地秒）
+  const spin = gal.userData.spin;
+  const SUN_R_LOCAL = 0.55; // 太阳到银心距离（盘本地单位；8.2kpc/15kpc）
 
   // 可见的位置标注：太阳（猎户臂/本地泡），银心 Sgr A*（可下潜）
-  const sunPos = [diskR * 0.55, 0, 0]; // 8.2kpc/15kpc ≈ 0.55 盘半径
+  const sunPos = [diskR * SUN_R_LOCAL, 0, 0]; // 8.2kpc/15kpc ≈ 0.55 盘半径
   const centerPos = [0, 0, 0];
 
   // 太阳系位置标签（随盘自转——太阳在猎户臂上绕银心公转）
@@ -111,8 +115,12 @@ export function buildGalaxyWorld() {
     ambient: { starCount: 1500, starSpread: 60 },
     group, entities,
     update(dtSim, clock) {
-      // 盘自转（演示速率）：恒星点云、银晕与太阳标签整体随盘
-      diskGroup.rotation.y = clock.t * GALAXY_SPIN_RATE;
+      // 差异自转（平坦旋转曲线，shader 内 ω ∝ 1/r）：太阳轨道处（0.55 盘
+      // 半径）保持原演示自转速率 0.0095 rad/s → spin 速率 = 0.0095 × 0.55
+      spin.value = clock.t * GALAXY_FLOW_RATE;
+      // 太阳标签随同一流场公转（本地半径 0.55，与恒星流一致不脱臂）
+      const sunAng = spin.value / SUN_R_LOCAL;
+      sunLabel.position.set(Math.cos(sunAng) * SUN_R_LOCAL * diskR, 0.5, Math.sin(sunAng) * SUN_R_LOCAL * diskR);
     },
   };
 }

@@ -68,3 +68,23 @@ export function makeOrbitLine(radiusWorld, color = '#3d5575', segments = 256) {
   line.userData.isOrbit = true;
   return line;
 }
+
+// 开普勒椭圆轨道线：a 半长轴（世界单位）、e 偏心率、peri 近日点方向角。
+// 参数沿偏近点角 E 采样，焦点（太阳）在原点：x = a(cosE − e)，y = a√(1−e²)sinE，
+// 再绕焦点旋转 peri——与 world-solar 的 keplerPos 位置公式严格一致。
+export function makeOrbitEllipse(aWorld, e, peri, color = '#3d5575', segments = 256) {
+  const pts = [];
+  const cw = Math.cos(peri), sw = Math.sin(peri);
+  const bA = aWorld * Math.sqrt(1 - e * e);
+  for (let i = 0; i <= segments; i++) {
+    const E = (i / segments) * Math.PI * 2;
+    const xo = aWorld * (Math.cos(E) - e);
+    const yo = bA * Math.sin(E);
+    pts.push(new THREE.Vector3(xo * cw - yo * sw, 0, xo * sw + yo * cw));
+  }
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  const mat = new THREE.LineBasicMaterial({ color: new THREE.Color(color), transparent: true, opacity: 0.35 });
+  const line = new THREE.Line(geo, mat);
+  line.userData.isOrbit = true;
+  return line;
+}

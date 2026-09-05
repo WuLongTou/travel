@@ -8,7 +8,7 @@ import { PLANETS, SOL, MOONS, ASTEROID_BELT, KUIPER_BELT, SOURCE_NOTE } from './
 import { AU_KM } from '../util/units.js';
 import { mulberry32, clamp } from '../util/math.js';
 import { registerWorld } from './worlds.js';
-import { makeSphere, makeRing, makeOrbitLine, makeGlowSprite } from '../render/bodies.js';
+import { makeSphere, makeRing, makeOrbitEllipse, makeGlowSprite } from '../render/bodies.js';
 import { makeTextSprite, labelScaleFor } from '../render/labels.js';
 import {
   sunTexture, gasGiantTexture, rockyTexture, earthTexture, venusTexture, iceGiantTexture,
@@ -45,6 +45,22 @@ const PLANET_TEXTURES = {
   uranus: () => iceGiantTexture({ base: '#9ad9dc', seed: 27 }),
   neptune: () => iceGiantTexture({ base: '#5f86d6', band: 'rgba(40,70,140,0.25)', seed: 28 }),
 };
+
+// 开普勒椭圆轨道位置：焦点（太阳）在原点。M 平近点角 → Newton 迭代解
+// 偏近点角方程 E − e·sinE = M（行星 e ≤ 0.21，4 次收敛到 1e-6 级），
+// 再由 E 得轨道坐标并旋转近日点方向。t 秒 ≡ 模拟钟累计秒。
+const _orbTmp = [0, 0, 0];
+function keplerPos(o, t, out = _orbTmp) {
+  const M = o.M0 + (t / o.periodS) * Math.PI * 2;
+  let E = M + o.e * Math.sin(M);
+  for (let k = 0; k < 4; k++) E -= (E - o.e * Math.sin(E) - M) / (1 - o.e * Math.cos(E));
+  const xo = o.aAU * (Math.cos(E) - o.e);
+  const yo = o.aAU * Math.sqrt(1 - o.e * o.e) * Math.sin(E);
+  const cw = Math.cos(o.peri), sw = Math.sin(o.peri);
+  out[0] = xo * cw - yo * sw;
+  out[2] = xo * sw + yo * cw;
+  return out;
+}
 
 export function buildSolarWorld() {
   const group = new THREE.Group();
@@ -123,10 +139,15 @@ export function buildSolarWorld() {
     // 真实自转轴倾角（度）：金星 177（近似逆转）、天王星 97.8"躺着"
     const axialTiltDeg = { mercury: 0.03, venus: 177.4, earth: 23.4, mars: 25.2, jupiter: 3.1, saturn: 26.7, uranus: 97.8, neptune: 28.3 }[p.id] ?? 0;
     if (axialTiltDeg) mesh.rotation.z = THREE.MathUtils.degToRad(axialTiltDeg);
-    // 起始角随机；轨道半径严格用真实数据
+    // 起始平近点角随机；轨道用真实根数（aAU 半长轴 + e 偏心率）的开普勒
+    // 椭圆——近日点方向（peri）未在数据中，取每行星固定随机相位；
+    // 匀速圆周改为开普勒变速：近日点明显加速（水星 e=0.206 最直观）
     const orbitA = p.aAU;
-    const startAngle = Math.random() * Math.PI * 2;
-    mesh.position.set(Math.cos(startAngle) * orbitA, 0, Math.sin(startAngle) * orbitA);
+    const M0 = Math.random() * Math.PI * 2;
+    const peri = Math.random() * Math.PI * 2;
+    const orbit = { aAU: orbitA, periodS: p.periodD * 86400, M0, e: p.e, peri };
+    keplerPos(orbit, 0, _orbTmp);
+    mesh.position.set(_orbTmp[0], 0, _orbTmp[2]);
     group.add(mesh);
 
     // 环（仅土星；真实环系内径 ~7 万 km，外径 ~14 万 km，渲染按比例缩到行星半径的 1.5–2.5 倍）
@@ -134,8 +155,8 @@ export function buildSolarWorld() {
       const ring = makeRing(rVis * 1.5, rVis * 2.4, '#d9cbb0');
       mesh.add(ring);
     }
-    // 轨道线
-    const ol = makeOrbitLine(orbitA, '#3d5575', 360);
+    // 轨道线：真实椭圆（太阳在焦点）
+    const ol = makeOrbitEllipse(orbitA, p.e, peri, '#3d5575', 360);
     group.add(ol);
     // 标签（贴行星上方一点；尺寸按行星比例但有最小可读下限）
     const lbl = makeTextSprite(p.name, { color: '#dbe7ff' });
@@ -159,7 +180,7 @@ export function buildSolarWorld() {
 
     const entity = {
       id: p.id, name: p.name, en: p.en, type: 'planet',
-      pos: [Math.cos(startAngle) * orbitA, 0, Math.sin(startAngle) * orbitA],
+      pos: [_orbTmp[0], 0, _orbTmp[2]],
       pickRadius: Math.max(rVis, 0.05),
       mesh, // 关键：让 update 能驱动位置
       schematic: true, // 尺寸为示意
@@ -178,7 +199,7 @@ export function buildSolarWorld() {
         source: SOURCE_NOTE,
       },
       visual: { color: p.color, labelOffset: 0 },
-      orbit: { aAU: p.aAU, periodS: p.periodD * 86400, startAngle },
+      orbit, // { aAU, periodS, M0, e, peri }——update 用 keplerPos 驱动
     };
     entities.push(entity);
   }
@@ -315,12 +336,13 @@ export function buildSolarWorld() {
     ambient: { starCount: 1400, starSpread: 600, milkyWay: true },
     group, entities, pickables,
     update(dtSim, clock, probe, dtReal = 0) {
-      // 行星轨道动画：真实周期 → 时间倍率足够才明显
+      // 行星轨道：开普勒椭圆（真实 aAU/e/periodD）——近日点加速、远日点
+      // 减速（面积速度守恒），时间倍率足够才明显
       for (const e of entities) {
         if (!e.orbit || !e.mesh) continue;
-        const ang = e.orbit.startAngle + (clock.t / e.orbit.periodS) * Math.PI * 2;
-        e.mesh.position.set(Math.cos(ang) * e.orbit.aAU, 0, Math.sin(ang) * e.orbit.aAU);
-        e.pos = [e.mesh.position.x, e.mesh.position.y, e.mesh.position.z];
+        keplerPos(e.orbit, clock.t, _orbTmp);
+        e.mesh.position.set(_orbTmp[0], 0, _orbTmp[2]);
+        e.pos = [_orbTmp[0], 0, _orbTmp[2]];
       }
       // 卫星公转：真实周期（月 27.3 天、火卫一 0.32 天…），倍速下可见
       for (const ma of moonAnims) {
