@@ -37,10 +37,11 @@ export function starCloud(count, spread, colorFn = () => '#ffffff', size = 1.6) 
 }
 
 // 银河带（盘状星云背景，扁椭球点云 + 低亮度弥漫光）
-// 真实银河 = 盘面恒星密集 + 银心鼓包；教学简化用扁盘点云。
+// 真实银河 = 盘面恒星密集 + 银心鼓包；视觉上应是一条约 60° 斜跨天空的
+// 弥漫光带：点要密、小、暗（单点过亮会被 Bloom 放大成绒球）。
 export function milkyWayBand(thickness = 0.12) {
   const group = new THREE.Group();
-  const count = 12000;
+  const count = 26000;
   const positions = new Float32Array(count*3);
   const colors = new Float32Array(count*3);
   const rng = mulberry32(42);
@@ -50,24 +51,23 @@ export function milkyWayBand(thickness = 0.12) {
     // 半径分布：核球密集 + 盘
     const r = Math.pow(rng(), 0.5) * rMax;
     const th = rng()*Math.PI*2;
-    const ringMode = rng();
     let y;
     if (r < 0.18) y = (rng()*2-1)*0.05; // 核球略厚
     else y = (rng()*2-1)*thickness*(1-r); // 盘薄
     positions[i*3] = Math.cos(th)*r;
     positions[i*3+1] = y;
     positions[i*3+2] = Math.sin(th)*r;
-    // 颜色：核球暖白，旋臂偏蓝白，外围淡
-    const bright = 0.5 + rng()*0.5;
-    if (r < 0.18) c.set('#ffe6c4').multiplyScalar(bright*1.4);
+    // 颜色：核球暖白，盘偏蓝白，整体压暗（避开 Bloom 发光阈值）
+    const bright = 0.25 + rng()*0.3;
+    if (r < 0.18) c.set('#ffe6c4').multiplyScalar(bright*1.15);
     else if (rng() < 0.75) c.set('#dde6ff').multiplyScalar(bright);
-    else c.set('#ffd9b0').multiplyScalar(bright*0.8);
+    else c.set('#ffd9b0').multiplyScalar(bright*0.85);
     colors[i*3]=c.r; colors[i*3+1]=c.g; colors[i*3+2]=c.b;
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  const mat = new THREE.PointsMaterial({ size: 2.0, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0.62, depthWrite: false });
+  const mat = new THREE.PointsMaterial({ size: 1.1, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0.45, depthWrite: false });
   const pts = new THREE.Points(geo, mat);
   group.add(pts);
   // 缩放为世界大尺度（跟随相机外很远）
@@ -104,18 +104,19 @@ export function cmbShell(radius, count = 22000, opts = {}) {
   return pts;
 }
 
-// 生成并组装背景组（按 ambient 配置）
+// 生成并组装背景组（按 ambient 配置：starCount/starSpread/starSize/milkyWay）
 export function buildAmbient(ambient, camera) {
   const group = new THREE.Group();
   group.position.copy(camera.position);
-  const starAmb = ambient.starAmbient || {};
-  // 主星空（球壳状分布，跟随相机）
-  const starPts = starCloud(starAmb.count || 9000, starAmb.spread || 4000,
-    (rng) => tempToHex(2800 + Math.pow(rng(), 2.2) * 30000), starAmb.size || 1.5);
+  // 主星空（球壳状分布，跟随相机）；count=0 合法（如 cosmos 层自带全部）
+  const starPts = starCloud(ambient.starCount ?? 9000, ambient.starSpread ?? 4000,
+    (rng) => tempToHex(2800 + Math.pow(rng(), 2.2) * 30000), ambient.starSize ?? 1.5);
   group.add(starPts);
   if (ambient.milkyWay) {
     const mw = milkyWayBand(ambient.milkyWayThickness || 0.1);
-    // 银河带朝向固定世界方向（盘绕 Y 近似；如需要可加 tilt）
+    // 真实银道面相对黄道倾斜 ~60°：避免与行星轨道面重合的假象
+    mw.rotation.z = 1.05;
+    mw.rotation.x = 0.35;
     group.add(mw);
   }
   if (ambient.cmb) {

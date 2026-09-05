@@ -312,7 +312,7 @@ export function buildSolarWorld() {
     viewDist: 30,
     maxSpeedWorldPerS: 2.2,
     thrustAccWorldPerS2: 1.2, dragPerSec: 0.4, timeScaleMax: 86400 * 365 * 2,
-    ambient: { starCount: 1400, starSpread: 600 },
+    ambient: { starCount: 1400, starSpread: 600, milkyWay: true },
     group, entities, pickables,
     update(dtSim, clock, probe, dtReal = 0) {
       // 行星轨道动画：真实周期 → 时间倍率足够才明显
