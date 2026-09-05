@@ -311,7 +311,8 @@ function renderFrame(now) {
         // 兴趣点（POI）：随机拣选可拾取天体；到点/超时/无目标则换下一个——永续航行
         auto.poiT -= dtReal;
         const near = auto.poi ? dist3(probe.pos, auto.poi.pos) : Infinity;
-        if (auto.poiT <= 0 || near < (auto.poi.pickRadius || 0.1) * 8) {
+        const arrived = auto.poi ? near < (auto.poi.pickRadius || 0.1) * 8 : false;
+        if (auto.poiT <= 0 || arrived) {
           const cands = curWorld.entities.filter((e) => (e.pickRadius || 0) > 0 && e !== auto.poi);
           auto.poi = cands.length ? cands[(Math.random() * cands.length) | 0] : null;
           auto.poiT = 24; // 每个 POI 至少逛 24s
