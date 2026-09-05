@@ -183,107 +183,46 @@ export function buildSolarWorld() {
     entities.push(entity);
   }
 
-  // ---- 教学彗星：哈雷彗星（真实轨道，数值积分）----
-  // 根数（NASA/JPL）：近日点 q=0.586 AU，e=0.967，周期 75.3 年；
-  // 近日点速度 √(GM☉(1+e)/q) ≈ 54.6 km/s（真实值）。与探测球同一套
-  // 引力积分（太阳井 GM），时间倍速下可见"近日加速-弯转-远离"与背阳彗尾。
-  {
-    const cometGM = 0.47; // 与太阳井一致的教学 GM（实时可见的轨道运动）
-    const q = 0.586, eH = 0.967;
-    const vP = Math.sqrt(cometGM * (1 + eH) / q);
-    const cState = { pos: [q, 0, 0], vel: [0, 0, -vP] };
-    const coreVis = 0.05;
-    const cometCore = makeSphere({
-      radius: coreVis, color: '#cfe0ea', emissive: '#9fc4d8', emissiveIntensity: 0.5, roughness: 0.8,
-    });
-    cometCore.position.set(...cState.pos);
-    group.add(cometCore);
-    const comaGlow = makeGlowSprite(coreVis * 9, '#bfe0f4', 0.55);
-    cometCore.add(comaGlow);
-    // 彗尾：背阳锥形点云（离子尾观感），长度随日距变化
-    const TAIL_N = 260;
-    const tPos = new Float32Array(TAIL_N * 3);
-    const tailRng = mulberry32(97);
-    const tailPts = [];
-    for (let i = 0; i < TAIL_N; i++) {
-      const u = Math.pow(tailRng(), 0.8);          // 沿尾 0..1（近核密）
-      const ang = tailRng() * Math.PI * 2;
-      const rad = (0.03 + tailRng() * 0.10) * u;  // 锥形张开
-      const ph = tailRng() * Math.PI * 2;
-      tailPts.push({ u, ang, rad, ph, w: 0.4 + tailRng() * 0.8 });
-    }
-    const tGeo = new THREE.BufferGeometry();
-    tGeo.setAttribute('position', new THREE.BufferAttribute(tPos, 3));
-    const tMat = new THREE.PointsMaterial({
-      size: 2.2, sizeAttenuation: false, color: '#9fd0ff',
-      transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending,
-    });
-    const tail = new THREE.Points(tGeo, tMat);
-    tail.frustumCulled = false;
-    group.add(tail);
-
-    entities.push({
-      id: 'halley', name: '哈雷彗星', en: "Halley's Comet", type: 'comet',
-      pos: cState.pos.slice(), pickRadius: 0.3,
-      info: {
-        kind: '短周期彗星', sub: '1P/Halley',
-        facts: [
-          ['近日点', '0.586 AU（金星轨道内侧）'],
-          ['远日点', '35.1 AU（海王星轨道外）'],
-          ['偏心率', '0.967'],
-          ['周期', '约 75.3 年'],
-          ['上次回归', '1986 年'],
-          ['下次回归', '2061 年'],
-        ],
-        text: '哈雷彗星是首颗被预言回归的彗星（哈雷 1705 年计算其周期）。彗尾由太阳风与辐射压把冰升华后的尘埃与离子推向背阳方向形成——图中彗尾始终背离太阳，越近日越长。',
-        source: 'NASA/JPL 标准值',
-      },
-      schematic: false,
-      visual: { color: '#9fd0ff' },
-    });
-
-    // 彗星运动与彗尾刷新（挂在 world.update，时间倍速驱动）
-    clockHandles.push((dtSim, clockT) => {
-      // 与探测球同一套引力积分（仅太阳井）：子步进
-      const STEP_MAX = 400;
-      let remain = Math.min(dtSim, 2.7e6);
-      do {
-        const h = Math.min(STEP_MAX, remain);
-        const dx = -cState.pos[0], dy = -cState.pos[1], dz = -cState.pos[2];
-        const r = Math.hypot(dx, dy, dz) || 1;
-        const a = cometGM / (r * r);
-        cState.vel[0] += dx / r * a * h;
-        cState.vel[1] += dy / r * a * h;
-        cState.vel[2] += dz / r * a * h;
-        cState.pos[0] += cState.vel[0] * h;
-        cState.pos[1] += cState.vel[1] * h;
-        cState.pos[2] += cState.vel[2] * h;
-        remain -= h;
-      } while (remain > 0);
-      cometCore.position.set(...cState.pos);
-      const e = entities.find((x) => x.id === 'halley');
-      if (e) e.pos = [...cState.pos];
-      // 彗尾：方向 = 背阳；长度随日距反比（近日壮观）
-      const r = Math.hypot(...cState.pos);
-      const L = clamp(0.5 / r, 0.12, 1.6);
-      const ux = cState.pos[0] / r, uy = cState.pos[1] / r, uz = cState.pos[2] / r;
-      // 尾向垂直基向量
-      const px = -uz, py = 0, pz = ux;
-      const pl = Math.hypot(px, py, pz) || 1;
-      const nx = px / pl, ny = py / pl, nz = pz / pl;
-      const qx = uy * nz - uz * ny, qy = uz * nx - ux * nz, qz = ux * ny - uy * nx;
-      for (let i = 0; i < TAIL_N; i++) {
-        const t = tailPts[i];
-        const sway = Math.sin(clockT * t.w + t.ph) * t.rad * t.u;
-        const along = t.u * L;
-        const spread = t.rad * t.u * L;
-        tPos[i * 3] = cState.pos[0] + ux * along + nx * spread * Math.cos(t.ang) + qx * sway;
-        tPos[i * 3 + 1] = cState.pos[1] + uy * along + ny * spread * Math.cos(t.ang) + qy * sway;
-        tPos[i * 3 + 2] = cState.pos[2] + uz * along + nz * spread * Math.cos(t.ang) + qz * sway;
-      }
-      tGeo.attributes.position.needsUpdate = true;
-    });
-  }
+  // ---- 教学彗星（真实根数 + 数值积分）----
+  // 与探测球同一套引力积分（太阳井教学 GM，实时可见）；
+  // 近日点速度 vP=√(GM(1+e)/q) 的真实公式，时间倍速下可见"近日加速-弯转-远离"。
+  // 哈雷 q=0.586 AU / e=0.967 / 周期 75.3 年；恩克 q=0.336 AU / e=0.847 / 3.3 年
+  // （NASA/JPL）。两者构成短/长周期对比。
+  makeComet(group, entities, clockHandles, {
+    id: 'halley', name: '哈雷彗星', en: "Halley's Comet",
+    q: 0.586, e: 0.967, startSide: 1,
+    coreColor: '#cfe0ea', comaColor: '#bfe0f4', tailColor: '#9fd0ff',
+    info: {
+      kind: '短周期彗星', sub: '1P/Halley',
+      facts: [
+        ['近日点', '0.586 AU（金星轨道内侧）'],
+        ['远日点', '35.1 AU（海王星轨道外）'],
+        ['偏心率', '0.967'],
+        ['周期', '约 75.3 年'],
+        ['上次回归', '1986 年'],
+        ['下次回归', '2061 年'],
+      ],
+      text: '哈雷彗星是首颗被预言回归的彗星（哈雷 1705 年计算其周期）。彗尾由太阳风与辐射压把冰升华后的尘埃与离子推向背阳方向形成——图中彗尾始终背离太阳，越近日越长。',
+      source: 'NASA/JPL 标准值',
+    },
+  });
+  makeComet(group, entities, clockHandles, {
+    id: 'encke', name: '恩克彗星', en: "Encke's Comet",
+    q: 0.336, e: 0.847, startSide: -1,
+    coreColor: '#d8e8d8', comaColor: '#c4e4cc', tailColor: '#a8e0c0',
+    info: {
+      kind: '短周期彗星', sub: '2P/Encke',
+      facts: [
+        ['近日点', '0.336 AU（水星轨道内侧）'],
+        ['远日点', '4.1 AU（小行星带外）'],
+        ['偏心率', '0.847'],
+        ['周期', '约 3.3 年（已知最短之一）'],
+        ['母体', '金牛座流星雨'],
+      ],
+      text: '恩克彗星是周期最短的彗星之一，每 3.3 年回归一次，是金牛座流星雨的源头。与哈雷彗星（75.3 年）对比：短周期彗星频繁近日，冰物质消耗更快、彗尾更弱。图中彗尾同样始终背离太阳。',
+      source: 'NASA/JPL 标准值',
+    },
+  });
 
   // ---- 小行星带（示意点云）----
   {
@@ -375,7 +314,7 @@ export function buildSolarWorld() {
     thrustAccWorldPerS2: 1.2, dragPerSec: 0.4, timeScaleMax: 86400 * 365 * 2,
     ambient: { starCount: 1400, starSpread: 600 },
     group, entities, pickables,
-    update(dtSim, clock, probe) {
+    update(dtSim, clock, probe, dtReal = 0) {
       // 行星轨道动画：真实周期 → 时间倍率足够才明显
       for (const e of entities) {
         if (!e.orbit || !e.mesh) continue;
@@ -392,10 +331,103 @@ export function buildSolarWorld() {
       for (const sp of spins) {
         sp.tex.offset.x = (clock.t / sp.rotPeriodS) % 1;
       }
-      // 彗星等附加模拟
-      for (const fn of clockHandles) fn(dtSim, clock.t);
+      // 彗星等附加模拟：实时时标（与轨道飞行物理一致——彗星轨道为演示
+      // GM 的实时运动，恩克 ~30 秒/圈；若用 dtSim 长跑会数值爆炸飞出）
+      for (const fn of clockHandles) fn(dtReal, clock.t, probe);
     },
   };
+}
+
+// 教学彗星构造：真实根数（q/e/近日点速度公式）+ 数值积分 + 背阳锥形离子尾。
+// GM 用太阳井的教学值（实时可见）；startSide 控制初始在近日点哪一侧与绕行方向。
+function makeComet(group, entities, clockHandles, { id, name, en, q, e, startSide = 1,
+  coreColor, comaColor, tailColor, info, GM = 0.47 }) {
+  const vP = Math.sqrt(GM * (1 + e) / q); // 近日点速度（真实公式）
+  const cState = { pos: [q * startSide, 0, 0], vel: [0, 0, -vP * startSide] };
+  const coreVis = 0.05;
+  const cometCore = makeSphere({
+    radius: coreVis, color: coreColor, emissive: coreColor, emissiveIntensity: 0.5, roughness: 0.8,
+  });
+  cometCore.position.set(...cState.pos);
+  group.add(cometCore);
+  const comaGlow = makeGlowSprite(coreVis * 9, comaColor, 0.55);
+  cometCore.add(comaGlow);
+  // 彗尾：背阳锥形点云（离子尾观感），长度随日距变化
+  const TAIL_N = 260;
+  const tPos = new Float32Array(TAIL_N * 3);
+  const tailRng = mulberry32(97);
+  const tailPts = [];
+  for (let i = 0; i < TAIL_N; i++) {
+    const u = Math.pow(tailRng(), 0.8);          // 沿尾 0..1（近核密）
+    const ang = tailRng() * Math.PI * 2;
+    const rad = (0.08 + tailRng() * 0.22) * u;  // 锥形张开（远看仍可辨锥形）
+    const ph = tailRng() * Math.PI * 2;
+    tailPts.push({ u, ang, rad, ph, w: 0.4 + tailRng() * 0.8 });
+  }
+  const tGeo = new THREE.BufferGeometry();
+  tGeo.setAttribute('position', new THREE.BufferAttribute(tPos, 3));
+  const tMat = new THREE.PointsMaterial({
+    size: 1.8, sizeAttenuation: false, color: tailColor,
+    transparent: true, opacity: 0.42, depthWrite: false, blending: THREE.AdditiveBlending,
+  });
+  const tail = new THREE.Points(tGeo, tMat);
+  tail.frustumCulled = false;
+  group.add(tail);
+
+  entities.push({
+    id, name, en, type: 'comet',
+    pos: cState.pos.slice(), pickRadius: 0.3,
+    info, schematic: false,
+    visual: { color: tailColor },
+  });
+
+  // 彗星运动与彗尾刷新（挂在 world.update，时间倍速驱动）
+  clockHandles.push((dtReal, clockT, probe) => {
+    // 与探测球同一套引力积分（仅太阳井）：实时时标子步进
+    const STEP_MAX = 0.05;
+    let remain = Math.min(dtReal, 0.5);
+    do {
+      const h = Math.min(STEP_MAX, remain);
+      const dx = -cState.pos[0], dy = -cState.pos[1], dz = -cState.pos[2];
+      const r = Math.hypot(dx, dy, dz) || 1;
+      const a = GM / (r * r);
+      cState.vel[0] += dx / r * a * h;
+      cState.vel[1] += dy / r * a * h;
+      cState.vel[2] += dz / r * a * h;
+      cState.pos[0] += cState.vel[0] * h;
+      cState.pos[1] += cState.vel[1] * h;
+      cState.pos[2] += cState.vel[2] * h;
+      remain -= h;
+    } while (remain > 0);
+    cometCore.position.set(...cState.pos);
+    const ent = entities.find((x) => x.id === id);
+    if (ent) ent.pos = [...cState.pos];
+    // 彗尾：方向 = 背阳；长度随日距反比（近日壮观）
+    const r = Math.hypot(...cState.pos);
+    const L = clamp(0.9 / r, 0.35, 1.8);
+    const ux = cState.pos[0] / r, uy = cState.pos[1] / r, uz = cState.pos[2] / r;
+    // 彗尾正对视线时淡出：正对的锥形尾透视上拉成"怪线"，
+    // 真实观感中正对彗尾表面亮度弥散降低
+    const vdx = cState.pos[0]-probe.pos[0], vdy = cState.pos[1]-probe.pos[1], vdz = cState.pos[2]-probe.pos[2];
+    const vd = Math.hypot(vdx, vdy, vdz) || 1;
+    const facing = Math.abs(ux*vdx/vd + uy*vdy/vd + uz*vdz/vd);
+    tMat.opacity = 0.42 * (1 - clamp((facing - 0.86) / 0.14, 0, 1) * 0.8);
+    // 尾向垂直基向量
+    const px = -uz, py = 0, pz = ux;
+    const pl = Math.hypot(px, py, pz) || 1;
+    const nx = px / pl, ny = py / pl, nz = pz / pl;
+    const qx = uy * nz - uz * ny, qy = uz * nx - ux * nz, qz = ux * ny - uy * nx;
+    for (let i = 0; i < TAIL_N; i++) {
+      const t = tailPts[i];
+      const sway = Math.sin(clockT * t.w + t.ph) * t.rad * t.u;
+      const along = t.u * L;
+      const spread = t.rad * t.u * L;
+      tPos[i * 3] = cState.pos[0] + ux * along + nx * spread * Math.cos(t.ang) + qx * sway;
+      tPos[i * 3 + 1] = cState.pos[1] + uy * along + ny * spread * Math.cos(t.ang) + qy * sway;
+      tPos[i * 3 + 2] = cState.pos[2] + uz * along + nz * spread * Math.cos(t.ang) + qz * sway;
+    }
+    tGeo.attributes.position.needsUpdate = true;
+  });
 }
 
 // 自注册工厂

@@ -46,7 +46,7 @@ async function main() {
         const w = u.world;
         const probeOk = Array.isArray(u.probe.pos) && u.probe.pos.every(Number.isFinite);
         let updateOk = true;
-        try { w.update && w.update(0.016, u.clock, u.probe); } catch (e) { updateOk = false; }
+        try { w.update && w.update(0.016, u.clock, u.probe, 0.016); } catch (e) { updateOk = false; }
         return JSON.stringify({
           id: w.id, entities: w.entities.length, children: w.group.children.length,
           probeOk, updateOk,

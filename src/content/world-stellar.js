@@ -6,7 +6,6 @@
 import * as THREE from 'three';
 import { registerWorld } from './worlds.js';
 import { LY_KM, tempToHex } from '../util/units.js';
-import { mulberry32 } from '../util/math.js';
 import { makeGlowSprite } from '../render/bodies.js';
 import { makeTextSprite, labelScaleFor } from '../render/labels.js';
 import { STAR_CATALOG } from './data/stars.js';
@@ -21,7 +20,6 @@ export function buildStellarWorld() {
   const positions = new Float32Array(STARS.length * 3);
   const colors = new Float32Array(STARS.length * 3);
   const c = new THREE.Color();
-  const starMeshes = [];
   STARS.forEach((s, i) => {
     // ra/dec/距离 → 3D 坐标（银河系标准：以太阳为原点的本地笛卡尔）
     const p = raDecDistToXYZ(s.raDeg, s.decDeg, s.distLy);
@@ -29,9 +27,6 @@ export function buildStellarWorld() {
     c.set(tempToHex(s.tempK || 5800));
     const lum = Math.max(0.25, 0.5 + (s.lumFactor || 0.5));
     colors[i*3] = c.r*lum; colors[i*3+1] = c.g*lum; colors[i*3+2] = c.b*lum;
-    // 单独小点球（每颗都建 mesh 成本高，改用一个大 Points + 选中时生成 mesh 太重）
-    // —— 简化：全部画进 points，labels 单独。
-    starMeshes.push({ s, pos: p });
   });
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -41,13 +36,15 @@ export function buildStellarWorld() {
   group.add(pts);
 
   // 交互实体：给「著名/亮」恒星建独立 mesh + 标签，并放进 entities
-  const FEATURED = STARS.filter((s) => s.featured);
-  const rng = mulberry32(7);
   const all = [];
   STARS.forEach((s, i) => {
     const p = raDecDistToXYZ(s.raDeg, s.decDeg, s.distLy);
     all.push({ s, p });
   });
+  // 南门二双星互绕动画引用（真实双星系统，见 buildBinaryAnim）
+  const binRefs = {};
+  let binEntA = null, binEntB = null, binLabel = null;
+
   for (const { s, p } of all) {
     // 恒星观感 = 小亮核 + 柔光晕（真实星光是点源 + 衍射/散射晕，不是大球）
     const lum = s.lumFactor ?? 0.4;
@@ -62,6 +59,9 @@ export function buildStellarWorld() {
     );
     core.position.set(p[0], p[1], p[2]);
     group.add(core);
+    if (s.id === 'alpha-centauri-a' || s.id === 'alpha-centauri-b') {
+      binRefs[s.id] = { glow, core, base: p, lum };
+    }
     if (s.showLabel) {
       const lbl = makeTextSprite(s.name, { color: '#cfe6ff' });
       const ls = labelScaleFor(lbl, 0.55);
@@ -69,6 +69,7 @@ export function buildStellarWorld() {
       // 标签放在光晕外缘上方（亮星光晕直径最大 ~1.45），避免文字糊进亮核
       lbl.position.set(p[0], p[1] + 0.55 + lum * 0.55, p[2]);
       group.add(lbl);
+      if (s.id === 'alpha-centauri-a') binLabel = lbl;
     }
     const facts = [
       ['距离', s.distLy.toFixed(2) + ' 光年'],
@@ -77,7 +78,10 @@ export function buildStellarWorld() {
       ['质量', (s.mass ? '约 ' + s.mass + ' 倍太阳' : '—')],
     ];
     if (s.mag !== undefined) facts.push(['视星等', s.mag]);
-    entities.push({
+    if (s.id === 'alpha-centauri-a') {
+      facts.push(['双星系统', '与南门二 B 互绕，周期约 79.9 年（图中间距为演示缩放，真实约 23 AU）']);
+    }
+    const ent = {
       id: s.id, name: s.name, en: s.en, type: 'star',
       pos: p, pickRadius: 0.5,
       info: {
@@ -88,7 +92,32 @@ export function buildStellarWorld() {
         source: s.source || '待核实',
       },
       visual: { color: tempToHex(s.tempK || 5800) },
-    });
+    };
+    entities.push(ent);
+    if (s.id === 'alpha-centauri-a') binEntA = ent;
+    if (s.id === 'alpha-centauri-b') binEntB = ent;
+  }
+
+  // 南门二 A/B 双星互绕：真实周期 79.9 年、质量比 A:B ≈ 1.1:0.9（半径反比）；
+  // 间距为演示缩放（真实 ~23 AU 在 ly 尺度不可见），演示周期 ~44 秒实时一圈。
+  const binA = binRefs['alpha-centauri-a'];
+  const binB = binRefs['alpha-centauri-b'];
+  const BIN_PERIOD_S = 44;
+  // 半径按质量反比分配；间距取 ~2.1 ly 保证最大分离时两核光晕可分辨
+  const BIN_R_A = 0.95, BIN_R_B = 1.2;
+  function updateBinary(clockT) {
+    if (!binA || !binB) return;
+    const a = (clockT / BIN_PERIOD_S) * Math.PI * 2;
+    const c = binA.base;
+    const ax = c[0] + Math.cos(a) * BIN_R_A, az = c[2] + Math.sin(a) * BIN_R_A;
+    const bx = c[0] - Math.cos(a) * BIN_R_B, bz = c[2] - Math.sin(a) * BIN_R_B;
+    binA.glow.position.set(ax, c[1], az);
+    binA.core.position.set(ax, c[1], az);
+    binB.glow.position.set(bx, c[1], bz);
+    binB.core.position.set(bx, c[1], bz);
+    if (binEntA) binEntA.pos = [ax, c[1], az];
+    if (binEntB) binEntB.pos = [bx, c[1], bz];
+    if (binLabel) binLabel.position.set(ax, c[1] + 0.55 + binA.lum * 0.55, az);
   }
 
   // 太阳位置标签（原点）
@@ -109,7 +138,9 @@ export function buildStellarWorld() {
     maxSpeedWorldPerS: 1.6, thrustAccWorldPerS2: 0.7, dragPerSec: 0.4, timeScaleMax: 365 * 86400,
     ambient: { starCount: 1800, starSpread: 260 },
     group, entities,
-    update() {},
+    update(dtSim, clock) {
+      updateBinary(clock.t);
+    },
   };
 }
 

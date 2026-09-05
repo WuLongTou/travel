@@ -86,7 +86,7 @@ let prevR = false; // R 键边沿检测
 function simulate(dtReal) {
   if (!curWorld || !curWorld.update) return;
   const dtSim = clock.paused ? 0 : dtReal * clock.rate;
-  curWorld.update(dtSim, clock, probe);
+  curWorld.update(dtSim, clock, probe, dtReal);
 }
 
 function pickObject(rayOrigin, rayDir, maxDist) {
@@ -169,7 +169,9 @@ function renderFrame(now) {
     const dtPhys = probe.mode === 'ballistic' ? dtReal : dtSim;
     if (thrustKeys) probe.step(dtReal, a, boost ? 3 : 1, dtPhys);
     else probe.step(dtReal, a, 0, dtPhys); // 仍应用阻尼/惯性
-    // 陨石本体跟随 + 慢速翻滚
+    // 陨石本体：仅轨道飞行模式显示（巡航=自由观察者，无实体），
+    // 避免观察时近处石块挡住目标
+    meteorMesh.visible = probe.mode === 'ballistic';
     meteorMesh.position.set(probe.pos[0], probe.pos[1], probe.pos[2]);
     const meteorSize = Math.max(chaseCam.followDist * 0.055, 1e-4);
     // 三轴不等缩放：不规则"土豆形"更贴近真实小天体

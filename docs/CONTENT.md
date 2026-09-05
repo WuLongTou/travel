@@ -12,6 +12,7 @@
 | `data/local-group.js` | 本星系群成员：距银河距离(Mpc)、RA/Dec 方向、盘径(kpc) | Wikipedia "Local Group" / NASA / NED；多数距离来自 Karachentsev et al. 2002/2013 |
 | `data/super-structures.js` | 室女团、天炉团、后发团、长蛇团等星系团：距离(Mpc)、RA/Dec | Wikipedia / NASA / NED 标准公开数据 |
 | `data/cosmos.js` | CMB 信息卡数据、可观测宇宙半径（46.5 Gly ≈ 14.2 Gpc） | Planck/NASA 标准值 |
+| （world-solar 内嵌） | 彗星根数：哈雷 q=0.586 AU/e=0.967/75.3 年；恩克 q=0.336 AU/e=0.847/3.3 年 | NASA/JPL 标准值 |
 
 坐标换算：RA/Dec + 距离 → 笛卡尔（`raDecDistToXYZ` / `direction3d`），
 银河系为本星系群坐标原点；太阳为恒星坐标原点。
@@ -24,6 +25,8 @@
 | solar 标签朝向 | 卫星随机方位摆放 | 卫星轨道半径真实 |
 | galaxy 层星系形态 | 程序化棒旋点云（seed 固定） | 半径 15 kpc、太阳位于 0.55 盘半径（≈8.2 kpc）、棒旋结构按真实形态 |
 | local 层星系盘可视半径 | 放大到 0.055–0.075 Mpc（真实 ~0.02 Mpc 不可见） | 距离、方位真实；M31>银河>M33 大小关系真实 |
+| solar 彗星轨道 | 教学时标（GM 0.47 AU³/s²，与太阳井一致）；间距/速度演示尺度 | q、e、周期、近日点速度公式（vP=√(GM☉(1+e)/q)）真实（NASA/JPL） |
+| stellar 南门二双星 | 双星互绕间距演示缩放（真实 ~23 AU 在 ly 尺度不可见）、演示周期 ~44 秒 | 周期 79.9 年、质量比 A:B≈1.1:0.9（半径反比）真实 |
 | super 层宇宙网丝 | 节点间连丝为示意拓扑 | 节点（星系团）方位、距离真实 |
 | cosmos 层宇宙网与 CMB 壳 | 网状拓扑示意、红移色示意 | 可观测半径 14.2 Gpc；CMB=边界的物理含义 |
 
