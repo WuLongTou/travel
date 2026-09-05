@@ -132,12 +132,11 @@ function disengageAuto(msg) {
 }
 const autoHelp = () => (auto.kind === 'voyage' ? HELP_VOYAGE : helpAuto(auto.target?.name));
 
-// 有限角速度转向目标（自动寻的）：偏航/俯仰均 ≤ maxTurn rad/s
-function steerTowards(tpos, dtReal, maxTurn = 1.0) {
-  const dx = tpos[0] - probe.pos[0], dy = tpos[1] - probe.pos[1], dz = tpos[2] - probe.pos[2];
-  const l = Math.hypot(dx, dy, dz) || 1;
-  const desYaw = Math.atan2(-dx, -dz);
-  const desPitch = Math.asin(Math.max(-1, Math.min(1, dy / l)));
+// 有限角速度转向给定方向（寻的/顺速度对准共用）：偏航/俯仰均 ≤ maxTurn rad/s
+function steerTowardsDir(dir, dtReal, maxTurn) {
+  const l = Math.hypot(dir[0], dir[1], dir[2]) || 1;
+  const desYaw = Math.atan2(-dir[0], -dir[2]);
+  const desPitch = Math.asin(Math.max(-1, Math.min(1, dir[1] / l)));
   let dYaw = desYaw - probe.yaw;
   while (dYaw > Math.PI) dYaw -= Math.PI * 2;
   while (dYaw < -Math.PI) dYaw += Math.PI * 2;
@@ -145,6 +144,9 @@ function steerTowards(tpos, dtReal, maxTurn = 1.0) {
   probe.yaw += Math.max(-m, Math.min(m, dYaw));
   const dPitch = desPitch - probe.pitch;
   probe.pitch += Math.max(-m, Math.min(m, dPitch));
+}
+function steerTowards(tpos, dtReal, maxTurn = 1.0) {
+  steerTowardsDir([tpos[0] - probe.pos[0], tpos[1] - probe.pos[1], tpos[2] - probe.pos[2]], dtReal, maxTurn);
 }
 
 function simulate(dtReal) {
@@ -308,6 +310,11 @@ function renderFrame(now) {
       } else if (auto.kind === 'voyage' && probe.mode === 'ballistic') {
         // 旅行者式自由航行：引力主导滑行，旁观镜头缓慢环绕（约 2.5 分钟一圈）
         if (chaseCam.mode === 'orbit') chaseCam.orbitBy(dtReal * 8, 0);
+        // 姿态：机头对准速度方向（prograde，飞去哪指哪）
+        const sp = probe.speedWorldPerS();
+        if (sp > 1e-4) {
+          steerTowardsDir([probe.vel[0] / sp, probe.vel[1] / sp, probe.vel[2] / sp], dtReal, 1.5);
+        }
         // 兴趣点（POI）：随机拣选可拾取天体；到点/超时/无目标则换下一个——永续航行
         auto.poiT -= dtReal;
         const near = auto.poi ? dist3(probe.pos, auto.poi.pos) : Infinity;
@@ -318,17 +325,38 @@ function renderFrame(now) {
           auto.poiT = 24; // 每个 POI 至少逛 24s
         }
         if (auto.poi) {
-          // 温和转向 POI（0.25 rad/s，天体附近的弯由引力甩出来）
-          steerTowards(auto.poi.pos, dtReal, 0.25);
-          // 深空航向修正（TCM，真·旅行者号的做法）：引力微弱且航向未对准
-          // POI（或几乎静止）时朝前微推；天体附近完全交给引力
+          // 轨迹修正（TCM，真·旅行者号的做法）：引力微弱时把速度方向缓慢
+          // 偏向 POI（≤0.12 rad/s，不改变速率）；天体附近完全交给引力。
+          // 修正点火时顺推微量（尾焰示意）——静止时也可点火起步（无井层）
           const ga = probe.gravAccel();
           const gal = Math.hypot(ga[0], ga[1], ga[2]);
-          const tx = auto.poi.pos[0] - probe.pos[0], ty = auto.poi.pos[1] - probe.pos[1], tz = auto.poi.pos[2] - probe.pos[2];
-          const tl = Math.hypot(tx, ty, tz) || 1;
-          const aligned = (f[0] * tx + f[1] * ty + f[2] * tz) / tl;
-          autoThrust = gal < curWorld.thrustAccWorldPerS2 * 0.5 && (aligned < 0.995 || fwdSpd < 0.08);
-          autoThrustScale = 0.15;
+          if (gal < curWorld.thrustAccWorldPerS2 * 0.5) {
+            const tx = auto.poi.pos[0] - probe.pos[0], ty = auto.poi.pos[1] - probe.pos[1], tz = auto.poi.pos[2] - probe.pos[2];
+            const tl = Math.hypot(tx, ty, tz) || 1;
+            // 方向基准：有速度用速度方向，静止用飞船朝向（起步）
+            const vx = sp > 1e-4 ? probe.vel[0] / sp : f[0];
+            const vy = sp > 1e-4 ? probe.vel[1] / sp : f[1];
+            const vz = sp > 1e-4 ? probe.vel[2] / sp : f[2];
+            const ux = tx / tl, uy = ty / tl, uz = tz / tl;
+            const dot = vx * ux + vy * uy + vz * uz;
+            const ang = Math.acos(Math.max(-1, Math.min(1, dot)));
+            if (ang > 0.02) { autoThrust = true; autoThrustScale = 0.1; } // 修正点火
+            if (ang > 1e-3 && sp > 1e-4) {
+              const turn = Math.min(0.12 * dtReal, ang);
+              // Rodrigues 旋转：轴 k = v̂ × t̂，把速度方向转 kick 角（保速率）
+              let ax = vy * uz - vz * uy, ay = vz * ux - vx * uz, az = vx * uy - vy * ux;
+              const al = Math.hypot(ax, ay, az);
+              if (al > 1e-6) {
+                ax /= al; ay /= al; az /= al;
+                const c = Math.cos(turn), s = Math.sin(turn);
+                const kd = vx * ax + vy * ay + vz * az;
+                const rx = ay * vz - az * vy, ry = az * vx - ax * vz, rz = ax * vy - ay * vx;
+                probe.vel[0] = (vx * c + rx * s + ax * kd * (1 - c)) * sp;
+                probe.vel[1] = (vy * c + ry * s + ay * kd * (1 - c)) * sp;
+                probe.vel[2] = (vz * c + rz * s + az * kd * (1 - c)) * sp;
+              }
+            }
+          }
         }
       }
     }
@@ -418,6 +446,7 @@ function renderFrame(now) {
     }
     ui.setHud({ speedText: spText, distText, modeText });
     ui.setTimeState({ clockLabel: clock.timeLabel(), paused: clock.paused });
+    ui.setFlyState({ auto: !!auto }); // 飞行快捷按钮状态（自动驾驶高亮）
   }
 
   chaseCam.update(dtReal, input.actions.boost && probe.thrustOn);

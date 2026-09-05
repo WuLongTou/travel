@@ -41,20 +41,28 @@ kbd { background: rgba(255,255,255,0.08); border: 1px solid var(--line); border-
 .ruler { font-size: 12px; color: var(--fg-dim); background: var(--glass); border: 1px solid var(--line);
   border-radius: 20px; padding: 5px 12px; backdrop-filter: blur(6px); font-variant-numeric: tabular-nums; }
 
-/* ---- 底部控制台 ---- */
+/* ---- 底部控制台：两行（尺度+时间 / 飞行快捷+提示），紧凑分隔 ---- */
 .dock { position: fixed; left: 50%; transform: translateX(-50%); bottom: 14px; z-index: 20;
-  display: flex; gap: 10px; align-items: stretch; max-width: min(96vw, 1180px);
+  display: flex; flex-direction: column; gap: 8px; max-width: min(96vw, 1180px);
   background: var(--glass); border: 1px solid var(--line); border-radius: var(--panel-r);
-  padding: 10px 12px; backdrop-filter: blur(10px); flex-wrap: wrap; justify-content: center; }
+  padding: 10px 14px; backdrop-filter: blur(10px); }
+.dock-row { display: flex; gap: 14px; align-items: stretch; flex-wrap: wrap; justify-content: center; }
+.dock-sep { width: 1px; background: var(--line); flex: 0 0 auto; }
 .dock-title { font-size: 11px; color: var(--fg-dim); margin-bottom: 6px; letter-spacing: 0.06em; }
-.nav-buttons, .time-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+.nav-buttons, .time-buttons, .fly-buttons { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .dock button { background: rgba(255,255,255,0.05); color: var(--fg); border: 1px solid var(--line);
   border-radius: 7px; padding: 6px 12px; font-size: 12px; cursor: pointer; transition: background 0.15s, border 0.15s; }
 .dock button:hover { background: rgba(127,180,255,0.12); }
 .dock button.active { background: rgba(127,180,255,0.2); border-color: var(--accent); color: var(--accent); }
+/* 飞行快捷键提示角标：按钮右上角小键名 */
+.fly-buttons button { position: relative; padding-right: 24px; }
+.fly-buttons button::after { content: attr(data-key); position: absolute; right: 6px; top: 50%;
+  transform: translateY(-50%); font-size: 9px; color: var(--fg-dim); border: 1px solid var(--line);
+  border-radius: 3px; padding: 0 3px; line-height: 1.4; }
+.fly-buttons button.active { background: rgba(255,210,127,0.16); border-color: var(--accent2); color: var(--accent2); }
 .dock-help { font-size: 11px; color: var(--fg-dim); display: flex; align-items: center; gap: 4px;
-  flex-wrap: wrap; max-width: 420px; line-height: 1.7; }
-.dock-nav, .dock-time { display: flex; flex-direction: column; }
+  flex-wrap: wrap; max-width: 520px; line-height: 1.7; align-self: center; }
+.dock-nav, .dock-time, .dock-fly { display: flex; flex-direction: column; }
 
 /* ---- HUD ---- */
 .hud { position: fixed; left: 14px; bottom: 14px; z-index: 15; font-size: 12px;
@@ -87,7 +95,7 @@ kbd { background: rgba(255,255,255,0.08); border: 1px solid var(--line); border-
 .info-actions button:hover { background: rgba(127,180,255,0.28); }
 
 /* ---- 下潜提示 ---- */
-.dive-hint { position: fixed; bottom: 92px; left: 50%; transform: translateX(-50%); z-index: 25;
+.dive-hint { position: fixed; bottom: 132px; left: 50%; transform: translateX(-50%); z-index: 25;
   display: flex; align-items: center; gap: 12px; background: var(--glass); border: 1px solid var(--accent);
   border-radius: 30px; padding: 8px 16px 8px 20px; backdrop-filter: blur(10px); }
 .dive-text { font-size: 13px; }
@@ -120,5 +128,8 @@ kbd { background: rgba(255,255,255,0.08); border: 1px solid var(--line); border-
 @media (max-width: 860px) {
   .infocard { width: min(88vw, 330px); }
   .dock-help { display: none; }
+  .dock-sep { display: none; }
   .hud { min-width: 150px; }
+  .fly-buttons button { padding-right: 10px; }
+  .fly-buttons button::after { display: none; }
 }

@@ -1,4 +1,4 @@
-// UI 控制器：绑定 DOM，状态渲染（顶栏/时间/信息卡/HUD/下潜提示）
+// UI 控制器：绑定 DOM，状态渲染（顶栏/时间/飞行快捷/信息卡/HUD/下潜提示）
 import { WORLD_DEFS } from '../content/schema.js';
 import { formatKm, lightTravelText, kmToKmText } from '../util/units.js';
 
@@ -7,16 +7,16 @@ export class UI {
     this.engine = engine;
     this.cb = callbacks || {};
     this.el = {};
-    const ids = ['crumb','ruler','nav-buttons','time-buttons','dock-help','infocard','info-title','info-sub',
+    const ids = ['crumb','ruler','nav-buttons','time-buttons','fly-buttons','dock-help','infocard','info-title','info-sub',
       'info-facts','info-text','info-actions','info-close','info-schematic','hud-speed','hud-dist',
       'hud-clock','hud-mode','dive-hint','dive-text','btn-dive','fade','loading',
       'world-intro','intro-title','intro-text'];
     for (const id of ids) this.el[id] = document.getElementById(id);
     this._buildNav();
     this._buildTime();
+    this._buildFly();
     this._bindInfoClose();
     this._bindDive();
-    this._bindPauseKey();
   }
 
   _buildNav() {
@@ -55,14 +55,51 @@ export class UI {
     this.pauseBtn = pause;
   }
 
+  // 飞行快捷按钮：合成键盘事件，复用 input.js → main 的同一条按键管线
+  // （边沿检测/临时接管/模式切换逻辑单一来源，不另开控制路径）
+  _tapKey(key, hold = 160) {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key }));
+    setTimeout(() => window.dispatchEvent(new KeyboardEvent('keyup', { key })), hold);
+  }
+  _buildFly() {
+    const fb = this.el['fly-buttons'];
+    fb.innerHTML = '';
+    const defs = [
+      ['视角', 'v', '切换 追踪/座舱/环绕'],
+      ['自动驾驶', 'h', '选中目标寻的；无目标=自由航行'],
+      ['引力模式', 'g', '引力滑行（开普勒轨道）'],
+      ['刹车', 'x', '按住减速悬停；航行中点击退出自动'],
+    ];
+    for (const [label, key, title] of defs) {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.title = `${title}（${key.toUpperCase()}）`;
+      b.dataset.key = key;
+      if (key === 'x') {
+        // 刹车是「按住」语义：点击 = 模拟按住 0.9s
+        b.addEventListener('click', () => this._tapKey('x', 900));
+      } else {
+        b.addEventListener('click', () => this._tapKey(key));
+      }
+      fb.appendChild(b);
+    }
+    this.flyButtons = Object.fromEntries([...fb.children].map((b) => [b.dataset.key, b]));
+  }
+
+  // 每帧同步飞行按钮状态（自动驾驶 active 高亮，由 main 调用）
+  setFlyState({ auto }) {
+    const b = this.flyButtons && this.flyButtons.h;
+    if (b) {
+      b.classList.toggle('active', !!auto);
+      b.textContent = auto ? '航行中' : '自动驾驶';
+    }
+  }
+
   _bindInfoClose() {
     this.el['info-close'].addEventListener('click', () => this.hideInfo());
   }
   _bindDive() {
     this.el['btn-dive'].addEventListener('click', () => this.cb.onDive && this.cb.onDive());
-  }
-  _bindPauseKey() {
-    // 空格在输入态外暂停/继续？交由 main 处理
   }
 
   // ---- 顶栏 ----

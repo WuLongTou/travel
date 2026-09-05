@@ -318,10 +318,11 @@ export class Probe {
     this._pushTrail(maxSp);
   }
 
-  // 轨迹采样（按移动距离；巡航用速度比例，轨道飞行用绝对间距保证连续）
+  // 轨迹采样（按移动距离；巡航用速度比例，轨道飞行用绝对间距保证连续；
+  // 低速时按层速上限给下限，防止船尾堆点成线团）
   _pushTrail(maxSp) {
     const sp = this.speedWorldPerS();
-    const minGap = this.mode === 'ballistic' ? Math.max(sp * 6, 1e-3) : maxSp * 0.08;
+    const minGap = this.mode === 'ballistic' ? Math.max(sp * 6, maxSp * 0.04) : maxSp * 0.08;
     if (!this.trail.length || Math.hypot(this.trail[this.trail.length-1][0]-this.pos[0],
         this.trail[this.trail.length-1][1]-this.pos[1], this.trail[this.trail.length-1][2]-this.pos[2]) > minGap) {
       this.trail.push([...this.pos]);

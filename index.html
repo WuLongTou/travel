@@ -15,17 +15,27 @@
     <div class="ruler" id="ruler"></div>
   </header>
 
-  <!-- 底部控制台：尺度导航 / 时间倍率 / 操作提示 -->
+  <!-- 底部控制台：尺度导航 / 时间倍率 / 飞行快捷 / 操作提示 -->
   <div class="dock" id="dock">
-    <div class="dock-nav">
-      <div class="dock-title">宇宙尺度</div>
-      <div class="nav-buttons" id="nav-buttons"></div>
+    <div class="dock-row">
+      <div class="dock-group">
+        <div class="dock-title">宇宙尺度</div>
+        <div class="nav-buttons" id="nav-buttons"></div>
+      </div>
+      <div class="dock-sep"></div>
+      <div class="dock-group">
+        <div class="dock-title">时间</div>
+        <div class="time-buttons" id="time-buttons"></div>
+      </div>
     </div>
-    <div class="dock-time">
-      <div class="dock-title">时间</div>
-      <div class="time-buttons" id="time-buttons"></div>
+    <div class="dock-row">
+      <div class="dock-group">
+        <div class="dock-title">飞行</div>
+        <div class="fly-buttons" id="fly-buttons"></div>
+      </div>
+      <div class="dock-sep"></div>
+      <div class="dock-help" id="dock-help"></div>
     </div>
-    <div class="dock-help" id="dock-help"></div>
   </div>
 
   <!-- 目标信息卡 -->
