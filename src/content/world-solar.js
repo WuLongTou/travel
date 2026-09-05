@@ -211,7 +211,7 @@ export function buildSolarWorld() {
   // （NASA/JPL）。两者构成短/长周期对比。
   makeComet(group, entities, clockHandles, {
     id: 'halley', name: '哈雷彗星', en: "Halley's Comet",
-    q: 0.586, e: 0.967, startSide: 1,
+    q: 0.586, e: 0.967, startSide: 1, incDeg: 162.3,
     coreColor: '#cfe0ea', comaColor: '#bfe0f4', tailColor: '#9fd0ff',
     info: {
       kind: '短周期彗星', sub: '1P/Halley',
@@ -229,7 +229,7 @@ export function buildSolarWorld() {
   });
   makeComet(group, entities, clockHandles, {
     id: 'encke', name: '恩克彗星', en: "Encke's Comet",
-    q: 0.336, e: 0.847, startSide: -1,
+    q: 0.336, e: 0.847, startSide: -1, incDeg: 11.8,
     coreColor: '#d8e8d8', comaColor: '#c4e4cc', tailColor: '#a8e0c0',
     info: {
       kind: '短周期彗星', sub: '2P/Encke',
@@ -362,10 +362,15 @@ export function buildSolarWorld() {
 
 // 教学彗星构造：真实根数（q/e/近日点速度公式）+ 数值积分 + 背阳锥形离子尾。
 // GM 用太阳井的教学值（实时可见）；startSide 控制初始在近日点哪一侧与绕行方向。
-function makeComet(group, entities, clockHandles, { id, name, en, q, e, startSide = 1,
+function makeComet(group, entities, clockHandles, { id, name, en, q, e, startSide = 1, incDeg = 0,
   coreColor, comaColor, tailColor, info, GM = 0.47 }) {
   const vP = Math.sqrt(GM * (1 + e) / q); // 近日点速度（真实公式）
-  const cState = { pos: [q * startSide, 0, 0], vel: [0, 0, -vP * startSide] };
+  // 轨道倾角（真实值，绕黄道 x 轴倾斜）：哈雷 162° 逆行、恩克 12°——
+  // 彗星轨道不与行星共面是真实性质，也是视觉上区分彗星与行星的关键
+  const inc = incDeg * Math.PI / 180;
+  const ci = Math.cos(inc), si = Math.sin(inc);
+  const tilt = (v) => [v[0], v[1] * ci - v[2] * si, v[1] * si + v[2] * ci];
+  const cState = { pos: tilt([q * startSide, 0, 0]), vel: tilt([0, 0, -vP * startSide]) };
   const coreVis = 0.05;
   const cometCore = makeSphere({
     radius: coreVis, color: coreColor, emissive: coreColor, emissiveIntensity: 0.5, roughness: 0.8,
