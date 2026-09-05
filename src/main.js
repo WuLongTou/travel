@@ -458,6 +458,9 @@ async function boot() {
   ui.showLoading('载入宇宙…');
   try {
     await nav.enter('solar');
+    // 载入即启航：默认进入旅行者式自由航行——全自动飞行，无需任何操控
+    // （H 可暂停/接管，手动键随时微调，松手继续飞）
+    engageAuto();
   } catch (e) {
     console.error(e);
     document.body.insertAdjacentHTML('beforeend', `<pre style="position:fixed;top:0;left:0;z-index:99999;color:#fff;background:#a00;font-size:12px;padding:10px;max-width:90vw;overflow:auto">${e.stack || e.message}</pre>`);
