@@ -1,6 +1,9 @@
-// 主入口：宇宙漫游 · 教育向可交互宇宙
-// 装配：引擎（渲染）→ 世界工厂注册 → 导航 → 探测球 → UI → 输入 → 主循环
+// 主入口：宇宙航行 · 游戏式太空飞行
+// 装配：引擎（渲染）→ 世界工厂注册 → 导航 → 飞船 → UI → 输入 → 主循环
+// 操作（游戏标准）：点击锁定鼠标转向 · W/S 前后 · A/D 左右 · Space/C 上下 ·
+// Q/E 横滚 · Shift 加力 · X 刹车 · V 切换视角 · G 引力模式 · F 下潜 · 滚轮变焦
 import './style.css';
+import * as THREE from 'three';
 import { CosmicEngine } from './render/engine.js';
 import { Input } from './core/input.js';
 import { Probe } from './core/probe.js';
@@ -17,11 +20,13 @@ import './content/world-local.js';
 import './content/world-super.js';
 import './content/world-cosmos.js';
 import { formatKm, lightTravelText, unitRulerText, C_KM_S } from './util/units.js';
-import { ChaseCam } from './render/camera.js';
+import { ChaseCam, VIEW_NAMES } from './render/camera.js';
 import { updateLabelFades } from './render/labels.js';
 import { TrailRibbon } from './render/trail.js';
-import { makeSphere, makeGlowSprite } from './render/bodies.js';
-import { rockyTexture } from './render/textures.js';
+import { makeShip, updateShipFlame } from './render/ship.js';
+
+const HELP_CRUISE = '点击锁定鼠标转向 · <kbd>W</kbd><kbd>S</kbd>前后 <kbd>A</kbd><kbd>D</kbd>左右 <kbd>Space</kbd>/<kbd>C</kbd>上下 · <kbd>Q</kbd><kbd>E</kbd>横滚 · <kbd>Shift</kbd>加力 <kbd>X</kbd>刹车 · <kbd>V</kbd>视角 <kbd>G</kbd>引力模式 <kbd>F</kbd>下潜 · 滚轮变焦';
+const HELP_BALLISTIC = '引力模式：低速贴近天体切入可被捕获 · WASD 变轨 · <kbd>G</kbd>返回巡航 · <kbd>R</kbd>挣脱捕获 · <kbd>V</kbd>视角';
 
 const canvas = document.getElementById('scene');
 const engine = new CosmicEngine(canvas);
@@ -31,16 +36,11 @@ const nav = new Navigator(engine, probe, clock);
 const chaseCam = new ChaseCam(engine.camera, probe);
 engine.chaseCam = chaseCam;
 const trailRibbon = new TrailRibbon(engine.scene);
-// 陨石本体（可视）：巡航/轨道飞行时都跟随探测球，跟拍视角下可见自己
-const meteorMesh = makeSphere({
-  radius: 1, color: '#9a8f80', roughness: 1,
-  // 微自发光：夜面朝向相机时仍可辨认（与行星同策略）
-  emissive: '#9a8f80', emissiveIntensity: 0.35,
-  map: rockyTexture({ base: '#8d7f70', dark: '#5c5045', light: '#b3a595', craterCount: 34, seed: 61, size: 256 }),
-});
-engine.scene.add(meteorMesh);
-const meteorGlow = makeGlowSprite(2.6, '#c9b8a0', 0.4);
-meteorMesh.add(meteorGlow);
+// 飞船本体：追踪/环绕视角可见，座舱视角隐藏（第一人称）
+const ship = makeShip();
+engine.scene.add(ship);
+const _m4 = new THREE.Matrix4();
+const _ndc = new THREE.Vector3();
 
 const input = new Input(canvas);
 const ui = new UI(engine, {
@@ -50,7 +50,6 @@ const ui = new UI(engine, {
   onDive: () => { if (nav.diveCandidate) nav.diveInto(nav.diveCandidate); },
   onDiveTo: (entity) => nav.diveInto(entity),
   onInfoClose: () => { ui.hideDiveHint(); },
-  onWheelZoom: (dir) => { if (dir < 0) nav.zoomIn(); else nav.zoomOut(); },
 });
 
 let curWorld = null;
@@ -69,19 +68,20 @@ nav.onWorldChanged = (world, idx) => {
   ui.hideInfo();
   ui.setCurrentRate(clock.rate);
   ui.setTimeState({ clockLabel: clock.timeLabel(), paused: clock.paused });
-  // 键位提示同步刷新
-  ui.setDockHelp(curWorld.hint || '点击画面锁定鼠标转向 · WASD 飞行 · G 轨道飞行 · 滚轮缩放 · F 下潜');
+  // 键位提示同步刷新（刷新滚轮缩放边界）
+  chaseCam.setDist(chaseCam.followDist);
+  ui.setDockHelp(probe.mode === 'ballistic' ? HELP_BALLISTIC : (curWorld.hint || HELP_CRUISE));
   // 轨迹缎带重建 + 层介绍导览
   trailRibbon.reset();
   ui.showIntro(world);
 };
 
-// 每帧：更新探测球（飞行/转向/时间）
+// 每帧：更新飞船（飞行/转向/时间）
 let lastFrame = performance.now();
 let frame = 0;
-let wheelAcc = 0;
 let prevG = false; // G 键边沿检测
 let prevR = false; // R 键边沿检测
+let prevV = false; // V 键边沿检测
 
 function simulate(dtReal) {
   if (!curWorld || !curWorld.update) return;
@@ -111,20 +111,42 @@ function rayDist(o, dir, c, r) {
 }
 function dist3(a, b) { return Math.hypot(a[0]-b[0], a[1]-b[1], a[2]-b[2]); }
 
-// 鼠标拾取 → 信息卡
-function updatePick() {
+// 相机射线（游戏式准星拾取）：ndc 为屏幕归一化坐标（中心 = 0,0）
+function cameraRay(ndcX, ndcY) {
+  _ndc.set(ndcX, ndcY, 0.5).unproject(engine.camera);
+  const o = engine.camera.position;
+  const dx = _ndc.x - o.x, dy = _ndc.y - o.y, dz = _ndc.z - o.z;
+  const l = Math.hypot(dx, dy, dz) || 1;
+  return { o: [o.x, o.y, o.z], d: [dx / l, dy / l, dz / l] };
+}
+function pickMaxDist() {
+  const cp = engine.camera.position;
+  const dCam = Math.hypot(cp.x - probe.pos[0], cp.y - probe.pos[1], cp.z - probe.pos[2]);
+  return dCam + chaseCam.followDist * 4;
+}
+
+// 准星悬停：屏幕中心射线拾取（每帧）
+function updateHover() {
   if (!curWorld) return;
-  const o = probe.pos;
-  const fwd = probe.forward();
-  const camDist = chaseCam.followDist;
-  const hit = pickObject(o, fwd, camDist * 1.6);
-  if (hit) {
-    hoveredId = hit.id;
-    if (!selected && !ui.el.infocard.classList.contains('hidden')) return;
-  } else {
-    hoveredId = null;
-  }
-  // 点击（由 main 的 mouse click 事件驱动，见 boot）
+  const { o, d } = cameraRay(0, 0);
+  const hit = pickObject(o, d, pickMaxDist());
+  hoveredId = hit ? hit.id : null;
+  const cross = document.getElementById('crosshair');
+  if (cross) cross.classList.toggle('lock', !!hit);
+}
+
+// 飞船位姿同步：位置 + yaw/pitch/roll 基向量（机头 -Z 对前向）
+function syncShip() {
+  ship.position.set(probe.pos[0], probe.pos[1], probe.pos[2]);
+  const f = probe.forward(), r = probe.right(), u = probe.up();
+  _m4.makeBasis(
+    new THREE.Vector3(r[0], r[1], r[2]),
+    new THREE.Vector3(u[0], u[1], u[2]),
+    new THREE.Vector3(-f[0], -f[1], -f[2]),
+  );
+  ship.quaternion.setFromRotationMatrix(_m4);
+  const s = Math.max(chaseCam.followDist * 0.05, 1e-4);
+  ship.scale.setScalar(s);
 }
 
 function renderFrame(now) {
@@ -134,17 +156,17 @@ function renderFrame(now) {
   const steer = input.poll();
   const a = input.actions;
 
-  // G 键（边沿触发）：巡航 ⇄ 轨道飞行（陨石模式）
+  // G 键（边沿触发）：巡航 ⇄ 引力模式
   const gDown = input.keys.has('g');
   if (gDown && !prevG && curWorld) {
     if (probe.mode === 'ballistic') {
       probe.exitBallistic();
-      ui.setDockHelp(curWorld.hint || '点击画面锁定鼠标转向 · WASD 飞行 · G 轨道飞行 · 滚轮缩放 · F 下潜');
+      ui.setDockHelp(curWorld.hint || HELP_CRUISE);
     } else {
       probe.enterBallistic();
       // 轨道物理为实时：倍速会让行星狂奔而无法建立引力遭遇，回到实时
       if (clock.rate !== 1) { clock.setRate(1); ui.setCurrentRate(1); }
-      ui.setDockHelp('轨道飞行（陨石）：低速贴近行星切入可被捕获 · WASD 变轨 · G 返回巡航 · R 挣脱捕获');
+      ui.setDockHelp(HELP_BALLISTIC);
     }
   }
   prevG = gDown;
@@ -153,32 +175,49 @@ function renderFrame(now) {
   const rDown = input.keys.has('r');
   if (rDown && !prevR && probe.mode === 'ballistic' && curWorld) {
     probe.respawn();
-    ui.setDockHelp('已脱离引力捕获，在系统边缘重新出发 · G 轨道飞行 · WASD 飞行');
+    ui.setDockHelp('已脱离引力捕获，在系统边缘重新出发 · G 引力模式 · WASD 飞行');
   }
   prevR = rDown;
 
+  // V 键（边沿触发）：追踪 ⇄ 座舱 ⇄ 环绕
+  const vDown = input.keys.has('v');
+  if (vDown && !prevV && curWorld) {
+    const m = chaseCam.cycleView();
+    ui.setDockHelp(`视角：${VIEW_NAMES[m]} · V 切换（追踪/座舱/环绕）· 滚轮变焦`);
+  }
+  prevV = vDown;
+
   if (curWorld) {
-    // 转向：Pointer Lock 时移动即转向，未锁定按住拖拽
-    probe.steer(steer.steerX * 0.0045, steer.steerY * 0.0045);
-    // 飞行（只有推进键按下时才加速；Shift = 增推）
+    // 转向：FPS 惯例——鼠标右偏航右转、上抬头（非反转）；
+    // 环绕视角只转观察角，不改变航向
+    const SENS = 0.0042;
+    if (chaseCam.mode === 'orbit') {
+      chaseCam.orbitBy(steer.steerX, steer.steerY);
+    } else {
+      probe.steer(steer.steerX * SENS, -steer.steerY * SENS);
+    }
+    // Q/E 横滚（~90°/秒）
+    const rollIn = (input.keys.has('q') ? 1 : 0) - (input.keys.has('e') ? 1 : 0);
+    if (rollIn !== 0 && chaseCam.mode !== 'orbit') probe.steer(0, 0, rollIn * 1.6 * dtReal);
+    // 飞行（只有推进键按下时才加速；Shift = 加力；X = 刹车悬停）
     const thrustKeys = a.fwd || a.bwd || a.left || a.right || a.up || a.down;
     probe.thrustOn = thrustKeys;
-    const boost = input.keys.has('shift');
+    const boost = a.boost;
+    const braking = input.keys.has('x') && probe.mode === 'cruise';
     const dtSim = clock.paused ? 0 : dtReal * clock.rate;
-    // 轨道飞行物理用实时（dtReal，演示 GM），巡航用阻尼惯性
+    // 引力模式物理用实时（dtReal，演示 GM），巡航用阻尼惯性
     const dtPhys = probe.mode === 'ballistic' ? dtReal : dtSim;
-    if (thrustKeys) probe.step(dtReal, a, boost ? 3 : 1, dtPhys);
+    if (braking) {
+      probe.brake(dtReal);
+      probe.step(dtReal, { fwd: false, bwd: false, left: false, right: false, up: false, down: false }, 0, dtPhys);
+    } else if (thrustKeys) probe.step(dtReal, a, boost ? 3 : 1, dtPhys);
     else probe.step(dtReal, a, 0, dtPhys); // 仍应用阻尼/惯性
-    // 陨石本体：仅轨道飞行模式显示（巡航=自由观察者，无实体），
-    // 避免观察时近处石块挡住目标
-    meteorMesh.visible = probe.mode === 'ballistic';
-    meteorMesh.position.set(probe.pos[0], probe.pos[1], probe.pos[2]);
-    const meteorSize = Math.max(chaseCam.followDist * 0.055, 1e-4);
-    // 三轴不等缩放：不规则"土豆形"更贴近真实小天体
-    meteorMesh.scale.set(meteorSize, meteorSize * 0.76, meteorSize * 0.88);
-    meteorMesh.children[0].scale.setScalar(2.6); // 相对父缩放：光晕直径 ≈ 2.6× 陨石半径
-    meteorMesh.rotation.y += dtReal * 0.6;
-    meteorMesh.rotation.x += dtReal * 0.23;
+    // 飞船本体：座舱视角隐藏（第一人称看不见自己），尾焰随推力
+    ship.visible = chaseCam.mode !== 'cockpit';
+    if (ship.visible) {
+      syncShip();
+      updateShipFlame(ship, thrustKeys ? 1 : 0, boost && thrustKeys);
+    }
 
     // 下潜候选
     let best = null; let bestD = 1e18;
@@ -197,23 +236,25 @@ function renderFrame(now) {
     clock.advance(dtReal);
     simulate(dtReal);
 
+    // 准星悬停
+    updateHover();
+
     // HUD
     const spKmS = probe.speedKmS();
     const cfrac = spKmS / C_KM_S;
-    // 轨道飞行用教学 GM（演示速度可超光速）：超光速时明示"演示速度"
+    // 引力模式用教学 GM（演示速度可超光速）：超光速时明示"演示速度"
     const demoTag = probe.mode === 'ballistic' && cfrac >= 1 ? ' · 演示速度' : '';
     const spText = spKmS < C_KM_S
       ? Math.max(spKmS, 0).toLocaleString('zh-CN', { maximumFractionDigits: 0 }) + ' km/s'
       : '≈' + cfrac.toFixed(1) + ' c' + demoTag;
     let distText = '—';
-    if (hoveredId) {
-      const h = curWorld.entities.find((e) => e.id === hoveredId);
-      if (h) {
-        const dkm = dist3(probe.pos, h.pos) * curWorld.kmPerUnit;
-        distText = `${h.name} · ${formatKm(dkm)} · 光 ${lightTravelText(dkm)}`;
-      }
+    const showEnt = selected || (hoveredId && curWorld.entities.find((e) => e.id === hoveredId));
+    if (showEnt) {
+      const dkm = dist3(probe.pos, showEnt.pos) * curWorld.kmPerUnit;
+      distText = `${showEnt.name} · ${formatKm(dkm)} · 光 ${lightTravelText(dkm)}`;
     }
-    let modeText = probe.mode === 'ballistic' ? '轨道飞行' : '巡航';
+    const viewName = VIEW_NAMES[chaseCam.mode] || '';
+    let modeText = `${probe.mode === 'ballistic' ? '引力模式' : '巡航'} · ${viewName}${braking ? ' · 刹车' : ''}${boost && thrustKeys ? ' · 加力' : ''}`;
     if (probe.mode === 'ballistic') {
       const gname = probe.dominantWell ? probe.dominantWell.name
         : (curWorld.gravity ? curWorld.gravity.name : '无（惯性直线）');
@@ -222,9 +263,9 @@ function renderFrame(now) {
         const c = probe.dominantWell.ref ? probe.dominantWell.ref.pos : probe.dominantWell.center;
         const r = Math.hypot(probe.pos[0]-c[0], probe.pos[1]-c[1], probe.pos[2]-c[2]) || 1;
         const E = (probe.vel[0]**2 + probe.vel[1]**2 + probe.vel[2]**2) / 2 - probe.dominantWell.GM / r;
-        modeText = `轨道飞行 · ${probe.dominantWell.name} · ${E < 0 ? '束缚轨道' : '逃逸轨道'}`;
+        modeText = `引力模式 · ${viewName} · ${probe.dominantWell.name} · ${E < 0 ? '束缚轨道' : '逃逸轨道'}`;
       } else {
-        modeText = `轨道飞行 · ${gname}`;
+        modeText = `引力模式 · ${viewName} · ${gname}`;
       }
       // 完全捕获提示（深入引力阱且束缚轨道持续 → 引导按 R 重生）；
       // 解除捕获后恢复常规提示（捕获时 probe.step 会清除 captureState）
@@ -233,7 +274,7 @@ function renderFrame(now) {
         if (probe.captureState && performance.now() / 1000 - probe.captureState.since > 1.2) {
           helpEl.innerHTML = `<b style="color:#ffd27f">已被 ${probe.captureState.name} 的引力完全捕获</b> —— 按 R 在系统边缘重生继续航行`;
         } else if (!probe.captureState && helpEl.dataset.captured === '1') {
-          helpEl.textContent = '点击画面锁定鼠标转向 · WASD 飞行 · G 轨道飞行 · 滚轮缩放 · F 下潜';
+          helpEl.textContent = '引力模式：WASD 变轨 · G 返回巡航 · R 挣脱捕获';
         }
         helpEl.dataset.captured = probe.captureState ? '1' : '';
       }
@@ -242,7 +283,7 @@ function renderFrame(now) {
     ui.setTimeState({ clockLabel: clock.timeLabel(), paused: clock.paused });
   }
 
-  chaseCam.update(dtReal);
+  chaseCam.update(dtReal, input.actions.boost && probe.thrustOn);
   trailRibbon.update(probe);
   // 标签距离淡出+屏幕避让：远景标签降透明度，重叠标签只保留最近者
   if (curWorld) {
@@ -251,22 +292,31 @@ function renderFrame(now) {
   engine.render(dtReal);
 }
 
-// 点击 → 选中信息卡
+// 点击 → 选中信息卡（游戏式：指针锁定时取准星目标，未锁定取光标射线目标）
 canvas.addEventListener('click', (ev) => {
   if (!curWorld) return;
-  const rect = canvas.getBoundingClientRect();
-  // 用相机射线？简化：中心十字拾取不可点击屏幕位置时用光标射线
-  // 此处用「屏幕中心→探测球朝向」的替代：点击主要选择视野中心对象。
-  // 更好的实现：three raycaster。为免重依赖，用光标方向近似：
-  // （教学场景对象少、pickRadius 大，鼠标与中心偏差小可容忍）
-  const o = probe.pos;
-  const fwd = probe.forward();
-  const hit = pickObject(o, fwd, chaseCam.followDist * 1.6);
+  let hit;
+  if (input.pointerLocked) {
+    const { o, d } = cameraRay(0, 0);
+    hit = pickObject(o, d, pickMaxDist());
+  } else {
+    const rect = canvas.getBoundingClientRect();
+    const nx = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+    const ny = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+    const { o, d } = cameraRay(nx, ny);
+    hit = pickObject(o, d, pickMaxDist());
+  }
   if (hit) {
     selected = hit;
     ui.showInfo(hit);
   }
 });
+
+// 滚轮：追踪/环绕距离变焦（游戏第三人称惯例）
+canvas.addEventListener('wheel', (ev) => {
+  ev.preventDefault();
+  chaseCam.zoomBy(ev.deltaY > 0 ? 1.12 : 0.89);
+}, { passive: false });
 
 async function boot() {
   ui.showLoading('载入宇宙…');
@@ -284,6 +334,6 @@ async function boot() {
 window.addEventListener('resize', () => engine._resize());
 
 // 调试钩子
-window.__universe = { engine, probe, clock, nav, ui, get world() { return nav.world; } };
+window.__universe = { engine, probe, clock, nav, ui, input, chaseCam, ship, get world() { return nav.world; } };
 
 boot();

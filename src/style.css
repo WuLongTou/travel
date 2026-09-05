@@ -14,6 +14,20 @@
 html, body { width: 100%; height: 100%; overflow: hidden; background: #000; color: var(--fg); font-family: var(--font-ui); }
 canvas#scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 
+/* ---- 屏幕准星（游戏式）：常显十字，悬停目标时扩散高亮 ---- */
+.crosshair { position: fixed; left: 50%; top: 50%; width: 22px; height: 22px;
+  transform: translate(-50%, -50%); z-index: 18; pointer-events: none; opacity: 0.75; }
+.crosshair::before, .crosshair::after { content: ''; position: absolute; background: var(--fg); }
+.crosshair::before { left: 50%; top: 0; width: 1.5px; height: 100%; transform: translateX(-50%);
+  clip-path: polygon(0 0, 100% 0, 100% 32%, 0 32%, 0 68%, 100% 68%, 100% 100%, 0 100%); }
+.crosshair::after { top: 50%; left: 0; height: 1.5px; width: 100%; transform: translateY(-50%);
+  clip-path: polygon(0 0, 32% 0, 32% 100%, 0 100%, 68% 0, 100% 0, 100% 100%, 68% 100%); }
+.crosshair span { position: absolute; left: 50%; top: 50%; width: 3px; height: 3px;
+  border-radius: 50%; background: var(--fg); transform: translate(-50%, -50%); }
+.crosshair.lock { opacity: 1; }
+.crosshair.lock::before, .crosshair.lock::after { background: var(--accent2); }
+.crosshair.lock span { background: var(--accent2); width: 4px; height: 4px; }
+
 .hidden { display: none !important; }
 kbd { background: rgba(255,255,255,0.08); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; font-size: 11px; }
 

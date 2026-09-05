@@ -1,8 +1,9 @@
-// 探测球：两种飞行模式（教育向）
-//   cruise   巡航（默认）：WASD 推进 + 阻尼，演示倍率速度，用于尺度漫游；
+// 飞船：两种飞行模式（游戏向）
+//   cruise   巡航（默认）：WASD + Space/C 六向推进 + 阻尼（飞行辅助），
+//            Q/E 横滚；X 刹车（强阻尼悬停）；Shift 加力。
 //            真实宇宙无法以此速度旅行，HUD 明示教学快进。
-//   ballistic 轨道飞行（陨石）：无推力阻尼，仅受当前层引力源作用，
-//            以 dtSim（模拟时间）积分——把时间调快即可看到开普勒轨道；
+//   ballistic 引力模式：无推力阻尼，仅受当前层引力源作用，
+//            以实时子步进积分——把时间调快即可看到开普勒轨道；
 //            WASD 提供小推力作变轨机动。切入时自动获得圆轨道速度。
 // 引力源由 world.gravity 声明：{ GM(世界单位³/真实秒²), minR(碰撞半径), name }
 // 无 gravity 声明的层中 ballistic 退化为惯性直线飞行。
@@ -14,6 +15,7 @@ export class Probe {
     this.vel = [0, 0, 0]; // 世界单位 / 真实秒
     this.yaw = 0; // 朝向（绕 Y），0 = -Z 方向
     this.pitch = 0;
+    this.roll = 0; // 横滚（绕前向轴，Q/E 控制；层切换时回正）
     this.thrustOn = false;
     this.mode = 'cruise'; // 'cruise' | 'ballistic'
     this.world = null; // 当前 world 描述（见 schema）
@@ -28,6 +30,7 @@ export class Probe {
     this._spawn = spawn ? spawn.slice() : [0, 0, 0];
     this.pos = this._spawn.slice();
     this.vel = [0, 0, 0];
+    this.roll = 0; // 跨层时机翼回正
     this.trail.length = 0;
     // 朝向由 Navigator.enter 的 lookTowards 设定（看向该层兴趣中心）
   }
@@ -104,24 +107,48 @@ export class Probe {
     const l = Math.hypot(dx, dy, dz) || 1;
     this.pitch = Math.asin(dy / l);
     this.yaw = Math.atan2(-dx, -dz);
+    this.roll = 0;
   }
 
   // 前向/右/上（yaw/pitch 球坐标；与引擎 chase 相机约定一致：初始朝 -Z）
+  // 右/上额外绕前向轴旋转 roll（横滚），平飞时 roll=0 与旧行为一致
   forward() {
     const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw);
     const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
     return [-sy * cp, sp, -cy * cp];
   }
-  right() { return [Math.cos(this.yaw), 0, -Math.sin(this.yaw)]; }
+  right() {
+    const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw);
+    const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
+    // 零横滚基向量：水平右 + 由 r×f 得到的基上
+    const rx = cy, ry = 0, rz = -sy;
+    const fx = -sy * cp, fy = sp, fz = -cy * cp;
+    const ux = ry * fz - rz * fy, uy = rz * fx - rx * fz, uz = rx * fy - ry * fx;
+    const c = Math.cos(this.roll), s = Math.sin(this.roll);
+    return [rx * c + ux * s, ry * c + uy * s, rz * c + uz * s];
+  }
   up() {
     const f = this.forward(), r = this.right();
     return [r[1]*f[2]-r[2]*f[1], r[2]*f[0]-r[0]*f[2], r[0]*f[1]-r[1]*f[0]];
   }
 
-  // 相对航向推动（世界轴）：dYaw/dPitch（弧度）
-  steer(dYaw, dPitch) {
+  // 相对航向推动：dYaw/dPitch（弧度，鼠标）+ dRoll（弧度，Q/E 横滚）
+  steer(dYaw, dPitch, dRoll = 0) {
     this.yaw -= dYaw;
     this.pitch = clamp(this.pitch + dPitch, -Math.PI/2 + 0.02, Math.PI/2 - 0.02);
+    this.roll += dRoll;
+    // 横滚收敛到 [-π, π]，避免长期累积溢出
+    if (this.roll > Math.PI) this.roll -= Math.PI * 2;
+    else if (this.roll < -Math.PI) this.roll += Math.PI * 2;
+  }
+
+  // 紧急刹车：强阻尼把速度杀到接近 0（X 键，巡航模式）
+  brake(dtReal) {
+    const k = Math.max(0, 1 - 4.0 * dtReal);
+    this.vel[0] *= k; this.vel[1] *= k; this.vel[2] *= k;
+    if (this.speedWorldPerS() < (this.world?.maxSpeedWorldPerS || 1) * 0.002) {
+      this.vel = [0, 0, 0];
+    }
   }
 
   // dtPhys = 轨道飞行模式的物理时标（实时秒——引力井全部为演示校准 GM，

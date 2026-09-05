@@ -1,11 +1,13 @@
-// 键盘/鼠标输入状态（探测球与 UI 共用）
-// 视角：Pointer Lock 惯例——点击画面锁定指针，移动鼠标即转向（无需按住），
+// 键盘/鼠标输入状态（飞船与 UI 共用）
+// 游戏式视角：点击画面锁定指针（Pointer Lock），移动鼠标即转向（俯仰/偏航），
 // ESC 释放；未锁定时保留「按住拖拽」兼容操作。
+// 游戏标准键位：W/S 前进/后退 · A/D 左右平移 · Space/C 上浮/下沉 ·
+// Q/E 左右横滚 · Shift 加力 · X 刹车 · V 切换视角 · G 引力模式 · F 下潜
 export class Input {
   constructor(canvas) {
     this.canvas = canvas;
     this.keys = new Set();
-    // 探测球动作语义：每帧由 main 计算
+    // 飞船动作语义：每帧由 main 计算
     this.actions = { fwd: false, bwd: false, left: false, right: false, up: false, down: false, dive: false, boost: false };
     this.steer = { dx: 0, dy: 0 }; // 每帧累计的视角转向（像素）
     this.mouseDown = false;
@@ -15,7 +17,8 @@ export class Input {
     const kd = (e) => {
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
       const k = e.key.toLowerCase();
-      if ([' ', 'w', 'a', 's', 'd', 'q', 'e', 'g', 'r', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift', 'f'].includes(k)) {
+      if ([' ', 'w', 'a', 's', 'd', 'q', 'e', 'c', 'g', 'r', 'x', 'v',
+        'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift', 'f'].includes(k)) {
         e.preventDefault();
         this.keys.add(k);
       }
@@ -64,10 +67,11 @@ export class Input {
     a.bwd = this.keys.has('s') || this.keys.has('arrowdown');
     a.left = this.keys.has('a') || this.keys.has('arrowleft');
     a.right = this.keys.has('d') || this.keys.has('arrowright');
-    a.up = this.keys.has('q') || this.keys.has(' ');
-    a.down = this.keys.has('e') || this.keys.has('shift');
+    // 上浮/下沉：Space 上、C 下（Q/E 让位给横滚；Shift 只做加力，不再复用为下沉）
+    a.up = this.keys.has(' ');
+    a.down = this.keys.has('c');
     a.dive = this.keys.has('f');
-    a.boost = this.keys.has('shift'); // 视世界而定（boost 与 down 冲突，由 main 决定）
+    a.boost = this.keys.has('shift');
     const sd = this.steer.dx, sdy = this.steer.dy;
     this.steer.dx = 0; this.steer.dy = 0;
     return { steerX: sd, steerY: sdy };
