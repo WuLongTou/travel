@@ -3,7 +3,7 @@
 // ESC 释放；未锁定时保留「按住拖拽」兼容操作。
 // 游戏标准键位：W/S 前进/后退 · A/D 左右平移 · Space/C 上浮/下沉 ·
 // Q/E 左右横滚 · Shift 加力 · X 刹车 · V 切换视角 · G 引力模式 ·
-// H 自动驾驶（旁观） · F 下潜
+// H 自动驾驶（选中目标寻的；无目标=旅行者式自由航行） · F 下潜
 export class Input {
   constructor(canvas) {
     this.canvas = canvas;

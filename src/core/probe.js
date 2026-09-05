@@ -5,6 +5,9 @@
 //   ballistic 引力模式：无推力阻尼，仅受当前层引力源作用，
 //            以实时子步进积分——把时间调快即可看到开普勒轨道；
 //            WASD 提供小推力作变轨机动。切入时自动获得圆轨道速度。
+// autoVoyage（旅行者号自由航行）护栏：ballistic 下生效——
+//   防坠：近天体时速度渐转向切向（弹弓近掠，绝不着陆）；
+//   防困死：深入捕获半径束缚超 8s 后顺行加速逃逸，继续远航。
 // 引力源由 world.gravity 声明：{ GM(世界单位³/真实秒²), minR(碰撞半径), name }
 // 无 gravity 声明的层中 ballistic 退化为惯性直线飞行。
 import { clamp } from '../util/math.js';
@@ -23,6 +26,8 @@ export class Probe {
     this._spawn = [0, 0, 0];
     this.dominantWell = null; // 当前主导引力井（最近）
     this.captureState = null; // { well, name, since(性能时钟秒) } 完全捕获检测
+    this.autoVoyage = false; // 旅行者号自由航行护栏开关（ballistic 下生效）
+    this._voyBound = null; // 深井束缚起始时刻（防困死逃逸计时）
   }
 
   bindWorld(world, spawn) {
@@ -32,6 +37,7 @@ export class Probe {
     this.vel = [0, 0, 0];
     this.roll = 0; // 跨层时机翼回正
     this.trail.length = 0;
+    this._voyBound = null;
     // 朝向由 Navigator.enter 的 lookTowards 设定（看向该层兴趣中心）
   }
 
@@ -77,6 +83,8 @@ export class Probe {
   exitBallistic() {
     this.mode = 'cruise';
     this.captureState = null;
+    this.autoVoyage = false;
+    this._voyBound = null;
   }
 
   // 被"完全捕获"后的继续航行：沿层出生方向，在引力系统边缘重新出发
@@ -99,6 +107,8 @@ export class Probe {
     this.mode = 'cruise';
     this.trail.length = 0;
     this.captureState = null;
+    this.autoVoyage = false;
+    this._voyBound = null;
   }
 
   // 转动朝向使其看向目标点（层进入时用，保证构图稳定不依赖上一层朝向）
@@ -195,14 +205,37 @@ export class Probe {
         this.pos[0] += this.vel[0] * h;
         this.pos[1] += this.vel[1] * h;
         this.pos[2] += this.vel[2] * h;
-        // 引力体接触：进入井核心半径后软着陆（钳在表面、径向速度清零）——
-        // 直观呈现"撞上/停泊"，避免弹跳累积不稳定
+        // 引力体接触：常规模式软着陆（钳在表面、径向速度清零）；
+        // 自由航行则是防坠护栏——速度渐转向切向，弹弓近掠绝不着陆
         for (const well of wells) {
           const c = well.ref ? well.ref.pos : well.center;
           const minR = well.minR || 0.3;
           const dx = this.pos[0] - c[0], dy = this.pos[1] - c[1], dz = this.pos[2] - c[2];
           const r = Math.hypot(dx, dy, dz) || 1;
-          if (r < minR) {
+          if (this.autoVoyage && r < minR * 1.8) {
+            const rx = dx / r, ry = dy / r, rz = dz / r;
+            const vr = this.vel[0] * rx + this.vel[1] * ry + this.vel[2] * rz;
+            let tx = this.vel[0] - rx * vr, ty = this.vel[1] - ry * vr, tz = this.vel[2] - rz * vr;
+            let tl = Math.hypot(tx, ty, tz);
+            if (tl < 1e-6) { tx = -rz; ty = 0; tz = rx; tl = Math.hypot(tx, ty, tz) || 1; } // 正对心坠落：任取切向
+            const sp = Math.hypot(this.vel[0], this.vel[1], this.vel[2]);
+            // 越贴近偏折越强；k 封顶按子步长——1 秒内完成甩摆
+            const k = Math.min(1, (minR * 1.8 - r) / (minR * 0.8)) * Math.min(1, 6 * h);
+            this.vel[0] = this.vel[0] * (1 - k) + tx / tl * sp * k;
+            this.vel[1] = this.vel[1] * (1 - k) + ty / tl * sp * k;
+            this.vel[2] = this.vel[2] * (1 - k) + tz / tl * sp * k;
+            if (r < minR * 1.05) {
+              const kk = (minR * 1.05) / r;
+              this.pos[0] = c[0] + dx * kk;
+              this.pos[1] = c[1] + dy * kk;
+              this.pos[2] = c[2] + dz * kk;
+              if (vr < 0) {
+                this.vel[0] -= rx * vr;
+                this.vel[1] -= ry * vr;
+                this.vel[2] -= rz * vr;
+              }
+            }
+          } else if (r < minR) {
             const k = minR / r;
             this.pos[0] = c[0] + dx * k;
             this.pos[1] = c[1] + dy * k;
@@ -231,14 +264,31 @@ export class Probe {
         const E = (this.vel[0]**2 + this.vel[1]**2 + this.vel[2]**2) / 2 - best.well.GM / best.r;
         const capR = best.well.capR ?? (best.well.minR || 0.3) * 5;
         // 捕获判定：贴在井表面（着陆停泊）或束缚轨道深入捕获半径
+        // （自由航行不判捕获——护栏自主逃逸，无需玩家 R 重生）
         const landed = best.r < (best.well.minR || 0.3) * 1.02;
-        const trapped = landed || (E < 0 && best.r < capR);
+        const trapped = !this.autoVoyage && (landed || (E < 0 && best.r < capR));
         const now = performance.now() / 1000;
         if (trapped) {
           if (!this.captureState) this.captureState = { name: best.well.name, since: now };
           this._lastTrapped = now; // 记录最近一次处于捕获态（解除滞后用）
         } else if (this.captureState && now - (this._lastTrapped ?? 0) > 3) {
           this.captureState = null; // 持续 3 秒脱离才解除（防瞬时波动闪烁）
+        }
+        // 自由航行防困死：深入捕获半径且束缚轨道超 8s → 顺行加速（TCM），
+        // 达逃逸能量或飞出捕获半径即停——绕行星欣赏片刻后继续远航
+        if (this.autoVoyage) {
+          if (E < 0 && best.r < capR) {
+            if (!this._voyBound) this._voyBound = now;
+            if (now - this._voyBound > 8) {
+              const sp = this.speedWorldPerS() || 1e-6;
+              const burn = (this.world.thrustAccWorldPerS2 || 1) * 0.3 * Math.min(dtPhys, 0.25);
+              this.vel[0] += this.vel[0] / sp * burn;
+              this.vel[1] += this.vel[1] / sp * burn;
+              this.vel[2] += this.vel[2] / sp * burn;
+            }
+          } else {
+            this._voyBound = null;
+          }
         }
       }
       this._pushTrail(maxSp);
@@ -280,6 +330,18 @@ export class Probe {
   }
 
   speedWorldPerS() { return Math.hypot(this.vel[0], this.vel[1], this.vel[2]); }
+  // 当前点所有引力井的合成加速度（世界单位/真实秒²）——自由航行 TCM 判据用
+  gravAccel() {
+    let ax = 0, ay = 0, az = 0;
+    for (const well of this._wells()) {
+      const c = well.ref ? well.ref.pos : well.center;
+      const dx = c[0] - this.pos[0], dy = c[1] - this.pos[1], dz = c[2] - this.pos[2];
+      const r = Math.hypot(dx, dy, dz) || 1;
+      const a = well.GM / (r * r);
+      ax += dx / r * a; ay += dy / r * a; az += dz / r * a;
+    }
+    return [ax, ay, az];
+  }
   // 换算真实 km/s（可超光速，仅供 HUD“演示倍率”展示）
   speedKmS() { return this.speedWorldPerS() * this.world.kmPerUnit; }
 }
