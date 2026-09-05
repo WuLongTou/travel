@@ -386,13 +386,16 @@ function renderFrame(now) {
       distText = `${showEnt.name} · ${formatKm(dkm)} · 光 ${lightTravelText(dkm)}`;
     }
     const viewName = VIEW_NAMES[chaseCam.mode] || '';
-    const autoTag = !auto ? '' : auto.kind === 'voyage' ? ' · 自由航行' : ` · 自动驾驶→${auto.target.name}`;
+    const autoTag = auto && auto.kind === 'goto' ? ` · 自动驾驶→${auto.target.name}` : '';
     let modeText = `${probe.mode === 'ballistic' ? '引力模式' : '巡航'} · ${viewName}${braking ? ' · 刹车' : ''}${boost && thrustKeys ? ' · 加力' : ''}${autoTag}`;
     if (probe.mode === 'ballistic') {
       const gname = probe.dominantWell ? probe.dominantWell.name
         : (curWorld.gravity ? curWorld.gravity.name : '无（惯性直线）');
       // 束缚/逃逸：比能量 E = v²/2 - GM/r 相对主导井
-      if (probe.dominantWell) {
+      if (auto && auto.kind === 'voyage') {
+        // 自由航行：不逐一标注主导天体——宇宙天体太多，一路飞掠提示不完
+        modeText = `自由航行 · ${viewName}`;
+      } else if (probe.dominantWell) {
         const c = probe.dominantWell.ref ? probe.dominantWell.ref.pos : probe.dominantWell.center;
         const r = Math.hypot(probe.pos[0]-c[0], probe.pos[1]-c[1], probe.pos[2]-c[2]) || 1;
         const E = (probe.vel[0]**2 + probe.vel[1]**2 + probe.vel[2]**2) / 2 - probe.dominantWell.GM / r;
