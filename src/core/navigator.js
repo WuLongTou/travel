@@ -2,7 +2,7 @@
 //   index 0=solar … 5=cosmos
 //   zoomIn  (下潜：进入更小尺度)   index-1
 //   zoomOut (浮升：退到更大尺度)   index+1
-// 每层按自身 unit 建模，「进入」都从该层默认观测位开始（教学视角）。
+// 自动 LOD 跃迁：基于飞船与可下潜实体的距离自动触发尺度切换
 import { WORLD_DEFS, WORLD_BY_ID } from '../content/schema.js';
 import { worldFactories, LAYER_CHAIN, CHAIN_INDEX } from '../content/worlds.js';
 
@@ -18,6 +18,8 @@ export class Navigator {
     this.diveCandidate = null;
     this.onWorldChanged = null;
     this._busy = false;
+    // 自动跃迁冷却：避免在边界处反复跳转
+    this._autoCooldown = 0;
   }
 
   get worldId() { return this.world ? this.world.id : null; }
@@ -47,6 +49,8 @@ export class Navigator {
       [lookAt[0], lookAt[1], lookAt[2]],
     );
     this.clock.rate = Math.min(this.clock.rate, world.timeScaleMax || Infinity);
+    // 跃迁后设置 2 秒冷却
+    this._autoCooldown = 2.0;
     if (this.onWorldChanged) this.onWorldChanged(world, idx);
   }
 
@@ -72,6 +76,60 @@ export class Navigator {
       dist: dive.dist || this.engine.chaseCam.followDist,
       lookAt: dive.lookAt || dive.at,
     }));
+  }
+
+  // 自动 LOD 跃迁检测（每帧由 main 调用）
+  // 返回 true 表示已触发跃迁，调用方应跳过本帧剩余逻辑
+  checkAutoTransition(dtReal) {
+    if (this._busy || !this.world) return false;
+    // 冷却倒计时
+    if (this._autoCooldown > 0) {
+      this._autoCooldown -= dtReal;
+      return false;
+    }
+    const world = this.world;
+    const pos = this.probe.pos;
+
+    // 1. 自动下潜：检查飞船是否足够接近某个可下潜实体
+    let bestDive = null;
+    let bestDist = Infinity;
+    for (const e of world.entities) {
+      if (!e.dive) continue;
+      const dx = pos[0] - e.pos[0], dy = pos[1] - e.pos[1], dz = pos[2] - e.pos[2];
+      const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const reach = e.dive.reach ?? (e.pickRadius * 2.2);
+      // 自动跃迁阈值：进入 reach 的 40% 范围内
+      if (d < reach * 0.4 && d < bestDist) {
+        bestDist = d;
+        bestDive = e;
+      }
+    }
+    if (bestDive) {
+      this.diveCandidate = bestDive;
+      this.diveInto(bestDive);
+      return true;
+    }
+
+    // 2. 自动浮升：飞船远离世界中心超过 worldRadius 的 85%（跳过顶层 cosmos）
+    if (this.idx < LAYER_CHAIN.length - 1) {
+      const distFromCenter = Math.sqrt(pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]);
+      if (distFromCenter > world.worldRadius * 0.85) {
+        this.zoomOut();
+        return true;
+      }
+    }
+
+    // 同时更新 diveCandidate（用于 HUD 提示）
+    let best = null; let bestD = Infinity;
+    for (const e of world.entities) {
+      if (!e.dive) continue;
+      const dx = pos[0] - e.pos[0], dy = pos[1] - e.pos[1], dz = pos[2] - e.pos[2];
+      const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const reach = e.dive.reach ?? (e.pickRadius * 2.2);
+      if (d < reach && d < bestD) { bestD = d; best = e; }
+    }
+    this.diveCandidate = best;
+    return false;
   }
 
   async _guard(fn) {

@@ -3,40 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>宇宙航行 · 游戏式可交互宇宙</title>
+  <title>宇宙航行 · 飞行器模拟</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 </head>
 <body>
   <canvas id="scene"></canvas>
 
-  <!-- 顶栏：当前尺度面包屑 + 光速尺 -->
+  <!-- 顶栏：当前尺度面包屑 -->
   <header class="topbar" id="topbar">
     <div class="crumb" id="crumb"></div>
-    <div class="ruler" id="ruler"></div>
   </header>
-
-  <!-- 底部控制台：尺度导航 / 时间倍率 / 飞行快捷 / 操作提示 -->
-  <div class="dock" id="dock">
-    <div class="dock-row">
-      <div class="dock-group">
-        <div class="dock-title">宇宙尺度</div>
-        <div class="nav-buttons" id="nav-buttons"></div>
-      </div>
-      <div class="dock-sep"></div>
-      <div class="dock-group">
-        <div class="dock-title">时间</div>
-        <div class="time-buttons" id="time-buttons"></div>
-      </div>
-    </div>
-    <div class="dock-row">
-      <div class="dock-group">
-        <div class="dock-title">飞行</div>
-        <div class="fly-buttons" id="fly-buttons"></div>
-      </div>
-      <div class="dock-sep"></div>
-      <div class="dock-help" id="dock-help"></div>
-    </div>
-  </div>
 
   <!-- 目标信息卡 -->
   <aside class="infocard hidden" id="infocard">
@@ -54,24 +30,34 @@
   <!-- 屏幕准星：游戏式瞄准/拾取指示，命中目标时高亮 -->
   <div class="crosshair" id="crosshair"><span></span></div>
 
-  <!-- 左下 HUD -->
+  <!-- HUD 飞行仪表 -->
   <div class="hud" id="hud">
     <div class="hud-row"><span class="hud-k">速度</span><span class="hud-v" id="hud-speed">—</span></div>
     <div class="hud-row"><span class="hud-k">距选择</span><span class="hud-v" id="hud-dist">—</span></div>
-    <div class="hud-row"><span class="hud-k">模拟钟</span><span class="hud-v" id="hud-clock">—</span></div>
     <div class="hud-row"><span class="hud-k">模式</span><span class="hud-v" id="hud-mode">巡航</span></div>
+    <div class="hud-row hud-sep"></div>
+    <div class="hud-row"><span class="hud-k">时间</span><span class="hud-v" id="hud-clock">—</span></div>
+    <div class="hud-row"><span class="hud-k">倍率</span><span class="hud-v" id="hud-rate">实时</span></div>
+    <div class="hud-row"><span class="hud-k">尺度</span><span class="hud-v" id="hud-scale">—</span></div>
   </div>
 
-  <!-- 下潜提示 -->
-  <div class="dive-hint hidden" id="dive-hint">
-    <div class="dive-text" id="dive-text"></div>
-    <button id="btn-dive">下潜（F）</button>
-  </div>
-
-  <!-- 层介绍卡：进入新尺度时的教育导览 -->
-  <div class="world-intro hidden" id="world-intro">
-    <div class="intro-title" id="intro-title"></div>
-    <div class="intro-text" id="intro-text"></div>
+  <!-- 操控提示：首次进入短暂显示后自动消失 -->
+  <div class="controls-hint" id="controls-hint">
+    <div class="hint-title">操控</div>
+    <div class="hint-grid">
+      <span class="hint-key">W S A D</span><span>飞行</span>
+      <span class="hint-key">鼠标</span><span>转向</span>
+      <span class="hint-key">Q E</span><span>横滚</span>
+      <span class="hint-key">Shift</span><span>加力</span>
+      <span class="hint-key">X</span><span>刹车</span>
+      <span class="hint-key">V</span><span>视角</span>
+      <span class="hint-key">H</span><span>自动飞行</span>
+      <span class="hint-key">G</span><span>引力模式</span>
+      <span class="hint-key">[ ]</span><span>时间倍率</span>
+      <span class="hint-key">\</span><span>暂停</span>
+      <span class="hint-key">滚轮</span><span>变焦</span>
+      <span class="hint-key">Tab</span><span>显示帮助</span>
+    </div>
   </div>
 
   <!-- 全屏转场遮罩 -->

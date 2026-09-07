@@ -19,7 +19,8 @@ export class Input {
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
       const k = e.key.toLowerCase();
       if ([' ', 'w', 'a', 's', 'd', 'q', 'e', 'c', 'g', 'r', 'x', 'v', 'h',
-        'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift', 'f'].includes(k)) {
+        'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift', 'f',
+        '[', ']', '\\', 'tab'].includes(k)) {
         e.preventDefault();
         this.keys.add(k);
       }
