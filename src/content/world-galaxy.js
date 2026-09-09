@@ -67,16 +67,30 @@ export function buildGalaxyWorld() {
 
   const coreEntity = {
     id: 'sgrA', name: '人马座 A*', en: 'Sagittarius A*', type: 'blackhole',
-    pos: centerPos, pickRadius: 0.5,
+    pos: centerPos, pickRadius: 0.8,
     info: {
-      kind: '超大质量黑洞', sub: '银河系中心',
-      facts: [['质量', '约 430 万倍太阳质量'], ['距离', '约 26000 光年'], ['视直径', '极小（事件视界约 0.1 AU 级）']],
-      text: '人马座 A* 是银河系中心的超大质量黑洞，位于人马座方向约 2.6 万光年处。2022 年事件视界望远镜(EHT)发布了它的首张影像。',
+      kind: '超大质量黑洞', sub: '银河系中心引力枢纽',
+      facts: [['质量', '约 430 万倍太阳质量'], ['距离', '约 26000 光年'], ['视直径', '事件视界约 0.1 AU 级']],
+      text: '人马座 A* 是银河系中心的超大质量黑洞，位于人马座方向约 2.6 万光年处，掌控着银河系中心的极强引力势阱。',
     },
     visual: { color: '#ffcf7f' },
   };
   entities.push(coreEntity);
   coreGlow.userData.entity = coreEntity;
+
+  // 太阳系及星际邻域实体（可自动下潜至星际近邻）
+  const sunSysEntity = {
+    id: 'solar-neighborhood', name: '太阳系与星际邻域', en: 'Solar Neighborhood', type: 'system',
+    pos: [sunPos[0], sunPos[1], sunPos[2]], pickRadius: 0.8,
+    info: {
+      kind: '恒星系统', sub: '猎户臂 · 距银心 2.6 万光年',
+      facts: [['公转速度', '约 220 km/s'], ['银河年', '约 2.3 亿年'], ['位置', '猎户臂内侧']],
+      text: '太阳系位于猎户臂，带着整颗母星系高速绕银心公转。飞近可自动下潜进入星际近邻与太阳系。',
+    },
+    dive: { toWorld: 'stellar', at: [3, 1.2, 3], dist: 0.35, targetName: '星际近邻' },
+    visual: { color: '#7fe8ff' },
+  };
+  entities.push(sunSysEntity);
 
   // 银河系本体（点选显示银河信息）
   const galEntity = {
@@ -102,25 +116,24 @@ export function buildGalaxyWorld() {
     id: 'galaxy', title: '银河系', unitName: 'kpc', kmPerUnit: KPC_KM,
     intro: '直径约 10 万光年的棒旋星系。我们位于猎户臂，距银心约 2.6 万光年，正以约 220 km/s 绕银心运动（图中自转为演示速率）。',
     worldRadius: diskR,
-    // 教学引力（演示校准，与 solar 层的真实 GM 不同）：本层时间倍速上限为
-    // 实时，真实银心 GM 下轨道周期 ~2.3 亿年不可见，故取演示值让轨道运动
-    // 实时可看；引力平方律与圆轨道关系保持。
     gravity: { center: [0, 0, 0], GM: 0.12, minR: 0.6, name: '银心' },
-    spawn: [diskR * 0.75, diskR * 0.45, diskR * 0.75], // 斜上方观测位，看向银心
+    spawn: [diskR * 0.75, diskR * 0.45, diskR * 0.75],
     spawnLookAt: [0, 0, 0],
     viewDist: 12,
-    labelFadeDist: 40, // 全景下银心/太阳标注保持可读
-    maxSpeedWorldPerS: 0.35, // kpc/真实秒（演示）
+    shipViewDist: 0.35, // 飞船第三人称跟拍视距
+    labelFadeDist: 40,
+    maxSpeedWorldPerS: 0.35,
     thrustAccWorldPerS2: 0.12, dragPerSec: 0.35, timeScaleMax: 1,
     ambient: { starCount: 1500, starSpread: 60 },
     group, entities,
     update(dtSim, clock) {
-      // 差异自转（平坦旋转曲线，shader 内 ω ∝ 1/r）：太阳轨道处（0.55 盘
-      // 半径）保持原演示自转速率 0.0095 rad/s → spin 速率 = 0.0095 × 0.55
       spin.value = clock.t * GALAXY_FLOW_RATE;
-      // 太阳标签随同一流场公转（本地半径 0.55，与恒星流一致不脱臂）
       const sunAng = spin.value / SUN_R_LOCAL;
-      sunLabel.position.set(Math.cos(sunAng) * SUN_R_LOCAL * diskR, 0.5, Math.sin(sunAng) * SUN_R_LOCAL * diskR);
+      const sx = Math.cos(sunAng) * SUN_R_LOCAL * diskR;
+      const sz = Math.sin(sunAng) * SUN_R_LOCAL * diskR;
+      sunLabel.position.set(sx, 0.5, sz);
+      sunSysEntity.pos[0] = sx;
+      sunSysEntity.pos[2] = sz;
     },
   };
 }

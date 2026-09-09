@@ -62,9 +62,22 @@ export function buildSuperWorld() {
     if (s.dive) entities[entities.length - 1].dive = s.dive;
   }
 
-  // 分层引力真实化（LOD）：本层的「天体」= 星系团。数据无逐团质量，
-  // 给统一教学演示 GM = 10 Mpc³/s²：圆轨道速度 v=√(GM/r) 在 5 Mpc 处
-  // ≈1.4 u/s（层速上限 3.2）——掠过星系团可见轨道偏折，低速可被俘获。
+  // 原点位置：本星系群（可下潜进入本星系群）
+  const localGroupEnt = {
+    id: 'local-group', name: '本星系群', en: 'Local Group', type: 'clusterMark',
+    pos: [0, 0, 0], pickRadius: 2.5,
+    schematic: true,
+    info: {
+      kind: '星系群', sub: '银河系与仙女座星系所在的群系',
+      facts: [['直径', '约 1000 万光年（3 Mpc）'], ['成员星系', '50+ 个'], ['主要成员', '银河系、仙女座星系(M31)、三角座星系(M33)']],
+      text: '本星系群是包含银河系在内的小型星系群，属于室女座超星系团的外围成员。飞近可自动下潜进入。',
+    },
+    dive: { toWorld: 'local', at: [0.9, 0.3, 0.9], dist: 0.35, targetName: '本星系群' },
+    visual: { color: '#7fe8ff' },
+  };
+  entities.push(localGroupEnt);
+
+  // 分层引力真实化（LOD）：本层的「天体」= 星系团。
   const gravityWells = entities
     .filter((e) => e.type === 'clusterMark')
     .map((e) => ({ ref: e, GM: 10, minR: 1.5, capR: 8, name: e.name }));
@@ -76,7 +89,8 @@ export function buildSuperWorld() {
     spawn: [20, 10, 20],
     spawnLookAt: [0, 0, 0], // 兴趣中心：本地群（原点，丝网交汇近端）
     viewDist: 26,
-    labelFadeDist: 110, // 全景下星系团名称仍可读
+    shipViewDist: 0.35, // 飞船跟拍视距
+    labelFadeDist: 110,
     maxSpeedWorldPerS: 3.2, thrustAccWorldPerS2: 1.4, dragPerSec: 0.35, timeScaleMax: 365 * 86400,
     ambient: { starCount: 700, starSpread: 120 },
     gravityWells,

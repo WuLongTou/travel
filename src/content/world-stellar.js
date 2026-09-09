@@ -121,22 +121,35 @@ export function buildStellarWorld() {
     if (binLabel) binLabel.position.set(ax, c[1] + 0.55 + binA.lum * 0.55, az);
   }
 
-  // 太阳位置标签（原点）
-  const sunLabel = makeTextSprite('太阳（本层原点）', { color: '#ffd27f', priority: 1 });
-  const sunLs2 = labelScaleFor(sunLabel, 0.35);
+  // 太阳位置实体与标签（原点：下潜至太阳系）
+  const sunEntity = {
+    id: 'sun-system', name: '太阳系', en: 'Solar System', type: 'star',
+    pos: [0, 0, 0], pickRadius: 0.8,
+    mass: 1.0,
+    info: {
+      kind: '单星恒星系', sub: '我们的家园母星系',
+      facts: [
+        ['中心天体', '太阳（G2V 黄矮星）'],
+        ['已知大行星', '8 颗（水、金、地、火、木、土、天王、海王）'],
+        ['范围', '日球层顶约 120 AU'],
+      ],
+      text: '太阳系是以太阳为中心，由八大行星、数百颗卫星、矮行星及数以亿计的小天体组成的恒星行星系统。飞近可自动下潜深入太阳系内部。',
+    },
+    dive: { toWorld: 'solar', at: [22, 7, 26], dist: 0.35, targetName: '太阳系内部' },
+    visual: { color: '#ffd27f' },
+  };
+  entities.push(sunEntity);
+
+  const sunLabel = makeTextSprite('太阳系（本层原点）', { color: '#ffd27f', priority: 1 });
+  const sunLs2 = labelScaleFor(sunLabel, 0.4);
   sunLabel.scale.set(sunLs2[0], sunLs2[1], 1);
-  sunLabel.position.set(0, 0.8, 0);
+  sunLabel.position.set(0, 0.9, 0);
   group.add(sunLabel);
 
-  // 分层引力真实化（LOD）：本层的「天体」= 恒星，每颗都有引力井——
-  // 教学演示 GM = 0.8 ly³/s² × 真实质量（太阳倍数）：圆轨道速度尺度
-  // v=√(GM/r)，2 ly 处 ~0.6 u/s（层速上限 1.6），实时约 20 秒一圈；
-  // 探测器掠过恒星即可看到轨道被偏折，低速贴近可被捕获。
-  // 太阳本身也一颗井（原点）。ref: entity → 双星互绕时井跟随移动。
+  // 分层引力真实化（LOD）：本层的「天体」= 恒星，每颗都有引力井
   const gravityWells = entities
     .filter((e) => e.type === 'star')
-    .map((e) => ({ ref: e, GM: 0.8 * (e.mass ?? 1), minR: 0.6, capR: 2.5, name: e.name }));
-  gravityWells.push({ center: [0, 0, 0], GM: 0.8, minR: 0.6, capR: 2.5, name: '太阳' });
+    .map((e) => ({ ref: e, GM: 0.8 * (e.mass ?? 1), minR: 0.5, capR: 2.5, name: e.name }));
 
   return {
     id: 'stellar', title: '星际近邻', unitName: 'ly', kmPerUnit: LY_KM,
@@ -145,7 +158,8 @@ export function buildStellarWorld() {
     spawn: [3, 1.2, 3],
     spawnLookAt: [0, 0, 0], // 兴趣中心：太阳（本层原点）
     viewDist: 6,
-    labelFadeDist: 14, // 60 ly 邻域内 featured 恒星标注保持可读
+    shipViewDist: 0.35, // 飞船第三人称跟拍视距
+    labelFadeDist: 14,
     maxSpeedWorldPerS: 1.6, thrustAccWorldPerS2: 0.7, dragPerSec: 0.4, timeScaleMax: 365 * 86400,
     ambient: { starCount: 1800, starSpread: 260, milkyWay: true },
     gravityWells,

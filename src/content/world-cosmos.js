@@ -65,26 +65,38 @@ export function buildCosmosWorld() {
     group.add(lbl);
   }
 
-  // 本地群标注（原点附近极小）
-  const localLabel = makeTextSprite('我们 · 本星系群', { color: '#7fe8ff' });
+  // 本地群与超星系团实体（原点：下潜进入室女座超星系团与宇宙网）
+  const superClusterEnt = {
+    id: 'super-cluster', name: '室女座超星系团 · 拉尼亚凯亚', en: 'Virgo Supercluster / Laniakea', type: 'system',
+    pos: [0, 0, 0], pickRadius: 1.2,
+    schematic: true,
+    info: {
+      kind: '超星系团', sub: '包含银河系在内的宏观结构',
+      facts: [['范围', '跨度约 5.2 亿光年（160 Mpc）'], ['总质量', '约 10^17 太阳质量'], ['引力枢纽', '巨引源（Great Attractor）']],
+      text: '拉尼亚凯亚超星系团是包含银河系、仙女座星系及约 10 万个星系的大尺度结构。飞近可深入内部宇宙网。',
+    },
+    dive: { toWorld: 'super', at: [20, 10, 20], dist: 0.35, targetName: '室女超星系团' },
+    visual: { color: '#7fe8ff' },
+  };
+  entities.push(superClusterEnt);
+
+  const localLabel = makeTextSprite('我们 · 室女超星系团', { color: '#7fe8ff' });
   const llS = labelScaleFor(localLabel, 0.9);
   localLabel.scale.set(llS[0], llS[1], 1);
-  localLabel.position.set(0, 0.35, 0);
+  localLabel.position.set(0, 0.45, 0);
   group.add(localLabel);
-
-  // 一些知名深空目标（数据回表后填，现在放代表性示意）
-  // 真实目标：后发星系团等——放 COSMOS_INFO.targets
 
   return {
     id: 'cosmos', title: '可观测宇宙', unitName: 'Gpc', kmPerUnit: GPC_KM,
     intro: '半径约 465 亿光年。橙色边界是宇宙微波背景——大爆炸后 38 万年的余晖；网中的每一个亮点都是一整个星系。',
     worldRadius: OBSERVABLE_RADIUS_GPC * 1.4,
-    spawn: [19, 7, 24], // 壳外观测位（半径 ~31.6 Gpc）看全景
+    spawn: [19, 7, 24],
     spawnLookAt: [0, 0, 0],
     viewDist: 12,
-    labelFadeDist: 45, // 壳外观测位到中心 ~31 Gpc，标注保持可见
+    shipViewDist: 0.35, // 飞船第三人称跟拍视距
+    labelFadeDist: 45,
     maxSpeedWorldPerS: 2.4, thrustAccWorldPerS2: 1.0, dragPerSec: 0.35, timeScaleMax: 365 * 86400,
-    ambient: { starCount: 0, starSpread: 0, cmb: false }, // 本层自带全部
+    ambient: { starCount: 0, starSpread: 0, cmb: false },
     group, entities,
     update() {},
   };

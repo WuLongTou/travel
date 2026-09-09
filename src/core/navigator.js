@@ -32,18 +32,36 @@ export class Navigator {
     }
     const world = await worldFactories[worldId]();
     const prevAnchor = this.anchors[worldId];
-    const useAnchor = opts.keepAnchor && prevAnchor;
-    const defaultShipDist = world.shipViewDist || Math.max(world.worldRadius * 0.015, 0.35);
-    const dist = useAnchor ? prevAnchor.dist : (opts.dist || defaultShipDist);
+    let spawn = opts.spawn || world.spawn;
+    if (opts.escapeDir) {
+      // 从微观子系统冲出：在母系统中心天体外围沿逃逸矢量方向出现，继续向外航行
+      const r = Math.max(world.worldRadius * 0.08, 1.5);
+      spawn = [opts.escapeDir[0] * r, opts.escapeDir[1] * r, opts.escapeDir[2] * r];
+    } else if (opts.approachDir) {
+      // 从宏观系统深入微观：从子系统外边缘沿逼近方向切入
+      const r = world.worldRadius * 0.55;
+      spawn = [opts.approachDir[0] * r, opts.approachDir[1] * r, opts.approachDir[2] * r];
+    } else if (opts.keepAnchor && prevAnchor) {
+      spawn = prevAnchor.pos;
+    }
+
+    const defaultShipDist = world.shipViewDist || 0.35;
+    const dist = (opts.keepAnchor && prevAnchor) ? prevAnchor.dist : (opts.dist || defaultShipDist);
     this.probe.bindWorld(world, spawn);
     this.world = world;
     this.idx = idx;
     this.engine.chaseCam.followDist = dist;
-    // 相机：从观测位看向「该层的兴趣中心」（多数世界 spawn 即兴趣点附近）
-    const lookAt = opts.lookAt || world.spawnLookAt || spawn;
+
+    // 相机与飞船航向：
+    // 若向外逃逸，航向继续向外；若向内切入，航向朝向系统中心
+    let lookAt = opts.lookAt || world.spawnLookAt || [0, 0, 0];
+    if (opts.escapeDir) {
+      lookAt = [spawn[0] + opts.escapeDir[0] * 5, spawn[1] + opts.escapeDir[1] * 5, spawn[2] + opts.escapeDir[2] * 5];
+    } else if (opts.approachDir) {
+      lookAt = [0, 0, 0]; // 看向中心
+    }
     this.probe.lookTowards(lookAt);
     const f = this.probe.forward(), u = this.probe.up();
-    // 相机初始眼位放置在飞船后上方，确保进入场景即可看到飞船本身
     const eye = [
       spawn[0] - f[0] * dist + u[0] * dist * 0.35,
       spawn[1] - f[1] * dist + u[1] * dist * 0.35,
@@ -62,20 +80,30 @@ export class Navigator {
     const target = LAYER_CHAIN[this.idx - 1];
     await this._guard(() => this.enter(target));
   }
-  // 缩小一档（到更大尺度）
+  // 缩小一档（浮升到更大尺度）：保持飞船逃逸方向的物理连续性
   async zoomOut() {
     if (this.idx >= LAYER_CHAIN.length - 1) return;
     const target = LAYER_CHAIN[this.idx + 1];
-    await this._guard(() => this.enter(target, { keepAnchor: true }));
+    const p = this.probe.pos;
+    const l = Math.hypot(p[0], p[1], p[2]) || 1;
+    const escapeDir = [p[0] / l, p[1] / l, p[2] / l];
+    await this._guard(() => this.enter(target, { escapeDir }));
   }
-  // 下潜到目标实体（world 内声明的 dive.toWorld + dive.at）
+
+  // 下潜到目标实体（进入更微观的子系统）：按逼近方向自然切入子世界边缘
   async diveInto(entity) {
     const dive = entity.dive;
     if (!dive) return;
     const target = dive.toWorld;
+    // 计算逼近实体的相对方位向量
+    const p = this.probe.pos;
+    const dx = p[0] - entity.pos[0], dy = p[1] - entity.pos[1], dz = p[2] - entity.pos[2];
+    const dl = Math.hypot(dx, dy, dz) || 1;
+    const approachDir = [dx / dl, dy / dl, dz / dl];
     await this._guard(() => this.enter(target, {
+      approachDir,
       spawn: dive.at,
-      dist: dive.dist || this.engine.chaseCam.followDist,
+      dist: dive.dist || 0.35,
       lookAt: dive.lookAt || dive.at,
     }));
   }
