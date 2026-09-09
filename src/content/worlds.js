@@ -2,7 +2,7 @@
 // world = {
 //   id, title, unitName, kmPerUnit, worldRadius,
 //   spawn: [x,y,z], viewDist(相机初始距离), maxSpeedWorldPerS,
-//   thrustAccWorldPerS2, dragPerSec, timeScaleMax(模拟钟上限倍率),
+//   thrustAccWorldPerS2, timeScaleMax(模拟钟上限倍率),
 //   ambient: {...}, entities: [...], buildAmbientFns...
 // }
 import { WORLD_DEFS, WORLD_BY_ID } from './schema.js';

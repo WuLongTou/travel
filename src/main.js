@@ -12,7 +12,6 @@ import { Probe } from './core/probe.js';
 import { SimClock } from './core/clock.js';
 import { Navigator } from './core/navigator.js';
 import { UI } from './ui/controller.js';
-import { WORLD_DEFS, WORLD_BY_ID } from './content/schema.js';
 import { worldFactories } from './content/worlds.js';
 // 世界模块（副作用自注册）
 import './content/world-solar.js';
@@ -75,7 +74,6 @@ nav.onWorldChanged = (world, idx) => {
 };
 
 let lastFrame = performance.now();
-let frame = 0;
 let prevR = false;
 let prevV = false;
 let prevBracketL = false;
@@ -172,7 +170,6 @@ function syncShip() {
 function renderFrame(now) {
   const dtReal = Math.min(0.05, (now - lastFrame) / 1000);
   lastFrame = now;
-  frame++;
   const steer = input.poll();
   const a = input.actions;
 

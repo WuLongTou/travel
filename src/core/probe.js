@@ -238,20 +238,4 @@ export class Probe {
   speedKmS() {
     return this.speedWorldPerS() * (this.world ? this.world.kmPerUnit : 1);
   }
-
-  // 合引力加速度
-  gravAccel() {
-    const wells = this._wells();
-    let gx = 0, gy = 0, gz = 0;
-    for (const w of wells) {
-      const c = w.ref ? w.ref.pos : w.center;
-      const dx = c[0] - this.pos[0], dy = c[1] - this.pos[1], dz = c[2] - this.pos[2];
-      const r = Math.hypot(dx, dy, dz) || 1e-4;
-      const a = w.GM / (r * r);
-      gx += (dx / r) * a;
-      gy += (dy / r) * a;
-      gz += (dz / r) * a;
-    }
-    return [gx, gy, gz];
-  }
 }

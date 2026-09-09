@@ -91,7 +91,7 @@ export function buildSuperWorld() {
     viewDist: 26,
     shipViewDist: 0.35, // 飞船跟拍视距
     labelFadeDist: 110,
-    maxSpeedWorldPerS: 3.2, thrustAccWorldPerS2: 1.4, dragPerSec: 0.35, timeScaleMax: 365 * 86400,
+    maxSpeedWorldPerS: 3.2, thrustAccWorldPerS2: 1.4, timeScaleMax: 365 * 86400,
     ambient: { starCount: 700, starSpread: 120 },
     gravityWells,
     group, entities,

@@ -29,7 +29,6 @@ canvas#scene { position: fixed; inset: 0; width: 100%; height: 100%; display: bl
 .crosshair.lock span { background: var(--accent2); width: 4px; height: 4px; }
 
 .hidden { display: none !important; }
-kbd { background: rgba(255,255,255,0.08); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; font-size: 11px; }
 
 /* ---- 顶栏 ---- */
 .topbar { position: fixed; top: 0; left: 0; right: 0; display: flex; justify-content: flex-start; align-items: center;
@@ -47,8 +46,6 @@ kbd { background: rgba(255,255,255,0.08); border: 1px solid var(--line); border-
 .hud-k { color: var(--fg-dim); }
 .hud-v { color: var(--fg); font-variant-numeric: tabular-nums; text-align: right; }
 .hud-sep { border-top: 1px solid var(--line); margin: 4px 0 2px; padding: 0 !important; }
-/* 引力捕获警告 */
-.hud-warn { color: var(--accent2); font-size: 11px; padding: 4px 0 0; text-align: center; }
 
 /* ---- 信息卡 ---- */
 .infocard { position: fixed; right: 16px; top: 16px; width: 330px; max-height: calc(100vh - 90px);

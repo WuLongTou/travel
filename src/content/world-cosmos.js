@@ -95,7 +95,7 @@ export function buildCosmosWorld() {
     viewDist: 12,
     shipViewDist: 0.35, // 飞船第三人称跟拍视距
     labelFadeDist: 45,
-    maxSpeedWorldPerS: 2.4, thrustAccWorldPerS2: 1.0, dragPerSec: 0.35, timeScaleMax: 365 * 86400,
+    maxSpeedWorldPerS: 2.4, thrustAccWorldPerS2: 1.0, timeScaleMax: 365 * 86400,
     ambient: { starCount: 0, starSpread: 0, cmb: false },
     group, entities,
     update() {},

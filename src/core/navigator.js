@@ -3,7 +3,6 @@
 //   zoomIn  (下潜：进入更小尺度)   index-1
 //   zoomOut (浮升：退到更大尺度)   index+1
 // 自动 LOD 跃迁：基于飞船与可下潜实体的距离自动触发尺度切换
-import { WORLD_DEFS, WORLD_BY_ID } from '../content/schema.js';
 import { worldFactories, LAYER_CHAIN, CHAIN_INDEX } from '../content/worlds.js';
 
 export class Navigator {
@@ -13,9 +12,6 @@ export class Navigator {
     this.clock = clock;
     this.world = null;
     this.idx = 0; // 当前层在 CHAIN 中的位置（0=solar…5=cosmos）
-    // 每层记忆的观测点（离开时存，回来恢复）→ 让来回缩放保持熟悉视角
-    this.anchors = {};
-    this.diveCandidate = null;
     this.onWorldChanged = null;
     this._busy = false;
     // 自动跃迁冷却：避免在边界处反复跳转
@@ -149,16 +145,6 @@ export class Navigator {
       }
     }
 
-    // 同时更新 diveCandidate（用于 HUD 提示）
-    let best = null; let bestD = Infinity;
-    for (const e of world.entities) {
-      if (!e.dive) continue;
-      const dx = pos[0] - e.pos[0], dy = pos[1] - e.pos[1], dz = pos[2] - e.pos[2];
-      const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      const reach = e.dive.reach ?? (e.pickRadius * 2.2);
-      if (d < reach && d < bestD) { bestD = d; best = e; }
-    }
-    this.diveCandidate = best;
     return false;
   }
 

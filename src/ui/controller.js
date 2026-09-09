@@ -1,10 +1,8 @@
 // UI 控制器：精简游戏 HUD（顶栏面包屑 / 飞行仪表 / 信息卡 / 操控提示）
 import { WORLD_DEFS } from '../content/schema.js';
-import { formatKm, lightTravelText } from '../util/units.js';
 
 export class UI {
   constructor(engine, callbacks) {
-    this.engine = engine;
     this.cb = callbacks || {};
     this.el = {};
     const ids = ['crumb','infocard','info-title','info-sub',
@@ -12,14 +10,8 @@ export class UI {
       'hud-speed','hud-dist','hud-clock','hud-mode','hud-rate','hud-scale',
       'fade','loading','controls-hint'];
     for (const id of ids) this.el[id] = document.getElementById(id);
-    this._buildCrumbNav();
     this._bindInfoClose();
     this._setupHintToggle();
-  }
-
-  // 面包屑导航（点击可跳转尺度）
-  _buildCrumbNav() {
-    // 面包屑由 setCrumb() 每次切层时动态生成
   }
 
   _bindInfoClose() {

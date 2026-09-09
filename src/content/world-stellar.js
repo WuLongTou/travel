@@ -160,7 +160,7 @@ export function buildStellarWorld() {
     viewDist: 6,
     shipViewDist: 0.35, // 飞船第三人称跟拍视距
     labelFadeDist: 14,
-    maxSpeedWorldPerS: 1.6, thrustAccWorldPerS2: 0.7, dragPerSec: 0.4, timeScaleMax: 365 * 86400,
+    maxSpeedWorldPerS: 1.6, thrustAccWorldPerS2: 0.7, timeScaleMax: 365 * 86400,
     ambient: { starCount: 1800, starSpread: 260, milkyWay: true },
     gravityWells,
     group, entities,

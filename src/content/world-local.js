@@ -110,7 +110,7 @@ export function buildLocalWorld() {
     spawnLookAt: [0, 0, 0], // 兴趣中心：银河系（原点）
     viewDist: 0.6,
     labelFadeDist: 2.4, // 本星系群全景下成员标签可见
-    maxSpeedWorldPerS: 0.02, thrustAccWorldPerS2: 0.008, dragPerSec: 0.4, timeScaleMax: 365 * 86400 * 100,
+    maxSpeedWorldPerS: 0.02, thrustAccWorldPerS2: 0.008, timeScaleMax: 365 * 86400 * 100,
     ambient: { starCount: 1200, starSpread: 4 },
     gravityWells,
     group, entities,

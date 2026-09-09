@@ -332,7 +332,7 @@ export function buildSolarWorld() {
     viewDist: 30, // 宏观全景视距（供地图/全景参考）
     shipViewDist: 0.35, // 飞船第三人称跟拍视距（世界单位），避免数倍太阳系尺度的镜头错位
     maxSpeedWorldPerS: 2.2,
-    thrustAccWorldPerS2: 1.2, dragPerSec: 0.4, timeScaleMax: 86400 * 365 * 2,
+    thrustAccWorldPerS2: 1.2, timeScaleMax: 86400 * 365 * 2,
     ambient: { starCount: 1400, starSpread: 600, milkyWay: true },
     group, entities, pickables,
     update(dtSim, clock, probe, dtReal = 0) {
