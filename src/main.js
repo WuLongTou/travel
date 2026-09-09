@@ -190,7 +190,9 @@ function syncShip() {
     new THREE.Vector3(-f[0], -f[1], -f[2]),
   );
   ship.quaternion.setFromRotationMatrix(_m4);
-  const s = Math.max(chaseCam.followDist * 0.05, 1e-4);
+  // 当 followDist 被无限放大时，限制飞船的最大显示尺寸，避免遮挡行星与星系背景
+  const maxShipScale = curWorld ? Math.max(curWorld.worldRadius * 0.04, 30) : 30;
+  const s = Math.min(Math.max(chaseCam.followDist * 0.05, 1e-4), maxShipScale);
   ship.scale.setScalar(s);
 }
 
@@ -269,7 +271,16 @@ function renderFrame(now) {
   prevBackslash = bsDown;
 
   if (curWorld) {
-    // 转向
+    // 视角平移（按住右键/中键拖拽自由位移）
+    if (steer.panX !== 0 || steer.panY !== 0) {
+      chaseCam.panBy(steer.panX, steer.panY);
+    }
+    // Z 键或 Backspace 键：快速复位相机焦点回飞船中心
+    if ((input.keys.has('z') || input.keys.has('backspace')) && chaseCam.panOffset.lengthSq() > 1e-6) {
+      chaseCam.resetPan();
+    }
+
+    // 视角旋转转向
     const SENS = 0.0042;
     if (chaseCam.mode === 'orbit') {
       chaseCam.orbitBy(steer.steerX, steer.steerY);
@@ -305,8 +316,10 @@ function renderFrame(now) {
           else if (fwdSpd > desired * 1.3 + maxSp * 0.01) autoBrake = true;
         }
       } else if (auto.kind === 'voyage' && probe.mode === 'ballistic') {
-        // 旅行者式自由航行
-        if (chaseCam.mode === 'orbit') chaseCam.orbitBy(dtReal * 8, 0);
+        // 旅行者式自由航行：若玩家未在主动交互视角，镜头才轻柔环顾（约 3 分钟一圈）
+        if (chaseCam.mode === 'orbit' && performance.now() - chaseCam._lastInteractTime > 3500) {
+          chaseCam.orbitBy(dtReal * 2, 0);
+        }
         const sp = probe.speedWorldPerS();
         if (sp > 1e-4) {
           steerTowardsDir([probe.vel[0] / sp, probe.vel[1] / sp, probe.vel[2] / sp], dtReal, 1.5);
@@ -445,11 +458,16 @@ canvas.addEventListener('click', (ev) => {
   }
 });
 
-// 滚轮：追踪/环绕距离变焦
+// 滚轮：追踪/环绕距离变焦（支持无限缩放）
 canvas.addEventListener('wheel', (ev) => {
   ev.preventDefault();
   chaseCam.zoomBy(ev.deltaY > 0 ? 1.12 : 0.89);
 }, { passive: false });
+
+// 双击：快速复位相机焦点回飞船中心
+canvas.addEventListener('dblclick', () => {
+  chaseCam.resetPan();
+});
 
 async function boot() {
   ui.showLoading('载入宇宙…');

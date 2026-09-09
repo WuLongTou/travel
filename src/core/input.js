@@ -11,6 +11,8 @@ export class Input {
     // 飞船动作语义：每帧由 main 计算
     this.actions = { fwd: false, bwd: false, left: false, right: false, up: false, down: false, dive: false, boost: false };
     this.steer = { dx: 0, dy: 0 }; // 每帧累计的视角转向（像素）
+    this.pan = { dx: 0, dy: 0 };   // 每帧累计的视角平移位移（像素）
+    this.buttons = new Set();      // 按下的鼠标键集合 (0: 左键, 1: 中键, 2: 右键)
     this.mouseDown = false;
     this.mouse = { x: 0, y: 0 };
     this.pointerLocked = false;
@@ -18,39 +20,61 @@ export class Input {
     const kd = (e) => {
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
       const k = e.key.toLowerCase();
-      if ([' ', 'w', 'a', 's', 'd', 'q', 'e', 'c', 'g', 'r', 'x', 'v', 'h',
+      if ([' ', 'w', 'a', 's', 'd', 'q', 'e', 'c', 'g', 'r', 'x', 'v', 'h', 'z',
         'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift', 'f',
-        '[', ']', '\\', 'tab'].includes(k)) {
+        '[', ']', '\\', 'tab', 'backspace'].includes(k)) {
         e.preventDefault();
         this.keys.add(k);
       }
     };
     const ku = (e) => this.keys.delete(e.key.toLowerCase());
-    const blur = () => this.keys.clear();
+    const blur = () => { this.keys.clear(); this.buttons.clear(); this.mouseDown = false; };
     window.addEventListener('keydown', kd);
     window.addEventListener('keyup', ku);
     window.addEventListener('blur', blur);
-    const md = () => {
-      // 未锁定时：首次点击请求指针锁定（游戏惯例）；锁定状态下 mousedown 仅用于拾取
-      if (!this.pointerLocked && canvas.requestPointerLock) {
-        // 新版 Chrome 返回 Promise，拒绝时（如 headless/权限）静默降级为拖拽
-        const pr = canvas.requestPointerLock();
-        if (pr && pr.catch) pr.catch(() => {});
+
+    // 禁用右键菜单以支持右键自由平移拖拽
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    const md = (e) => {
+      this.buttons.add(e.button);
+      if (e.button === 0) {
+        // 未锁定时：首次左键点击请求指针锁定（游戏惯例）；锁定状态下左键仅用于拾取
+        if (!this.pointerLocked && canvas.requestPointerLock) {
+          const pr = canvas.requestPointerLock();
+          if (pr && pr.catch) pr.catch(() => {});
+        }
+        this.mouseDown = true;
       }
-      this.mouseDown = true;
     };
     const mm = (e) => {
+      const isPan = this.buttons.has(2) || this.buttons.has(1); // 按住右键或中键即为平移
       if (this.pointerLocked) {
-        // 锁定态：移动即转向（无需按住）
-        this.steer.dx += e.movementX || 0;
-        this.steer.dy += e.movementY || 0;
-      } else if (this.mouseDown) {
-        this.steer.dx += e.clientX - this.mouse.x;
-        this.steer.dy += e.clientY - this.mouse.y;
+        if (isPan) {
+          this.pan.dx += e.movementX || 0;
+          this.pan.dy += e.movementY || 0;
+        } else {
+          this.steer.dx += e.movementX || 0;
+          this.steer.dy += e.movementY || 0;
+        }
+      } else {
+        const dx = e.clientX - this.mouse.x;
+        const dy = e.clientY - this.mouse.y;
+        if (isPan) {
+          this.pan.dx += dx;
+          this.pan.dy += dy;
+        } else if (this.mouseDown) {
+          this.steer.dx += dx;
+          this.steer.dy += dy;
+        }
+        this.mouse.x = e.clientX;
+        this.mouse.y = e.clientY;
       }
-      if (!this.pointerLocked) { this.mouse.x = e.clientX; this.mouse.y = e.clientY; }
     };
-    const mu = () => { this.mouseDown = false; };
+    const mu = (e) => {
+      this.buttons.delete(e.button);
+      if (e.button === 0) this.mouseDown = false;
+    };
     const plc = () => {
       this.pointerLocked = document.pointerLockElement === canvas;
       if (this.onLockChange) this.onLockChange(this.pointerLocked);
@@ -59,10 +83,10 @@ export class Input {
     window.addEventListener('mousemove', mm);
     window.addEventListener('mouseup', mu);
     document.addEventListener('pointerlockchange', plc);
-    this._clear = () => { this.steer.dx = 0; this.steer.dy = 0; };
+    this._clear = () => { this.steer.dx = 0; this.steer.dy = 0; this.pan.dx = 0; this.pan.dy = 0; };
   }
 
-  // 每帧开头调用：从 keys 合成动作，并消费 steer
+  // 每帧开头调用：从 keys 合成动作，并消费 steer 和 pan
   poll() {
     const a = this.actions;
     a.fwd = this.keys.has('w') || this.keys.has('arrowup');
@@ -75,7 +99,9 @@ export class Input {
     a.dive = this.keys.has('f');
     a.boost = this.keys.has('shift');
     const sd = this.steer.dx, sdy = this.steer.dy;
+    const pd = this.pan.dx, pdy = this.pan.dy;
     this.steer.dx = 0; this.steer.dy = 0;
-    return { steerX: sd, steerY: sdy };
+    this.pan.dx = 0; this.pan.dy = 0;
+    return { steerX: sd, steerY: sdy, panX: pd, panY: pdy };
   }
 }
