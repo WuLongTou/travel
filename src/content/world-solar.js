@@ -314,23 +314,23 @@ export function buildSolarWorld() {
     // 真实轨道周期数据见各天体信息卡。
     gravityWells: (() => {
       const sunGM = 0.47;
-      const wells = [{ center: [0, 0, 0], GM: sunGM, minR: 0.1, capR: 0.16, name: '太阳' }];
+      // 太阳碰撞物理半径严格等于太阳可视半径 sunVis（0.42 AU），触碰光球层即碰撞熔毁
+      const wells = [{ center: [0, 0, 0], GM: sunGM, minR: sunVis, capR: sunVis * 2.5, name: '太阳' }];
       for (const e of entities) {
         if (e.type !== 'planet') continue;
         const R = e.pickRadius || 0.06;
-        // GM=3R²：飞掠 b~0.15 AU 明显偏转；贴近（<0.1R·AU 量级）且低速
-        // 切入可形成绕行星轨道（有 ~30% 太阳潮汐摆动，如真实地月系），
-        // 高速飞掠则被太阳潮汐带走——捕获与否取决于玩家切入姿态
+        // 行星引力井碰撞半径严格等于行星物理表面 R，贴近产生真实引力摄动，触碰地表即撞毁
         wells.push({
           ref: e, GM: 3 * R * R,
-          minR: R * 1.15, capR: R * 2.4, name: e.name,
+          minR: R, capR: R * 2.4, name: e.name,
         });
       }
       return wells;
     })(),
     spawn: [22, 7, 26],
     spawnLookAt: [0, 0, 0],
-    viewDist: 30,
+    viewDist: 30, // 宏观全景视距（供地图/全景参考）
+    shipViewDist: 0.35, // 飞船第三人称跟拍视距（世界单位），避免数倍太阳系尺度的镜头错位
     maxSpeedWorldPerS: 2.2,
     thrustAccWorldPerS2: 1.2, dragPerSec: 0.4, timeScaleMax: 86400 * 365 * 2,
     ambient: { starCount: 1400, starSpread: 600, milkyWay: true },

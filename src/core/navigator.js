@@ -33,21 +33,23 @@ export class Navigator {
     const world = await worldFactories[worldId]();
     const prevAnchor = this.anchors[worldId];
     const useAnchor = opts.keepAnchor && prevAnchor;
-    const spawn = useAnchor ? prevAnchor.pos : (opts.spawn || world.spawn);
-    const dist = useAnchor ? prevAnchor.dist : (opts.dist || world.viewDist);
+    const defaultShipDist = world.shipViewDist || Math.max(world.worldRadius * 0.015, 0.35);
+    const dist = useAnchor ? prevAnchor.dist : (opts.dist || defaultShipDist);
     this.probe.bindWorld(world, spawn);
     this.world = world;
     this.idx = idx;
     this.engine.chaseCam.followDist = dist;
     // 相机：从观测位看向「该层的兴趣中心」（多数世界 spawn 即兴趣点附近）
     const lookAt = opts.lookAt || world.spawnLookAt || spawn;
-    // 探测球朝向必须同步看向兴趣中心：chase 相机每帧由探测球朝向推导，
-    // 否则会沿用上一层离开时的朝向，进入构图随机
     this.probe.lookTowards(lookAt);
-    this.engine.chaseCam.snapTo(
-      [spawn[0], spawn[1], spawn[2]],
-      [lookAt[0], lookAt[1], lookAt[2]],
-    );
+    const f = this.probe.forward(), u = this.probe.up();
+    // 相机初始眼位放置在飞船后上方，确保进入场景即可看到飞船本身
+    const eye = [
+      spawn[0] - f[0] * dist + u[0] * dist * 0.35,
+      spawn[1] - f[1] * dist + u[1] * dist * 0.35,
+      spawn[2] - f[2] * dist + u[2] * dist * 0.35,
+    ];
+    this.engine.chaseCam.snapTo(eye, spawn);
     this.clock.rate = Math.min(this.clock.rate, world.timeScaleMax || Infinity);
     // 跃迁后设置 2 秒冷却
     this._autoCooldown = 2.0;
