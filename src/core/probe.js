@@ -46,6 +46,11 @@ export class Probe {
         let tx = dz, ty = 0, tz = -dx;
         const tl = Math.hypot(tx, ty, tz) || 1;
         this.vel = [tx / tl * v, ty / tl * v, tz / tl * v];
+        const sp = Math.hypot(this.vel[0], this.vel[1], this.vel[2]);
+        if (sp > 1e-4) {
+          this.yaw = Math.atan2(-this.vel[0], -this.vel[2]);
+          this.pitch = Math.asin(clamp(this.vel[1] / sp, -1, 1));
+        }
       }
     }
   }
@@ -82,6 +87,11 @@ export class Probe {
     let tx = nz, ty = 0, tz = -nx;
     let tl = Math.hypot(tx, ty, tz) || 1;
     this.vel = [tx / tl * v, ty / tl * v, tz / tl * v];
+    const sp = Math.hypot(this.vel[0], this.vel[1], this.vel[2]);
+    if (sp > 1e-4) {
+      this.yaw = Math.atan2(-this.vel[0], -this.vel[2]);
+      this.pitch = Math.asin(clamp(this.vel[1] / sp, -1, 1));
+    }
     this.trail.length = 0;
   }
 

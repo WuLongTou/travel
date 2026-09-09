@@ -244,6 +244,7 @@ function renderFrame(now) {
     const manualThrustKeys = a.fwd || a.bwd || a.left || a.right || a.up || a.down;
     const isBraking = input.keys.has('x');
     const isBoosting = a.boost;
+    const isIntervening = manualThrustKeys || isBraking;
     const maxSp = curWorld.maxSpeedWorldPerS || 5.0;
 
     let autoFwdThrust = false;
@@ -251,24 +252,32 @@ function renderFrame(now) {
     let autoBrake = false;
     let flightStatus = '';
 
-    if (isBraking) {
-      // 玩家主动反推刹车
-      probe.brake(dtReal);
-      probe.thrustOn = true;
-      flightStatus = '反推制动';
-    } else if (manualThrustKeys) {
-      // 玩家手动按键推进：完全按玩家意愿飞行；非环绕模式下机头平滑导向当前视线方向
-      probe.thrustOn = true;
-      const boostScale = isBoosting ? 2.5 : 1.0;
-      if (chaseCam.mode !== 'orbit') {
-        const camDir = new THREE.Vector3();
-        engine.camera.getWorldDirection(camDir);
-        steerTowardsDir([camDir.x, camDir.y, camDir.z], dtReal, 3.2);
+    if (isIntervening) {
+      // 玩家主动键盘干预：若此前有锁定的天体目标，即刻解除锁定，转为玩家当前控制状态
+      if (selected) {
+        selected = null;
+        ui.hideInfo();
       }
-      probe.step(dtReal, a, boostScale, dtReal);
-      flightStatus = isBoosting ? '加力推进' : '手动推进';
+
+      if (isBraking) {
+        // 玩家主动反推刹车
+        probe.brake(dtReal);
+        probe.thrustOn = true;
+        flightStatus = '手动干预 · 反推制动';
+      } else {
+        // 玩家手动按键推进：完全按玩家意愿飞行；按 W 前进时机头平滑导向当前观察视线
+        probe.thrustOn = true;
+        const boostScale = isBoosting ? 2.5 : 1.0;
+        if (chaseCam.mode !== 'orbit' && a.fwd) {
+          const camDir = new THREE.Vector3();
+          engine.camera.getWorldDirection(camDir);
+          steerTowardsDir([camDir.x, camDir.y, camDir.z], dtReal, 3.2);
+        }
+        probe.step(dtReal, a, boostScale, dtReal);
+        flightStatus = isBoosting ? '手动干预 · 加力推进' : '手动干预 · 推进机动';
+      }
     } else {
-      // 玩家未按按键：智能自动飞控全自动接管
+      // 玩家未按按键：全自动航行接管（干预结束后按当前状态平稳继续航行）
       const currentSpeed = probe.speedWorldPerS();
       const f = probe.forward();
       const fwdSpeed = probe.vel[0] * f[0] + probe.vel[1] * f[1] + probe.vel[2] * f[2];
@@ -307,15 +316,22 @@ function renderFrame(now) {
           flightStatus = `自动导向 · ${selected.name}`;
         }
       } else {
-        // 【深空顺行探索】：无特定目标，机头自动对准顺行方向（Prograde），开普勒引力自然滑行
-        if (currentSpeed > 0.01) {
-          steerTowardsDir([probe.vel[0] / currentSpeed, probe.vel[1] / currentSpeed, probe.vel[2] / currentSpeed], dtReal, 1.2);
-          flightStatus = '顺行引力滑行';
+        // 【自由全自动航行】：保持干预结束后的当前航向继续自动飞行
+        if (currentSpeed < 0.05) {
+          // 若玩家刚才将飞船彻底刹停至静止，保持在当前空间悬停停泊
+          flightStatus = '全自动接管 · 空间停泊';
         } else {
-          // 静止微推起航
-          autoFwdThrust = true;
-          autoThrustScale = 0.4;
-          flightStatus = '起航巡游';
+          // 沿干预结束时的机头航向恒速巡航推进
+          const cruiseSpeed = maxSp * 0.5;
+          if (fwdSpeed < cruiseSpeed) {
+            // 前向微推补偿，平稳加速至巡航速度，推力自然牵引速度矢量收敛对齐机头
+            autoFwdThrust = true;
+            autoThrustScale = Math.min(1.0, Math.max(0.15, (cruiseSpeed - fwdSpeed) / (maxSp * 0.25)));
+            flightStatus = '全自动航行 · 巡航推进 (保持航向)';
+          } else {
+            // 已达巡航速度或以上，依靠惯性与真实引力自然航行
+            flightStatus = '全自动航行 · 惯性巡航 (保持航向)';
+          }
         }
       }
 
