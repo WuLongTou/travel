@@ -35,16 +35,23 @@ export class ChaseCam {
     this.maxDist = 5e6;
   }
 
-  // 重置视角位移回飞船中心
+  // 重置视角位移与朝向回飞船正后方
   resetPan() {
     this.panOffset.set(0, 0, 0);
+    this.orbitYaw = 0;
+    this.orbitPitch = 0.25;
   }
 
   cycleView() {
     const i = VIEW_MODES.indexOf(this.mode);
     this.mode = VIEW_MODES[(i + 1) % VIEW_MODES.length];
-    // 切到环绕时从当前追踪方位起步，避免跳变
-    if (this.mode === 'orbit') { this.orbitYaw = 0; this.orbitPitch = 0.35; }
+    if (this.mode === 'cockpit') {
+      this.orbitYaw = 0;
+      this.orbitPitch = 0;
+    } else {
+      this.orbitYaw = 0;
+      this.orbitPitch = 0.25;
+    }
     this._inited = false;
     return this.mode;
   }
@@ -57,10 +64,9 @@ export class ChaseCam {
     this._lastInteractTime = performance.now();
   }
 
-  // 环绕视角：鼠标增量只转观察角
+  // 鼠标移动控制观察视角（偏航角与俯仰角，全向自由环顾，不干扰飞船航行）
   orbitBy(dxPx, dyPx) {
     this.orbitYaw -= dxPx * 0.005;
-    // 允许几乎垂直全天球环顾（-1.56 ~ 1.56，避免绝对 90° 产生奇异性）
     this.orbitPitch = THREE.MathUtils.clamp(this.orbitPitch + dyPx * 0.005, -1.56, 1.56);
     this.userInteracted = true;
     this._lastInteractTime = performance.now();
@@ -72,7 +78,6 @@ export class ChaseCam {
     const right = new THREE.Vector3();
     const up = new THREE.Vector3();
     this.camera.matrixWorld.extractBasis(right, up, new THREE.Vector3());
-    // 依据视距动态计算每像素的世界空间位移量，拉远时跨度大，拉近时微调精细
     const factor = Math.max(this.followDist, 0.01) * 0.0016;
     this.panOffset.addScaledVector(right, -dxPx * factor);
     this.panOffset.addScaledVector(up, dyPx * factor);
@@ -83,13 +88,22 @@ export class ChaseCam {
   update(dtReal, boost = false) {
     const p = this.probe;
     const px = p.pos[0], py = p.pos[1], pz = p.pos[2];
-    const k = Math.min(1, dtReal * 10); // 跟随平滑系数
+    const k = Math.min(1, dtReal * 12); // 平滑跟随系数
+
     if (this.mode === 'cockpit') {
-      // 眼位 = 船头，朝向 = 飞船前向（含横滚）
-      const f = p.forward(), u = p.up();
+      // 座舱视角：眼位在船头，支持驾驶员在舱内 360° 自由转头环顾窗外星空
+      const f = p.forward(), r = p.right(), u = p.up();
       const eye = [px + f[0] * 0.02, py + f[1] * 0.02, pz + f[2] * 0.02];
       this.camera.position.set(eye[0], eye[1], eye[2]);
-      this._look.set(px + f[0], py + f[1], pz + f[2]);
+
+      // 观察朝向由飞船基底叠加玩家鼠标环顾角决定，机头航向本身不被扰动
+      const cy = Math.cos(this.orbitYaw), sy = Math.sin(this.orbitYaw);
+      const cp = Math.cos(this.orbitPitch), sp = Math.sin(this.orbitPitch);
+      const lx = f[0] * cy * cp + r[0] * sy * cp + u[0] * sp;
+      const ly = f[1] * cy * cp + r[1] * sy * cp + u[1] * sp;
+      const lz = f[2] * cy * cp + r[2] * sy * cp + u[2] * sp;
+
+      this._look.set(eye[0] + lx, eye[1] + ly, eye[2] + lz);
       this.camera.up.set(u[0], u[1], u[2]);
       this.camera.lookAt(this._look);
       this._kickFov(dtReal, boost);
@@ -97,42 +111,24 @@ export class ChaseCam {
       return;
     }
 
-    // 观察中心基准（飞船坐标 + 自由平移偏置）
+    // 观察中心基准（飞船当前坐标 + 自由平移偏置）
     const cx = px + this.panOffset.x;
     const cy = py + this.panOffset.y;
     const cz = pz + this.panOffset.z;
 
-    if (this.mode === 'orbit') {
-      // 以 (cx, cy, cz) 为球心、orbitYaw/Pitch 为球坐标观察
-      const cyaw = Math.cos(this.orbitYaw), syaw = Math.sin(this.orbitYaw);
-      const cpitch = Math.cos(this.orbitPitch), spitch = Math.sin(this.orbitPitch);
-      const eye = [
-        cx + syaw * cpitch * this.followDist,
-        cy + spitch * this.followDist,
-        cz + cyaw * cpitch * this.followDist
-      ];
-      this._smoothTo(eye, k);
-      this._look.set(cx, cy, cz);
-      this.camera.up.set(0, 1, 0);
-      this.camera.lookAt(this._look);
-      this._kickFov(dtReal, false);
-      return;
-    }
-    // chase：眼 = 观察中心 - 前向*followDist + 上*followDist*0.35
-    const f = p.forward(), u = p.up();
+    // 追尾（chase）与环绕（orbit）：相机在以 (cx, cy, cz) 为球心的球面上全向自由环视
+    const cyaw = Math.cos(this.orbitYaw), syaw = Math.sin(this.orbitYaw);
+    const cpitch = Math.cos(this.orbitPitch), spitch = Math.sin(this.orbitPitch);
     const eye = [
-      cx - f[0] * this.followDist + u[0] * this.followDist * 0.35,
-      cy - f[1] * this.followDist + u[1] * this.followDist * 0.35,
-      cz - f[2] * this.followDist + u[2] * this.followDist * 0.35,
+      cx + syaw * cpitch * this.followDist,
+      cy + spitch * this.followDist,
+      cz + cyaw * cpitch * this.followDist
     ];
     this._smoothTo(eye, k);
     this._look.set(cx, cy, cz);
-    // 相机上向量 = 世界上向量与飞船上向量取半：有压杆倾斜感又不晕
-    const hx = u[0], hy = u[1] + 1, hz = u[2];
-    const hl = Math.hypot(hx, hy, hz) || 1;
-    this.camera.up.set(hx / hl, hy / hl, hz / hl);
+    this.camera.up.set(0, 1, 0);
     this.camera.lookAt(this._look);
-    this._kickFov(dtReal, boost);
+    this._kickFov(dtReal, boost && this.mode === 'chase');
   }
 
   _smoothTo(eye, k) {

@@ -224,22 +224,19 @@ function renderFrame(now) {
     if (steer.panX !== 0 || steer.panY !== 0) {
       chaseCam.panBy(steer.panX, steer.panY);
     }
-    // Z / Backspace 键：复位观察焦点回飞船
-    if ((input.keys.has('z') || input.keys.has('backspace')) && chaseCam.panOffset.lengthSq() > 1e-6) {
+    // Z / Backspace 键：复位观察焦点与观察视线回飞船正后方
+    if (input.keys.has('z') || input.keys.has('backspace')) {
       chaseCam.resetPan();
     }
 
-    // 视角旋转控制：环绕模式旋转视角，追踪/座舱模式旋转机头航向
-    const SENS = 0.0042;
-    if (chaseCam.mode === 'orbit') {
+    // 鼠标移动自由旋转观察视角（全向环视，100% 不干扰飞船的机头航向与全自动航行）
+    if (steer.steerX !== 0 || steer.steerY !== 0) {
       chaseCam.orbitBy(steer.steerX, steer.steerY);
-    } else {
-      probe.steer(steer.steerX * SENS, -steer.steerY * SENS);
     }
 
-    // Q/E 横滚（~90°/秒）
+    // Q/E 横滚机翼（~90°/秒）
     const rollIn = (input.keys.has('q') ? 1 : 0) - (input.keys.has('e') ? 1 : 0);
-    if (rollIn !== 0 && chaseCam.mode !== 'orbit') {
+    if (rollIn !== 0) {
       probe.steer(0, 0, rollIn * 1.6 * dtReal);
     }
 
@@ -263,11 +260,16 @@ function renderFrame(now) {
       probe.thrustOn = true;
       flightStatus = '反推制动';
     } else if (manualThrustKeys) {
-      // 玩家手动按键推进：完全按玩家意愿飞行
+      // 玩家手动按键推进：完全按玩家意愿飞行；非环绕模式下机头平滑导向当前视线方向
       probe.thrustOn = true;
       const boostScale = isBoosting ? 2.5 : 1.0;
+      if (chaseCam.mode !== 'orbit') {
+        const camDir = new THREE.Vector3();
+        engine.camera.getWorldDirection(camDir);
+        steerTowardsDir([camDir.x, camDir.y, camDir.z], dtReal, 3.2);
+      }
       probe.step(dtReal, a, boostScale, dtReal);
-      flightStatus = isBoosting ? '加力全开' : '手动推进';
+      flightStatus = isBoosting ? '加力推进' : '手动推进';
     } else {
       // 玩家未按按键：智能自动飞控全自动接管
       const currentSpeed = probe.speedWorldPerS();
