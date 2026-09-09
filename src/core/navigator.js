@@ -12,6 +12,8 @@ export class Navigator {
     this.clock = clock;
     this.world = null;
     this.idx = 0; // 当前层在 CHAIN 中的位置（0=solar…5=cosmos）
+    this.anchors = {};
+    this.diveCandidate = null;
     this.onWorldChanged = null;
     this._busy = false;
     // 自动跃迁冷却：避免在边界处反复跳转
