@@ -1,9 +1,10 @@
 // 主入口：宇宙航行 · 真实物理太空飞行器模拟
 // 装配：渲染引擎 → 世界管理 → 尺度导航 → 动力学飞船 → UI 响应 → 主循环
-// 操作逻辑：
-//   - 手动控制：WASD 前后左右 · Space/C 升降 · Q/E 横滚 · Shift 加力 · X 反推刹车 · 鼠标转向
-//   - 全自动航行：无按键操作时自动接管（选定目标则自动导引飞向目标并泊车，无目标则顺行自由巡航）
-//   - 视角与时间：V 切换追尾/座舱/环绕 · 右键拖拽平移位移 · 滚轮无限缩放 · Z 视角复位 · [ ] 时间倍率 · \ 暂停
+// 操作逻辑（按「操作分类体系」判定，见 core/input.js 的 OP_CATEGORIES）：
+//   - 飞行操控（唯一构成人工干预）：WASD 前后左右 · Space/C 升降 · Q/E 横滚 · Shift 加力 · X 反推刹车
+//   - 全自动航行：无「飞行操控类」操作时自动接管（选定目标则自动导引飞向目标并泊车，无目标则顺行自由巡航）
+//   - 视角与时间（绝不判定为干预）：V 切换追尾/座舱/环绕 · 鼠标环视/右键平移/滚轮缩放 ·
+//     Z 视角复位 · [ ] 时间倍率 · \ 暂停 · R 安全轨道重部署
 import './style.css';
 import * as THREE from 'three';
 import { CosmicEngine } from './render/engine.js';
@@ -231,20 +232,15 @@ function renderFrame(now) {
       chaseCam.orbitBy(steer.steerX, steer.steerY);
     }
 
-    // Q/E 横滚机翼（~90°/秒）
+    // ==========================================================
+    // 统一飞行控制系统（严格仅根据「飞行操控类」操作判断人工干预）
+    // 观察视角调整（鼠标环视/平移/缩放/切视角）、时间流速调整（加速/减速/暂停）、系统复位等 100% 不算干预
+    // ==========================================================
+    const isIntervening = input.isFlightIntervening();
     const rollIn = (input.keys.has('q') ? 1 : 0) - (input.keys.has('e') ? 1 : 0);
-    if (rollIn !== 0) {
-      probe.steer(0, 0, rollIn * 1.6 * dtReal);
-    }
-
-    // ==========================================
-    // 统一飞行控制系统（Unified Flight Control）
-    // 用户操作则听从指令；用户未操作则全自动航行接管
-    // ==========================================
     const manualThrustKeys = a.fwd || a.bwd || a.left || a.right || a.up || a.down;
     const isBraking = input.keys.has('x');
-    const isBoosting = a.boost;
-    const isIntervening = manualThrustKeys || isBraking;
+    const isBoosting = a.boost && manualThrustKeys;
     const maxSp = curWorld.maxSpeedWorldPerS || 5.0;
 
     let autoFwdThrust = false;
@@ -253,10 +249,16 @@ function renderFrame(now) {
     let flightStatus = '';
 
     if (isIntervening) {
-      // 玩家主动键盘干预：若此前有锁定的天体目标，即刻解除锁定，转为玩家当前控制状态
+      // 玩家主动进行「飞行操控类」干预：
+      // 若此前有锁定的天体目标，即刻解除锁定，转为玩家自主控制状态
       if (selected) {
         selected = null;
         ui.hideInfo();
+      }
+
+      // Q/E 机身横滚
+      if (rollIn !== 0) {
+        probe.steer(0, 0, rollIn * 1.6 * dtReal);
       }
 
       if (isBraking) {
@@ -264,7 +266,7 @@ function renderFrame(now) {
         probe.brake(dtReal);
         probe.thrustOn = true;
         flightStatus = '手动干预 · 反推制动';
-      } else {
+      } else if (manualThrustKeys) {
         // 玩家手动按键推进：完全按玩家意愿飞行；按 W 前进时机头平滑导向当前观察视线
         probe.thrustOn = true;
         const boostScale = isBoosting ? 2.5 : 1.0;
@@ -275,15 +277,20 @@ function renderFrame(now) {
         }
         probe.step(dtReal, a, boostScale, dtReal);
         flightStatus = isBoosting ? '手动干预 · 加力推进' : '手动干预 · 推进机动';
+      } else {
+        // 纯姿态控制（如仅按 Q/E 滚转机翼）
+        probe.thrustOn = false;
+        probe.step(dtReal, { fwd: false, bwd: false, left: false, right: false, up: false, down: false }, 0, dtReal);
+        flightStatus = '手动干预 · 姿态滚转';
       }
     } else {
-      // 玩家未按按键：全自动航行接管（干预结束后按当前状态平稳继续航行）
+      // 绝非干预：玩家进行视角环视、平移、缩放、切视角、调时间流速，均由全自动航行接管
       const currentSpeed = probe.speedWorldPerS();
       const f = probe.forward();
       const fwdSpeed = probe.vel[0] * f[0] + probe.vel[1] * f[1] + probe.vel[2] * f[2];
 
       // 机翼平缓回正
-      if (rollIn === 0 && chaseCam.mode !== 'orbit') {
+      if (chaseCam.mode !== 'orbit') {
         probe.steer(0, 0, -probe.roll * Math.min(1, dtReal * 0.8));
       }
 
@@ -353,7 +360,7 @@ function renderFrame(now) {
     ship.visible = chaseCam.mode !== 'cockpit';
     if (ship.visible) {
       syncShip();
-      updateShipFlame(ship, probe.thrustOn ? 1 : 0, isBoosting && manualThrustKeys);
+      updateShipFlame(ship, probe.thrustOn ? 1 : 0, isBoosting);
     }
 
     // 自动 LOD 尺度跃迁检测

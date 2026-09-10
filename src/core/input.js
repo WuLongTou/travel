@@ -1,9 +1,25 @@
-// 键盘/鼠标输入状态（飞船与 UI 共用）
-// 游戏式视角：点击画面锁定指针（Pointer Lock），移动鼠标即转向（俯仰/偏航），
-// ESC 释放；未锁定时保留「按住拖拽」兼容操作。
-// 游戏标准键位：W/S 前进/后退 · A/D 左右平移 · Space/C 上浮/下沉 ·
-// Q/E 左右横滚 · Shift 加力 · X 刹车 · V 切换视角 · G 引力模式 ·
-// H 自动驾驶（选中目标寻的；无目标=旅行者式自由航行） · F 下潜
+// =================================================================
+// 操作分类体系（Operation Categories）
+// 只有 FLIGHT_CONTROL 类别下的操作才被判定为用户正在对飞行器进行人工干预；
+// CAMERA_VIEW、TIME_FLOW、SYSTEM 类别绝不判定为干预，不影响全自动航行。
+// =================================================================
+export const OP_CATEGORIES = {
+  FLIGHT_CONTROL: 'flight_control', // 飞行操控类（推进、平移、升降、滚转、反推制动）-> 属于人工干预
+  CAMERA_VIEW: 'camera_view',       // 观察视角类（鼠标环视、平移、缩放、重置、模式切换）-> 非干预
+  TIME_FLOW: 'time_flow',           // 时间流速类（加速、减速、暂停继续）-> 非干预
+  SYSTEM: 'system',                 // 系统辅助类（安全轨道重置、天体拾取）-> 非干预
+};
+
+// 飞行操控键集（严格仅此类按键触发飞行人工干预）
+export const FLIGHT_CONTROL_KEYS = new Set([
+  'w', 's', 'a', 'd',
+  'arrowup', 'arrowdown', 'arrowleft', 'arrowright',
+  ' ', 'c',          // 垂直升降（Space 上浮 / C 下沉）
+  'q', 'e',          // 机身横滚（Q 左滚 / E 右滚）
+  'x',               // 反推制动刹车
+  'shift',           // 加力推进
+]);
+
 export class Input {
   constructor(canvas) {
     this.canvas = canvas;
@@ -103,5 +119,22 @@ export class Input {
     this.steer.dx = 0; this.steer.dy = 0;
     this.pan.dx = 0; this.pan.dy = 0;
     return { steerX: sd, steerY: sdy, panX: pd, panY: pdy };
+  }
+
+  // 严格仅对「飞行操控类」操作判断用户是否正在进行人工干预
+  isFlightIntervening() {
+    for (const key of FLIGHT_CONTROL_KEYS) {
+      if (this.keys.has(key)) {
+        // 单独按 Shift 且未按下任何方向或平移键时，不判定为飞行干预
+        if (key === 'shift') {
+          const hasThrust = this.keys.has('w') || this.keys.has('s') || this.keys.has('a') || this.keys.has('d') ||
+                            this.keys.has('arrowup') || this.keys.has('arrowdown') || this.keys.has('arrowleft') || this.keys.has('arrowright') ||
+                            this.keys.has(' ') || this.keys.has('c');
+          if (!hasThrust) continue;
+        }
+        return true;
+      }
+    }
+    return false;
   }
 }
