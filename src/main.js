@@ -364,35 +364,181 @@ function renderFrame(now) {
         const targetPos = selected.pos;
         const dToTarget = dist3(probe.pos, targetPos);
         const targetRadius = selected.pickRadius || 0.2;
-        const safeParkDistance = targetRadius * 3.5 + Math.min(chaseCam.followDist * 0.5, 2.0);
 
-        steerTowards(targetPos, dtReal, 1.4);
+        // 泊车物理：泊距必须落在「目标自身引力占优」的范围内（g_own ≥ 2×最强
+        // 第三方井，近似希尔球），泊位轨道才开普勒稳定——行星泊位若悬停在
+        // 太阳井占优区，任何悬停控制器都要与太阳引力对抗，扰动必然积累成坠日
+        const wells = probe._wells();
+        const ownWell = wells.find((w) => w.ref === selected ||
+          (!w.ref && w.center && dist3(w.center, targetPos) <= targetRadius * 1.5));
+        let safeParkDistance = targetRadius * 3.5 + Math.min(chaseCam.followDist * 0.5, 2.0);
+        if (ownWell && ownWell.GM > 0) {
+          let gOther = 0;
+          for (const w of wells) {
+            if (w === ownWell) continue;
+            const c = w.ref ? w.ref.pos : w.center;
+            const r = dist3(targetPos, c) || 1e-6;
+            gOther = Math.max(gOther, w.GM / (r * r));
+          }
+          const maxOrbitD = Math.sqrt(ownWell.GM / (2 * gOther));
+          safeParkDistance = Math.max(targetRadius * 1.8, Math.min(safeParkDistance, maxOrbitD));
+        }
 
-        if (dToTarget <= safeParkDistance) {
-          // 抵达目标安全泊车区：自动反推减速入轨停泊
-          // 滞环：速度阈值与重新加速阈值分离，避免泊位附近加减速抖振
-          if (currentSpeed > maxSp * 0.06) {
-            autoBrake = true;
-            flightStatus = `抵达泊位 · 制动伴飞 ${selected.name}`;
-          } else if (dToTarget > safeParkDistance * 0.9) {
-            // 目标公转逐渐远离：微推跟住，保持伴飞
+        // 最强井（按引力加速度而非井心距离——行星泊位处最近的是行星井，
+        // 最强的可能是太阳井），供安全包线与驻点方案使用
+        let well = null, wellC = null, wellG = 0;
+        for (const w of wells) {
+          const c = w.ref ? w.ref.pos : w.center;
+          const r = dist3(probe.pos, c) || 1e-6;
+          const g = w.GM / (r * r);
+          if (g > wellG) { wellG = g; well = w; wellC = c; }
+        }
+        const inTargetWell = !!(ownWell && well === ownWell);
+        // 驻点置于占优边界外侧：船处在第三方井主导区（目标自身井不占优或无井）
+        // 时，背井驻点悬停接应（PD 回归 + 引力抵消 + 全速度阻尼 + 目标斥力），
+        // 防止向目标过冲后直坠第三方井；一旦进入目标自身井占优区，驻点消失，
+        // 交由已验证的自由轨道防坠/伴飞路径
+        const bandMid = safeParkDistance * 1.3;
+        let station = null;
+        if (!inTargetWell && wellC) {
+          const sx = targetPos[0] - wellC[0], sy = targetPos[1] - wellC[1], sz = targetPos[2] - wellC[2];
+          const sl = Math.hypot(sx, sy, sz) || 1;
+          station = [
+            targetPos[0] + sx / sl * bandMid,
+            targetPos[1] + sy / sl * bandMid,
+            targetPos[2] + sz / sl * bandMid,
+          ];
+        }
+
+        // 导航基准点与沿基准点的接近速度（转向滞后时前向速度分量失真，油门判定
+        // 必须用接近速度，防「追踪转向+向心推力」自锁成动力环绕极限环）
+        const navPos = station || targetPos;
+        const dNav = station ? dist3(probe.pos, navPos) : dToTarget;
+        const nlx = (navPos[0] - probe.pos[0]) / dNav;
+        const nly = (navPos[1] - probe.pos[1]) / dNav;
+        const nlz = (navPos[2] - probe.pos[2]) / dNav;
+        const vClose = probe.vel[0] * nlx + probe.vel[1] * nly + probe.vel[2] * nlz;
+        const closingIn = vClose; // 坠向导航点的速度
+        // 目标本体方向单位向量（伴飞/斥力仍相对目标）
+        const rlx = (targetPos[0] - probe.pos[0]) / dToTarget;
+        const rly = (targetPos[1] - probe.pos[1]) / dToTarget;
+        const rlz = (targetPos[2] - probe.pos[2]) / dToTarget;
+
+        // 引力井安全包线（最高优先级）：向最强井俯冲时无条件全推力反井心拉起。
+        // 触发按制动需求距离判定——当前向井速度需要的停止距离一旦吃掉井面余量，
+        // 立即拉起（固定半径要么太晚要么误伤正常伴飞）
+        const acc = curWorld.thrustAccWorldPerS2 || 1.2;
+        let guardPull = false;
+        let gwr = Infinity, vWell = 0, safeR = 0.4;
+        if (well && wellC && well.GM > 0) {
+          safeR = well.minR || 0.4;
+          gwr = dist3(probe.pos, wellC) || 1e-6;
+          vWell = ((probe.pos[0] - wellC[0]) * probe.vel[0] + (probe.pos[1] - wellC[1]) * probe.vel[1] + (probe.pos[2] - wellC[2]) * probe.vel[2]) / gwr;
+          const vIn = Math.max(0, -vWell);
+          const aBrake = Math.max(0.15, acc - wellG);
+          const need = vIn * vIn / (2 * aBrake);
+          if (gwr - safeR < need + safeR * 0.5) {
+            steerTowardsDir([(probe.pos[0] - wellC[0]) / gwr, (probe.pos[1] - wellC[1]) / gwr, (probe.pos[2] - wellC[2]) / gwr], dtReal, 2.2);
             autoFwdThrust = true;
-            autoThrustScale = 0.12;
-            flightStatus = `安全伴飞 · 跟随 ${selected.name}`;
+            autoThrustScale = 1.0;
+            flightStatus = `防井坠毁 · 拉起 (${well.name})`;
+            guardPull = true;
+          }
+        }
+
+        if (!guardPull) {
+          // 泊位/悬停区判定：2 倍泊距圈（自身井目标在圈内做防坠/轨道收拢，
+          // 圈外由带反井心分量的巡航接管——占优边界/固定大倍数圈都会让进场
+          // 刹车或收拢刹车误伤合法的巡航/转移速度）；无自身井目标用驻点悬停圈
+          const inParkZone = station ? dToTarget <= safeParkDistance * 2 : dNav <= safeParkDistance * 2;
+          if (inParkZone) {
+            // 抵达泊位/驻位区：伴飞/悬停（各分支独占转向权，防坠的反向转向
+            // 若与对准转向叠加会互相抵消，机头永远调不离目标）
+            if (!station && closingIn > 0.06 * maxSp && dToTarget > safeParkDistance * 0.55) {
+              // 进场末段快速接近：反推刹车吸能。仅限泊位外半区——深处刹车会杀掉
+              // 切向轨道动量，近心点逐圈降低形成衰变螺旋直至撞毁
+              steerTowards(targetPos, dtReal, 1.4);
+              autoBrake = true;
+              flightStatus = `抵达泊位 · 制动伴飞 ${selected.name}`;
+            } else if (station) {
+              // 驻点悬停伴飞：驻点 PD 回归 + 全速度阻尼 + 反井心引力抵消 +
+              // 目标斥力（防 PD 直线穿越目标天体）
+              let ax = 0, ay = 0, az = 0;
+              const px = station[0] - probe.pos[0], py = station[1] - probe.pos[1], pz = station[2] - probe.pos[2];
+              const pd = Math.hypot(px, py, pz) || 1e-6;
+              const pdPull = Math.min(pd, 1) * 0.8;
+              ax += px / pd * pdPull; ay += py / pd * pdPull; az += pz / pd * pdPull;
+              ax -= probe.vel[0] * 0.8; ay -= probe.vel[1] * 0.8; az -= probe.vel[2] * 0.8;
+              const wx = probe.pos[0] - wellC[0], wy = probe.pos[1] - wellC[1], wz = probe.pos[2] - wellC[2];
+              const wr = Math.hypot(wx, wy, wz) || 1e-6;
+              const g = well.GM / (wr * wr);
+              ax += wx / wr * g; ay += wy / wr * g; az += wz / wr * g;
+              const rep = Math.max(0, safeParkDistance * 0.8 - dToTarget) * 3;
+              ax += rlx * rep; ay += rly * rep; az += rlz * rep;
+              const aMag = Math.hypot(ax, ay, az);
+              if (aMag > acc * 0.03) {
+                steerTowardsDir([ax, ay, az], dtReal, 1.4);
+                autoFwdThrust = true;
+                autoThrustScale = Math.min(1.0, aMag / acc);
+                flightStatus = aMag > acc ? `伴飞防坠 · 退避 ${selected.name}` : `安全伴飞 · 悬停 ${selected.name}`;
+              } else {
+                steerTowards(targetPos, dtReal, 1.4);
+                flightStatus = `安全伴飞 · ${selected.name}`;
+              }
+            } else if (closingIn > 0.02 * maxSp || (dToTarget < safeParkDistance * 0.55 && closingIn > -0.02 * maxSp)) {
+              // 目标自身井内防坠退避：低速悬停会坠向天体，机头调离目标反向撑住
+              // （若已明显远离则放行，交由跟随分支收回）
+              steerTowardsDir([-rlx, -rly, -rlz], dtReal, 1.4);
+              autoFwdThrust = true;
+              autoThrustScale = Math.min(1.0, closingIn / (maxSp * 0.2) + 0.3);
+              flightStatus = `伴飞防坠 · 退避 ${selected.name}`;
+            } else if (ownWell && ownWell.GM > 0 && currentSpeed > 1.3 * Math.sqrt(ownWell.GM / Math.max(dToTarget, 1e-6))) {
+              // 轨道收拢：偏心轨道远地点速度超过当地圆轨道速度 1.5 倍即泄速，
+              // 逐圈压低远心点，把松散椭圆收拢进泊位圈（否则远地点漂出目标
+              // 引力占优区后被第三方井甩回，近心点逐圈衰减直至撞毁）
+              steerTowards(targetPos, dtReal, 1.4);
+              autoBrake = true;
+              flightStatus = `抵达泊位 · 制动伴飞 ${selected.name}`;
+            } else if (dToTarget > safeParkDistance * 0.9) {
+              // 目标公转逐渐远离：微推跟住，保持伴飞
+              steerTowards(targetPos, dtReal, 1.4);
+              autoFwdThrust = true;
+              autoThrustScale = 0.12;
+              flightStatus = `安全伴飞 · 跟随 ${selected.name}`;
+            } else {
+              steerTowards(targetPos, dtReal, 1.4);
+              flightStatus = `安全伴飞 · ${selected.name}`;
+            }
           } else {
-            flightStatus = `安全伴飞 · ${selected.name}`;
+            // 巡航飞向导航点：制动能量曲线约束总速度（防过冲/防极限环，系数 0.45
+            // 保留一半以上制动裕量——向站区边缘的到达速度必须可被悬停 PD 吸收），
+            // 并受主导井安全速度约束——向井一侧按到井面余量的制动能量限速，
+            // 从源头杜绝以巡航速度向井俯冲（包线拉起只作异常兜底）。
+            // 期望方向混入反井心分量（按最强井引力权重）——机头指向目标的纯追踪
+            // 没有侧向分量抵消第三方引力拖拽，会形成绕目标的动力环绕极限环
+            let ax = nlx, ay = nly, az = nlz;
+            if (well && wellC && well.GM > 0 && well !== ownWell) {
+              const gw = Math.min(1.2, wellG / acc) * 1.1;
+              ax += (probe.pos[0] - wellC[0]) / gwr * gw;
+              ay += (probe.pos[1] - wellC[1]) / gwr * gw;
+              az += (probe.pos[2] - wellC[2]) / gwr * gw;
+            }
+            const al = Math.hypot(ax, ay, az) || 1;
+            steerTowardsDir([ax / al, ay / al, az / al], dtReal, 1.4);
+            const approachSpeed = Math.sqrt(Math.max(0, 2 * acc * (dNav - (station ? bandMid : safeParkDistance)))) * (station ? 0.35 : 0.45);
+            const wellSafe = well && wellC && well.GM > 0
+              ? Math.max(0.25, Math.sqrt(Math.max(0, 2 * acc * 0.8 * Math.max(0, gwr - safeR * 2.5))))
+              : Infinity;
+            const desiredSpeed = Math.min(maxSp * 0.8, Math.max(0.15 * maxSp, approachSpeed), wellSafe);
+            if (vClose > desiredSpeed * 1.15 || currentSpeed > desiredSpeed ||
+                (station && dToTarget < safeParkDistance * 0.8 && closingIn > 0.02 * maxSp)) {
+              autoBrake = true;
+            } else if (vClose < desiredSpeed) {
+              autoFwdThrust = true;
+              autoThrustScale = Math.min(1.0, (desiredSpeed - vClose) / (maxSp * 0.3));
+            }
+            flightStatus = `自动导向 · ${selected.name}`;
           }
-        } else {
-          // 巡航飞向目标：根据距离与限速智能匹配油门（含逼近速度约束，防过冲）
-          const approachSpeed = Math.sqrt(Math.max(0, 2 * (curWorld.thrustAccWorldPerS2 || 1.2) * (dToTarget - safeParkDistance))) * 0.9;
-          const desiredSpeed = Math.min(maxSp * 0.8, Math.max(0.15 * maxSp, approachSpeed));
-          if (fwdSpeed < desiredSpeed) {
-            autoFwdThrust = true;
-            autoThrustScale = Math.min(1.0, (desiredSpeed - fwdSpeed) / (maxSp * 0.3));
-          } else if (fwdSpeed > desiredSpeed * 1.15) {
-            autoBrake = true;
-          }
-          flightStatus = `自动导向 · ${selected.name}`;
         }
       } else {
         // 【自由全自动航行】：引力井内自动维持稳定轨道巡航，无井则惯性直线
