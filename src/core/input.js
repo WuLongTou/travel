@@ -114,6 +114,8 @@ export class Input {
     a.down = this.keys.has('c');
     a.dive = this.keys.has('f');
     a.boost = this.keys.has('shift');
+    a.rollL = this.keys.has('q');
+    a.rollR = this.keys.has('e');
     const sd = this.steer.dx, sdy = this.steer.dy;
     const pd = this.pan.dx, pdy = this.pan.dy;
     this.steer.dx = 0; this.steer.dy = 0;
@@ -136,5 +138,12 @@ export class Input {
       }
     }
     return false;
+  }
+
+  // 是否存在「实际改变运动状态」的推进/刹车输入（纯横滚 Q/E 不算——用于决定是否解除目标锁定）
+  hasThrustInput() {
+    return this.keys.has('w') || this.keys.has('s') || this.keys.has('a') || this.keys.has('d') ||
+           this.keys.has('arrowup') || this.keys.has('arrowdown') || this.keys.has('arrowleft') || this.keys.has('arrowright') ||
+           this.keys.has(' ') || this.keys.has('c') || this.keys.has('x');
   }
 }

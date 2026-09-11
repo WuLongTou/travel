@@ -15,6 +15,7 @@ export class Navigator {
     this.anchors = {};
     this.diveCandidate = null;
     this.onWorldChanged = null;
+    this.onBeforeWorldChange = null; // 跃迁前回调：调用方清理指向旧世界的状态（如目标锁定）
     this._busy = false;
     // 自动跃迁冷却：避免在边界处反复跳转
     this._autoCooldown = 0;
@@ -27,6 +28,7 @@ export class Navigator {
     if (idx === undefined) throw new Error('未注册世界: ' + worldId);
     if (this.world) {
       this.anchors[this.world.id] = { pos: this.probe.pos.slice(), dist: this.engine.chaseCam.followDist };
+      if (this.onBeforeWorldChange) this.onBeforeWorldChange(this.world);
     }
     const world = await worldFactories[worldId]();
     const prevAnchor = this.anchors[worldId];

@@ -1,10 +1,12 @@
 // 主入口：宇宙航行 · 真实物理太空飞行器模拟
 // 装配：渲染引擎 → 世界管理 → 尺度导航 → 动力学飞船 → UI 响应 → 主循环
-// 操作逻辑（按「操作分类体系」判定，见 core/input.js 的 OP_CATEGORIES）：
-//   - 飞行操控（唯一构成人工干预）：WASD 前后左右 · Space/C 升降 · Q/E 横滚 · Shift 加力 · X 反推刹车
-//   - 全自动航行：无「飞行操控类」操作时自动接管（选定目标则自动导引飞向目标并泊车，无目标则顺行自由巡航）
-//   - 视角与时间（绝不判定为干预）：V 切换追尾/座舱/环绕 · 鼠标环视/右键平移/滚轮缩放 ·
-//     Z 视角复位 · [ ] 时间倍率 · \ 暂停 · R 安全轨道重部署
+// 三种控制模式（MODE_*）：
+//   - AUTO（默认）：飞船全自动飞行（点选天体自动导向泊车；无目标引力井内自动入轨巡航），
+//     鼠标只管环视/缩放/时间，随时按飞行键接管
+//   - GOD（G 键切换）：上帝视角——相机脱离飞船自由浏览（WASD 移动/Space·C 或 Q/E 升降/
+//     鼠标转向/滚轮调速/Shift 加速），飞船在背景中继续全自动飞行，再按 G 返回飞船
+//   - MANUAL：按下飞行操控键期间人工干预飞船轨迹，松手自动回 AUTO
+// 视角与时间：V 切换追尾/座舱/环绕 · Z 视角复位 · [ ] 时间倍率 · \ 暂停 · R 安全轨道重部署
 import './style.css';
 import * as THREE from 'three';
 import { CosmicEngine } from './render/engine.js';
@@ -23,6 +25,7 @@ import './content/world-super.js';
 import './content/world-cosmos.js';
 import { formatKm, lightTravelText, unitRulerText, C_KM_S } from './util/units.js';
 import { ChaseCam, VIEW_NAMES } from './render/camera.js';
+import { FreeCam } from './render/freecam.js';
 import { updateLabelFades } from './render/labels.js';
 import { TrailRibbon } from './render/trail.js';
 import { makeShip, updateShipFlame } from './render/ship.js';
@@ -47,17 +50,51 @@ const _m4 = new THREE.Matrix4();
 const _ndc = new THREE.Vector3();
 
 const input = new Input(canvas);
+const freeCam = new FreeCam(engine.camera);
 let curTimeIdx = 0;
+
+// 控制模式状态机
+const MODE_AUTO = 'auto'; // 全自动飞行（默认）
+const MODE_MANUAL = 'manual'; // 人工干预（按住飞行键期间）
+const MODE_GOD = 'god'; // 上帝视角（相机脱离飞船，飞船继续自动飞）
+let controlMode = MODE_AUTO;
 
 let curWorld = null;
 let selected = null; // 当前选中的目标天体
 let hoveredId = null;
+
+function clearSelection() {
+  selected = null;
+  ui.hideInfo();
+}
+
+function enterGodMode() {
+  if (controlMode === MODE_GOD) return;
+  controlMode = MODE_GOD;
+  // 从当前相机位置无缝接管；按当前跟拍距离校准移动速度尺度
+  freeCam.enter(Math.max(chaseCam.followDist, curWorld ? curWorld.worldRadius * 0.01 : 0.1));
+}
+
+function exitGodMode() {
+  if (controlMode !== MODE_GOD) return;
+  controlMode = MODE_AUTO;
+  freeCam.exit();
+  // 相机回到飞船追尾位置
+  chaseCam.resetPan();
+  chaseCam._inited = false;
+}
 
 const ui = new UI(engine, {
   onNav: (wid) => nav.enter(wid),
   onDiveTo: (entity) => nav.diveInto(entity),
   onInfoClose: () => { selected = null; },
 });
+
+// 跃迁前清理指向旧世界实体的目标锁定（防止自动飞控追逐幽灵目标）
+nav.onBeforeWorldChange = () => {
+  clearSelection();
+  if (controlMode === MODE_GOD) exitGodMode();
+};
 
 nav.onWorldChanged = (world, idx) => {
   curWorld = world;
@@ -80,6 +117,7 @@ let prevV = false;
 let prevBracketL = false;
 let prevBracketR = false;
 let prevBackslash = false;
+let prevG = false;
 
 // 有限角速度平滑转向给定三维方向向量
 function steerTowardsDir(dir, dtReal, maxTurn = 1.2) {
@@ -218,30 +256,53 @@ function renderFrame(now) {
   prevBackslash = bsDown;
 
   if (curWorld) {
-    // 鼠标右键/中键拖拽：屏幕平面的自由平移位移（Pan）
-    if (steer.panX !== 0 || steer.panY !== 0) {
-      chaseCam.panBy(steer.panX, steer.panY);
+    // G 键（边沿触发）：上帝视角 ⇄ 返回飞船
+    const gDown = input.keys.has('g');
+    if (gDown && !prevG) {
+      if (controlMode === MODE_GOD) exitGodMode();
+      else enterGodMode();
     }
-    // Z / Backspace 键：复位观察焦点与观察视线回飞船正后方
-    if (input.keys.has('z') || input.keys.has('backspace')) {
-      chaseCam.resetPan();
-    }
+    prevG = gDown;
 
-    // 鼠标移动自由旋转观察视角（全向环视，100% 不干扰飞船的机头航向与全自动航行）
-    if (steer.steerX !== 0 || steer.steerY !== 0) {
-      chaseCam.orbitBy(steer.steerX, steer.steerY);
+    if (controlMode === MODE_GOD) {
+      // ===== 上帝视角：相机自由浏览，飞船在背景中继续全自动飞行 =====
+      if (steer.steerX !== 0 || steer.steerY !== 0) {
+        freeCam.lookBy(steer.steerX, steer.steerY);
+      }
+      // WASD 移动相机，Space/C 或 Q/E 升降，Shift 加速
+      freeCam.update(dtReal, {
+        fwd: a.fwd, bwd: a.bwd, left: a.left, right: a.right,
+        up: a.up || a.rollL, down: a.down || a.rollR, boost: a.boost,
+      });
+    } else {
+      // 鼠标右键/中键拖拽：屏幕平面的自由平移位移（Pan）
+      if (steer.panX !== 0 || steer.panY !== 0) {
+        chaseCam.panBy(steer.panX, steer.panY);
+      }
+      // Z / Backspace 键：复位观察焦点与观察视线回飞船正后方
+      if (input.keys.has('z') || input.keys.has('backspace')) {
+        chaseCam.resetPan();
+      }
+
+      // 鼠标移动自由旋转观察视角（全向环视，100% 不干扰飞船的机头航向与全自动航行）
+      if (steer.steerX !== 0 || steer.steerY !== 0) {
+        chaseCam.orbitBy(steer.steerX, steer.steerY);
+      }
     }
 
     // ==========================================================
     // 统一飞行控制系统（严格仅根据「飞行操控类」操作判断人工干预）
     // 观察视角调整（鼠标环视/平移/缩放/切视角）、时间流速调整（加速/减速/暂停）、系统复位等 100% 不算干预
     // ==========================================================
-    const isIntervening = input.isFlightIntervening();
+    // 上帝视角下飞行键用于移动相机，绝不干预飞船
+    const isIntervening = controlMode !== MODE_GOD && input.isFlightIntervening();
     const rollIn = (input.keys.has('q') ? 1 : 0) - (input.keys.has('e') ? 1 : 0);
     const manualThrustKeys = a.fwd || a.bwd || a.left || a.right || a.up || a.down;
     const isBraking = input.keys.has('x');
-    const isBoosting = a.boost && manualThrustKeys;
+    // 上帝视角下 Shift 加速只作用于相机移动，绝不让背景中的飞船尾焰呈现加力
+    const isBoosting = controlMode !== MODE_GOD && a.boost && manualThrustKeys;
     const maxSp = curWorld.maxSpeedWorldPerS || 5.0;
+    controlMode = isIntervening ? MODE_MANUAL : (controlMode === MODE_MANUAL ? MODE_AUTO : controlMode);
 
     let autoFwdThrust = false;
     let autoThrustScale = 1.0;
@@ -250,10 +311,9 @@ function renderFrame(now) {
 
     if (isIntervening) {
       // 玩家主动进行「飞行操控类」干预：
-      // 若此前有锁定的天体目标，即刻解除锁定，转为玩家自主控制状态
-      if (selected) {
-        selected = null;
-        ui.hideInfo();
+      // 仅当存在实际推进/刹车输入时才解除目标锁定（纯 Q/E 横滚保持锁定）
+      if (selected && input.hasThrustInput()) {
+        clearSelection();
       }
 
       // Q/E 机身横滚
@@ -284,7 +344,7 @@ function renderFrame(now) {
         flightStatus = '手动干预 · 姿态滚转';
       }
     } else {
-      // 绝非干预：玩家进行视角环视、平移、缩放、切视角、调时间流速，均由全自动航行接管
+      // 全自动航行（AUTO；上帝视角下飞船同样在此分支自动飞行）
       const currentSpeed = probe.speedWorldPerS();
       const f = probe.forward();
       const fwdSpeed = probe.vel[0] * f[0] + probe.vel[1] * f[1] + probe.vel[2] * f[2];
@@ -292,6 +352,11 @@ function renderFrame(now) {
       // 机翼平缓回正
       if (chaseCam.mode !== 'orbit') {
         probe.steer(0, 0, -probe.roll * Math.min(1, dtReal * 0.8));
+      }
+
+      // 目标有效性守卫：锁定实体必须仍属于当前世界（防跨层幽灵目标）
+      if (selected && !curWorld.entities.includes(selected)) {
+        clearSelection();
       }
 
       if (selected) {
@@ -305,38 +370,65 @@ function renderFrame(now) {
 
         if (dToTarget <= safeParkDistance) {
           // 抵达目标安全泊车区：自动反推减速入轨停泊
-          if (currentSpeed > maxSp * 0.05) {
+          // 滞环：速度阈值与重新加速阈值分离，避免泊位附近加减速抖振
+          if (currentSpeed > maxSp * 0.06) {
             autoBrake = true;
             flightStatus = `抵达泊位 · 制动伴飞 ${selected.name}`;
+          } else if (dToTarget > safeParkDistance * 0.9) {
+            // 目标公转逐渐远离：微推跟住，保持伴飞
+            autoFwdThrust = true;
+            autoThrustScale = 0.12;
+            flightStatus = `安全伴飞 · 跟随 ${selected.name}`;
           } else {
             flightStatus = `安全伴飞 · ${selected.name}`;
           }
         } else {
-          // 巡航飞向目标：根据距离与限速智能匹配油门
-          const desiredSpeed = Math.min(maxSp * 0.8, Math.max(0.4 * maxSp, (dToTarget - safeParkDistance) * 0.5));
+          // 巡航飞向目标：根据距离与限速智能匹配油门（含逼近速度约束，防过冲）
+          const approachSpeed = Math.sqrt(Math.max(0, 2 * (curWorld.thrustAccWorldPerS2 || 1.2) * (dToTarget - safeParkDistance))) * 0.9;
+          const desiredSpeed = Math.min(maxSp * 0.8, Math.max(0.15 * maxSp, approachSpeed));
           if (fwdSpeed < desiredSpeed) {
             autoFwdThrust = true;
             autoThrustScale = Math.min(1.0, (desiredSpeed - fwdSpeed) / (maxSp * 0.3));
-          } else if (fwdSpeed > desiredSpeed * 1.25) {
+          } else if (fwdSpeed > desiredSpeed * 1.15) {
             autoBrake = true;
           }
           flightStatus = `自动导向 · ${selected.name}`;
         }
       } else {
-        // 【自由全自动航行】：保持干预结束后的当前航向继续自动飞行
-        if (currentSpeed < 0.05) {
-          // 若玩家刚才将飞船彻底刹停至静止，保持在当前空间悬停停泊
+        // 【自由全自动航行】：引力井内自动维持稳定轨道巡航，无井则惯性直线
+        const well = probe.dominantWell;
+        if (well && well.GM > 0) {
+          const c = well.ref ? well.ref.pos : well.center;
+          const dx = probe.pos[0] - c[0], dy = probe.pos[1] - c[1], dz = probe.pos[2] - c[2];
+          const r = Math.hypot(dx, dy, dz) || 1;
+          const vCirc = Math.sqrt(well.GM / r); // 当前高度圆轨道速度
+          const radialSpeed = (probe.vel[0] * dx + probe.vel[1] * dy + probe.vel[2] * dz) / r;
+
+          if (currentSpeed < 0.02 * maxSp && Math.abs(radialSpeed) < 0.02 * maxSp) {
+            // 玩家主动刹停：保持空间停泊，不自动重启引擎
+            flightStatus = `全自动接管 · 空间停泊 (${well.name}引力井)`;
+          } else if (currentSpeed > vCirc * 1.6) {
+            // 明显超速（趋于逃逸）：不再补推，交由引力自然弯转航道；HUD 如实显示
+            flightStatus = `全自动航行 · 引力滑行 (${well.name})`;
+          } else if (currentSpeed < vCirc * 0.7 && radialSpeed < 0) {
+            // 低速且正在下坠：切向补推恢复轨道
+            autoFwdThrust = true;
+            autoThrustScale = Math.min(0.6, (vCirc - currentSpeed) / (maxSp * 0.2) + 0.1);
+            flightStatus = `全自动航行 · 轨道保持 (${well.name})`;
+          } else {
+            flightStatus = `全自动航行 · 轨道巡航 (${well.name})`;
+          }
+        } else if (currentSpeed < 0.02 * maxSp) {
+          // 无引力井且静止：保持停泊
           flightStatus = '全自动接管 · 空间停泊';
         } else {
-          // 沿干预结束时的机头航向恒速巡航推进
-          const cruiseSpeed = maxSp * 0.5;
-          if (fwdSpeed < cruiseSpeed) {
-            // 前向微推补偿，平稳加速至巡航速度，推力自然牵引速度矢量收敛对齐机头
+          // 无引力井：沿当前航向惯性巡航，低速时轻微补推至巡游速度
+          const cruiseSpeed = maxSp * 0.35;
+          if (fwdSpeed < cruiseSpeed * 0.6) {
             autoFwdThrust = true;
             autoThrustScale = Math.min(1.0, Math.max(0.15, (cruiseSpeed - fwdSpeed) / (maxSp * 0.25)));
             flightStatus = '全自动航行 · 巡航推进 (保持航向)';
           } else {
-            // 已达巡航速度或以上，依靠惯性与真实引力自然航行
             flightStatus = '全自动航行 · 惯性巡航 (保持航向)';
           }
         }
@@ -389,8 +481,9 @@ function renderFrame(now) {
       distText = `${showEnt.name} · ${formatKm(dkm)} · 光 ${lightTravelText(dkm)}`;
     }
 
-    const viewName = VIEW_NAMES[chaseCam.mode] || '';
-    let modeText = `${flightStatus} · ${viewName}`;
+    const viewName = controlMode === MODE_GOD ? '上帝视角' : (VIEW_NAMES[chaseCam.mode] || '');
+    const godSpeed = controlMode === MODE_GOD ? ` · 移速 ${freeCam.speed.toPrecision(2)} u/s` : '';
+    let modeText = `${flightStatus} · ${viewName}${godSpeed}`;
 
     // 真实开普勒轨道能量判定与引力状态
     if (probe.dominantWell) {
@@ -401,7 +494,7 @@ function renderFrame(now) {
       // 比机械能 E = v^2/2 - GM/r
       const energy = speedSq / 2 - well.GM / r;
       const orbitState = energy < 0 ? '束缚轨道' : '逃逸轨道';
-      modeText = `${flightStatus} · ${well.name} (${orbitState}) · ${viewName}`;
+      modeText = `${flightStatus} · ${well.name} (${orbitState}) · ${viewName}${godSpeed}`;
     }
 
     // 真实物理碰撞损毁提示（发生撞击后高亮反馈）
@@ -415,7 +508,10 @@ function renderFrame(now) {
     ui.setTimeHud({ clockLabel: clock.timeLabel(), rateLabel });
   }
 
-  chaseCam.update(dtReal, a.boost && probe.thrustOn);
+  // 上帝视角下相机由 FreeCam 全权控制，跳过追尾相机更新
+  if (controlMode !== MODE_GOD) {
+    chaseCam.update(dtReal, a.boost && probe.thrustOn);
+  }
   trailRibbon.update(probe);
 
   if (curWorld) {
@@ -444,10 +540,14 @@ canvas.addEventListener('click', (ev) => {
   }
 });
 
-// 滚轮：无限变焦缩放
+// 滚轮：上帝视角调节相机移动速度档位；其余视角为跟拍距离缩放
 canvas.addEventListener('wheel', (ev) => {
   ev.preventDefault();
-  chaseCam.zoomBy(ev.deltaY > 0 ? 1.12 : 0.89);
+  if (controlMode === MODE_GOD) {
+    freeCam.adjustSpeed(ev.deltaY > 0 ? 0.8 : 1.25);
+  } else {
+    chaseCam.zoomBy(ev.deltaY > 0 ? 1.12 : 0.89);
+  }
 }, { passive: false });
 
 // 双击画布：快速复位相机焦点回飞船中心
