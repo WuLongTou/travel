@@ -807,6 +807,7 @@ window.__universe = { engine, probe, clock, nav, ui, input, chaseCam, ship,
   get world() { return nav.world; },
   get selected() { return selected; },
   get tour() { return tour; },
+  get controlMode() { return controlMode; },
   select(id) {
     const e = nav.world?.entities.find((x) => x.id === id);
     if (e) { selected = e; ui.showInfo(e); }
