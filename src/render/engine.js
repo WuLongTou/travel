@@ -10,14 +10,16 @@ import { buildAmbient } from './background.js';
 
 export class CosmicEngine {
   constructor(canvas) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    // 对数深度缓冲：真实尺度宇宙要求 1e-7 AU（万 km 级特写）到 1e7 AU
+    // 宏观视野连续覆盖，普通深度缓冲精度无法支撑
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', logarithmicDepthBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x000005);
     const w = window.innerWidth, h = window.innerHeight;
-    this.camera = new THREE.PerspectiveCamera(60, w/h, 0.01, 5e6);
+    this.camera = new THREE.PerspectiveCamera(60, w / h, 1e-7, 2e7);
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     const bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.35, 0.7, 0.55);

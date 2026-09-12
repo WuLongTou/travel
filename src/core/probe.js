@@ -30,14 +30,15 @@ export class Probe {
     this.dominantWell = null;
     this.crashEvent = null;
 
-    // 出生时自动注入稳定的切向初速度（第一宇宙速度），防止静止垂直坠入太阳/引力中心
+    // 出生时自动注入稳定的切向初速度（当地第一宇宙速度）+ 母体公转速度，
+    // 防止静止垂直坠入引力中心；在地球边出生即真实携带地球 29.8 km/s 公转
     const wells = this._wells();
     if (wells.length) {
       let best = null, bestR = Infinity;
       for (const w of wells) {
         const c = w.ref ? w.ref.pos : w.center;
         const r = Math.hypot(this.pos[0] - c[0], this.pos[1] - c[1], this.pos[2] - c[2]) || 1;
-        if (r < bestR) { bestR = r; best = { c, GM: w.GM }; }
+        if (r < bestR) { bestR = r; best = { c, GM: w.GM, ref: w.ref }; }
       }
       if (best && best.GM > 0) {
         // 圆轨道速度 v = sqrt(GM / r)
@@ -45,7 +46,8 @@ export class Probe {
         const dx = this.pos[0] - best.c[0], dy = this.pos[1] - best.c[1], dz = this.pos[2] - best.c[2];
         let tx = dz, ty = 0, tz = -dx;
         const tl = Math.hypot(tx, ty, tz) || 1;
-        this.vel = [tx / tl * v, ty / tl * v, tz / tl * v];
+        const host = best.ref && best.ref.vel ? best.ref.vel : [0, 0, 0];
+        this.vel = [tx / tl * v + host[0], ty / tl * v + host[1], tz / tl * v + host[2]];
         const sp = Math.hypot(this.vel[0], this.vel[1], this.vel[2]);
         if (sp > 1e-4) {
           this.yaw = Math.atan2(-this.vel[0], -this.vel[2]);
@@ -74,19 +76,25 @@ export class Probe {
     }
     const c = well.ref ? well.ref.pos : well.center;
     const minR = well.minR || 0.45;
-    // 部署在 2.5 ~ 3.5 倍天体物理半径的安全轨道
-    const safeR = minR * 3.0;
+    // 部署半径取两者较大：3 倍天体半径的安全轨道 / 引力可被推力对抗的
+    // 最低轨道（g ≤ 0.5×推力）——真实 GM 下深井内引力远超推力（太阳
+    // 3 倍半径处为推力 50 倍），部署在那里推力无法改出轨道，必然复坠
+    const safeR = Math.max(
+      minR * 3.0,
+      this.world?.thrustAccWorldPerS2 > 0 ? Math.sqrt(well.GM / (this.world.thrustAccWorldPerS2 * 0.5)) : 0,
+    );
     const dx = this.pos[0] - c[0], dy = this.pos[1] - c[1], dz = this.pos[2] - c[2];
     let dl = Math.hypot(dx, dy, dz) || 1;
     let nx = dx / dl, ny = dy / dl, nz = dz / dl;
     if (dl < 1e-4) { nx = 1; ny = 0; nz = 0; }
     this.pos = [c[0] + nx * safeR, c[1] + ny * safeR, c[2] + nz * safeR];
 
-    // 赋予稳定的开普勒圆轨道切向速度 v = sqrt(GM / r)
+    // 赋予稳定的开普勒圆轨道切向速度 v = sqrt(GM / r)，并叠加母体公转速度
     const v = Math.sqrt(well.GM / safeR);
     let tx = nz, ty = 0, tz = -nx;
     let tl = Math.hypot(tx, ty, tz) || 1;
-    this.vel = [tx / tl * v, ty / tl * v, tz / tl * v];
+    const host = well.ref && well.ref.vel ? well.ref.vel : [0, 0, 0];
+    this.vel = [tx / tl * v + host[0], ty / tl * v + host[1], tz / tl * v + host[2]];
     const sp = Math.hypot(this.vel[0], this.vel[1], this.vel[2]);
     if (sp > 1e-4) {
       this.yaw = Math.atan2(-this.vel[0], -this.vel[2]);
@@ -170,19 +178,32 @@ export class Probe {
       tz = (f[2] * kf + r[2] * ks + u[2] * ku) * m;
     }
 
-    // 2. 高精度引力子步积分（STEP_MAX <= 8ms，保证引力积分精确无跳变）
-    const STEP_MAX = 0.008;
-    let remain = Math.min(dtPhys > 0 ? dtPhys : dtReal, 0.25);
+    // 2. 真实时间尺度自适应子步积分：步长随最强井的开普勒时标缩放
+    //（约 1/20 轨道周期，近日点/近行星自动细化），保证真实 GM 口径下
+    // 从实时到千年/秒 的全部时间倍率都有稳定轨道积分；子步预算兜底
+    const SUB_BUDGET = 900;
+    let remain = Math.max(0, dtPhys > 0 ? dtPhys : dtReal);
     let crashedWell = null;
+    let steps = 0;
 
     do {
-      const h = Math.min(STEP_MAX, remain);
+      // 最强井开普勒时标 τ = √(r³/GM)（局部轨道周期特征时间）
+      let tau = Infinity;
+      for (const well of wells) {
+        if (well.GM <= 0) continue;
+        const c = well.ref ? well.ref.pos : well.center;
+        const dx = c[0] - this.pos[0], dy = c[1] - this.pos[1], dz = c[2] - this.pos[2];
+        const r = Math.hypot(dx, dy, dz) || 1e-9;
+        tau = Math.min(tau, Math.sqrt(r * r * r / well.GM));
+      }
+      const h = Math.min(remain, Math.min(Math.max(tau * 0.05, 0.5), 1.5e6));
+
       // 万有引力合力加速度计算：a = sum(GM / r^2 * r_hat)
       let gx = 0, gy = 0, gz = 0;
       for (const well of wells) {
         const c = well.ref ? well.ref.pos : well.center;
         const dx = c[0] - this.pos[0], dy = c[1] - this.pos[1], dz = c[2] - this.pos[2];
-        const r = Math.hypot(dx, dy, dz) || 1e-4;
+        const r = Math.hypot(dx, dy, dz) || 1e-9;
         const a = well.GM / (r * r);
         gx += (dx / r) * a;
         gy += (dy / r) * a;
@@ -195,7 +216,7 @@ export class Probe {
         }
       }
 
-      // 速度与位置更新
+      // 速度与位置更新（半隐式欧拉：辛积分器，长期能量稳定）
       this.vel[0] += (gx + tx) * h;
       this.vel[1] += (gy + ty) * h;
       this.vel[2] += (gz + tz) * h;
@@ -205,7 +226,8 @@ export class Probe {
 
       if (crashedWell) break;
       remain -= h;
-    } while (remain > 0);
+      steps++;
+    } while (remain > 0 && steps < SUB_BUDGET);
 
     // 3. 真实碰撞事件响应：若撞毁则记录警报并在安全轨道重置部署
     if (crashedWell) {
@@ -234,7 +256,7 @@ export class Probe {
   _pushTrail(maxSp) {
     const p = this.pos;
     const last = this.trail[this.trail.length - 1];
-    const dMin = Math.max(maxSp * 0.005, 0.002);
+    const dMin = Math.max(maxSp * 0.02, 1e-8); // 真实尺度：随层速度缩放采样间距
     if (!last || Math.hypot(p[0] - last[0], p[1] - last[1], p[2] - last[2]) >= dMin) {
       this.trail.push([p[0], p[1], p[2]]);
       if (this.trail.length > 500) this.trail.shift();

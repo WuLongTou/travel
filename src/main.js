@@ -30,9 +30,10 @@ import { updateLabelFades } from './render/labels.js';
 import { TrailRibbon } from './render/trail.js';
 import { makeShip, updateShipFlame } from './render/ship.js';
 
-// 时间倍率阶梯（[ ] 键步进切换）
-const TIME_RATES = [1, 86400, 2592000, 31557600, 315576000, 31557600000];
-const TIME_RATE_LABELS = ['实时', '1天/秒', '1月/秒', '1年/秒', '10年/秒', '千年/秒'];
+// 时间倍率阶梯（[ ] 键步进切换）。真实物理口径下飞船速度远低于光速，
+// 跨行星/星际航行的节奏全部由时间倍率承担（AUTO 自动管理，见 autoWarpTick）
+const TIME_RATES = [1, 60, 3600, 21600, 86400, 604800, 2629800, 31557600, 315576000, 3155760000, 31557600000];
+const TIME_RATE_LABELS = ['实时', '1分/秒', '1时/秒', '6时/秒', '1天/秒', '1周/秒', '1月/秒', '1年/秒', '10年/秒', '100年/秒', '千年/秒'];
 
 const canvas = document.getElementById('scene');
 const engine = new CosmicEngine(canvas);
@@ -61,11 +62,29 @@ let controlMode = MODE_AUTO;
 
 let curWorld = null;
 let selected = null; // 当前选中的目标天体
+let rendMode = false; // 交会模式滞回：2.5 泊距进入、3.5 泊距退出（防边界抖动）
+let navDbg = null; // 自动导航诊断快照（__universe.dbg 暴露，无头验证用）
 let hoveredId = null;
+let warpMode = 'auto'; // 自动时间倍率：'auto'（按 ETA 自选档）| 'user'（用户 [ ] 接管）
 
 function clearSelection() {
   selected = null;
   ui.hideInfo();
+}
+
+// 选中目标（统一入口）：信息卡 + 跟拍视距随目标真实半径缩放 + 恢复自动倍率
+function selectEntity(e) {
+  selected = e;
+  rendMode = false; // 新目标从巡航拦截重新开始
+  ui.showInfo(e);
+  warpMode = 'auto';
+  if (curWorld && e.pickRadius > 0) {
+    const base = curWorld.shipViewDist || 0.35;
+    chaseCam.followDist = Math.min(
+      Math.max(e.pickRadius * 14, base * 0.3),
+      Math.max(curWorld.worldRadius * 0.02, base * 0.3),
+    );
+  }
 }
 
 // ==========================================================
@@ -92,9 +111,7 @@ function startTour() {
     .filter(Boolean);
   if (stops.length < 2) { toastMsg('此尺度层没有巡游路线'); return; }
   tour = { stops, idx: 0, phase: 'enroute', dwellLeft: 0, nearS: 0 };
-  selected = stops[0];
-  ui.showInfo(selected);
-  toastMsg(`大巡游启程 · 共 ${stops.length} 站`);
+  selectEntity(stops[0]);
 }
 
 function stopTour(msg) {
@@ -107,8 +124,7 @@ function tourNextStop() {
   tour.idx = (tour.idx + 1) % tour.stops.length;
   tour.phase = 'enroute';
   tour.nearS = 0;
-  selected = tour.stops[tour.idx];
-  ui.showInfo(selected);
+  selectEntity(tour.stops[tour.idx]);
 }
 
 // 每帧推进巡游状态机（仅在 AUTO 自动分支调用；到站判定复用自动导航泊距）
@@ -161,6 +177,7 @@ nav.onBeforeWorldChange = () => {
 
 nav.onWorldChanged = (world, idx) => {
   curWorld = world;
+  warpMode = 'auto'; // 换层恢复自动时间倍率
   engine.loadWorld(world, world.group, []);
   ui.setCrumb(idx);
   ui.setScaleHud(`${world.title} · 1单位≈${unitRulerText(world.unitName)}`);
@@ -201,9 +218,65 @@ function steerTowards(tpos, dtReal, maxTurn = 1.2) {
   steerTowardsDir([tpos[0] - probe.pos[0], tpos[1] - probe.pos[1], tpos[2] - probe.pos[2]], dtReal, maxTurn);
 }
 
-function simulate(dtReal) {
+// ============ 自动时间倍率：真实物理飞行的节奏引擎 ============
+// 物理速度真实后（<光速），跨行星航行靠时间倍率承担节奏：
+// - 朝目标接近中：按「剩余距离指数收敛、墙上时间常数 ≈8 秒」配速
+//   （制动能量曲线 v∝√d 下全程 ≈8s×ln(d0/d泊位)≈1 分钟量级），到站
+//   低倍率观赏；
+// - 无目标伴飞/巡航：按主导井「1/60 轨道周期/墙上秒」配速；
+// - 惯性层：实时；
+// - 用户按 [ ] 手动设置后挂起（warpMode='user'），重选目标/换层恢复。
+const WARP_ETA_S = 8;
+function autoWarpTick() {
+  if (warpMode !== 'auto' || clock.paused || !curWorld) return;
+  let target = 0; // 哨兵：0 = 尚未确定（由选中目标 ETA 或井配速填充）
+  if (selected && curWorld.entities.includes(selected)) {
+    const d = dist3(probe.pos, selected.pos);
+    const v = probe.speedWorldPerS();
+    // 有目标统一按 ETA 配速（用总速度而非接近分量——转向/制动的瞬间
+    // 接近分量过零，若交给井配速会形成高倍率背离腿的极限环）
+    if (v > 1e-14) target = d / (v * WARP_ETA_S);
+  }
+  if (target === 0) {
+    const well = probe.dominantWell;
+    if (well && well.GM > 0) {
+      const c = well.ref ? well.ref.pos : well.center;
+      const r = Math.hypot(probe.pos[0] - c[0], probe.pos[1] - c[1], probe.pos[2] - c[2]) || 1e-12;
+      const vCirc = Math.sqrt(well.GM / r);
+      target = r / (vCirc * 60); // 轨道周期 pacing：60 墙上秒看 1/60 圈
+    } else {
+      target = 1; // 无井层：实时
+    }
+  }
+  // 泊位邻域封顶：伴飞/悬停段固定 ≤1时/秒，保证近景观赏与推力微调精度
+  if (lastParkDist > 0 && selected) {
+    const dSel = dist3(probe.pos, selected.pos);
+    if (dSel < lastParkDist * 3) target = Math.min(target, 3600);
+  }
+  // 物理硬包线：接近中速度/视线角波动会让 ETA 公式瞬时爆表，必须约束
+  // 单帧位移（≤2% 剩余距离，防瞬移越过目标）与单帧 Δv（≤5% 巡航速度，
+  // 防推力瞬跳）——包线与 ETA 取最小，任何瞬态都无法突破
+  if (selected) {
+    const dSel = dist3(probe.pos, selected.pos);
+    const vNow = probe.speedWorldPerS();
+    if (vNow > 1e-14) target = Math.min(target, dSel * 0.02 / (vNow * 0.016));
+  }
+  const accW = curWorld.thrustAccWorldPerS2 || 1.2;
+  const maxSpW = curWorld.maxSpeedWorldPerS || 5.0;
+  target = Math.min(target, maxSpW * 0.05 / (accW * 0.016));
+  // 连续倍率（不吸附档位）：ETA 恒定 ≈25 墙上秒，制动曲线全程平滑变速；
+  // curTimeIdx 同步到最近档位供 [ ] 步进起点
+  const rate = Math.min(Math.max(target, 1), TIME_RATES[TIME_RATES.length - 1]);
+  let best = 0;
+  for (let i = 0; i < TIME_RATES.length; i++) {
+    if (Math.abs(TIME_RATES[i] - rate) < Math.abs(TIME_RATES[best] - rate)) best = i;
+  }
+  curTimeIdx = best;
+  if (Math.abs(clock.rate - rate) > rate * 0.02) clock.setRate(rate);
+}
+
+function simulate(dtReal, dtSim) {
   if (!curWorld || !curWorld.update) return;
-  const dtSim = clock.paused ? 0 : dtReal * clock.rate;
   curWorld.update(dtSim, clock, probe, dtReal);
 }
 
@@ -212,7 +285,11 @@ function pickObject(rayOrigin, rayDir, maxDist) {
   let best = null; let bestD = maxDist;
   for (const e of curWorld.entities) {
     if (!e.pickRadius || e.selectable === false) continue;
-    const d = rayDist(rayOrigin, rayDir, e.pos, e.pickRadius);
+    // 真实尺度点选：远处天体角直径过小，按 ~0.5° 视角下限放大可点选半径
+    //（泊车/碰撞/引力仍用实体真实半径，仅拾取口径放大）
+    const dCam = Math.hypot(e.pos[0] - rayOrigin[0], e.pos[1] - rayOrigin[1], e.pos[2] - rayOrigin[2]);
+    const rEff = Math.max(e.pickRadius, dCam * 0.0087);
+    const d = rayDist(rayOrigin, rayDir, e.pos, rEff);
     if (d >= 0 && d < bestD) { bestD = d; best = e; }
   }
   return best;
@@ -272,6 +349,9 @@ function syncShip() {
 
 function renderFrame(now) {
   const dtReal = Math.min(0.05, (now - lastFrame) / 1000);
+  // 模拟时间增量：飞船位置动力学（引力+推进）与天体运动共用同一口径，
+  // 时间倍率承担航行节奏（物理始终真实，倍率只放大时间流速）
+  const dtSim = clock.paused ? 0 : dtReal * clock.rate;
   lastFrame = now;
   const steer = input.poll();
   const a = input.actions;
@@ -290,13 +370,14 @@ function renderFrame(now) {
   }
   prevV = vDown;
 
-  // [ 键：时间减速步进
+  // [ 键：时间减速步进（用户手动设置后自动倍率挂起，重选目标/换层恢复）
   const blDown = input.keys.has('[');
   if (blDown && !prevBracketL) {
     if (curTimeIdx > 0) {
       curTimeIdx--;
       clock.setRate(TIME_RATES[curTimeIdx]);
       clock.paused = false;
+      warpMode = 'user';
     }
   }
   prevBracketL = blDown;
@@ -308,6 +389,7 @@ function renderFrame(now) {
       curTimeIdx++;
       clock.setRate(TIME_RATES[curTimeIdx]);
       clock.paused = false;
+      warpMode = 'user';
     }
   }
   prevBracketR = brDown;
@@ -320,6 +402,10 @@ function renderFrame(now) {
   prevBackslash = bsDown;
 
   if (curWorld) {
+    // 帧初状态快照：极端瞬态（深井高速穿越/倍率尖峰）下积分可能产生非有限
+    // 值，一旦进入相机/渲染管线整页崩黑——帧末校验失败即回滚快照
+    const posSnap = probe.pos.slice();
+    const velSnap = probe.vel.slice();
     // G 键（边沿触发）：上帝视角 ⇄ 返回飞船
     const gDown = input.keys.has('g');
     if (gDown && !prevG) {
@@ -376,6 +462,10 @@ function renderFrame(now) {
     controlMode = isIntervening ? MODE_MANUAL : (controlMode === MODE_MANUAL ? MODE_AUTO : controlMode);
 
     let autoFwdThrust = false;
+    // 自动飞控的转向速率按模拟时间轴对齐：推力沿机头方向在模拟时间轴上
+    // 积分，高倍率下若转向仍按真实秒进行，机头方向会严重滞后于制导指令
+    //（推力画圈不接近），因此自动转向速率随倍率同步提速；手动分支不受影响
+    const autoTurn = (base) => base * Math.max(1, clock.rate / 60);
     let autoThrustScale = 1.0;
     let autoBrake = false;
     let flightStatus = '';
@@ -395,8 +485,8 @@ function renderFrame(now) {
       }
 
       if (isBraking) {
-        // 玩家主动反推刹车
-        probe.brake(dtReal);
+        // 玩家主动反推刹车（模拟时间：倍率下制动同样物理一致）
+        probe.brake(dtSim);
         probe.thrustOn = true;
         flightStatus = '手动干预 · 反推制动';
       } else if (manualThrustKeys) {
@@ -408,12 +498,12 @@ function renderFrame(now) {
           engine.camera.getWorldDirection(camDir);
           steerTowardsDir([camDir.x, camDir.y, camDir.z], dtReal, 3.2);
         }
-        probe.step(dtReal, a, boostScale, dtReal);
+        probe.step(dtReal, a, boostScale, dtSim);
         flightStatus = isBoosting ? '手动干预 · 加力推进' : '手动干预 · 推进机动';
       } else {
         // 纯姿态控制（如仅按 Q/E 滚转机翼）
         probe.thrustOn = false;
-        probe.step(dtReal, { fwd: false, bwd: false, left: false, right: false, up: false, down: false }, 0, dtReal);
+        probe.step(dtReal, { fwd: false, bwd: false, left: false, right: false, up: false, down: false }, 0, dtSim);
         flightStatus = '手动干预 · 姿态滚转';
       }
     } else {
@@ -438,6 +528,7 @@ function renderFrame(now) {
         const targetPos = selected.pos;
         const dToTarget = dist3(probe.pos, targetPos);
         const targetRadius = selected.pickRadius || 0.2;
+        const acc = curWorld.thrustAccWorldPerS2 || 1.2;
 
         // 泊车物理：泊距必须落在「目标自身引力占优」的范围内（g_own ≥ 2×最强
         // 第三方井，近似希尔球），泊位轨道才开普勒稳定——行星泊位若悬停在
@@ -456,6 +547,9 @@ function renderFrame(now) {
           }
           const maxOrbitD = Math.sqrt(ownWell.GM / (2 * gOther));
           safeParkDistance = Math.max(targetRadius * 1.8, Math.min(safeParkDistance, maxOrbitD));
+          // 引力超出推力的天体（如太阳）：泊位外推到 g≈0.6×推力半径——
+          // 深处引力数倍于推力，圆化速度高、径向扰动猛，伴飞无法稳定
+          safeParkDistance = Math.max(safeParkDistance, Math.sqrt(ownWell.GM / (acc * 0.6)));
         }
         lastParkDist = safeParkDistance; // 供大巡游到站判定复用
 
@@ -485,16 +579,10 @@ function renderFrame(now) {
           ];
         }
 
-        // 导航基准点与沿基准点的接近速度（转向滞后时前向速度分量失真，油门判定
-        // 必须用接近速度，防「追踪转向+向心推力」自锁成动力环绕极限环）
-        const navPos = station || targetPos;
-        const dNav = station ? dist3(probe.pos, navPos) : dToTarget;
-        const nlx = (navPos[0] - probe.pos[0]) / dNav;
-        const nly = (navPos[1] - probe.pos[1]) / dNav;
-        const nlz = (navPos[2] - probe.pos[2]) / dNav;
-        const vClose = probe.vel[0] * nlx + probe.vel[1] * nly + probe.vel[2] * nlz;
-        const closingIn = vClose; // 坠向导航点的速度
-        // 目标本体方向单位向量（伴飞/斥力仍相对目标）
+        // 目标本体方向单位向量（接近剖面/伴飞/斥力均相对目标本体——
+        // 拦截前置由「期望速度 = 目标速度矢量 + 接近剖面」的矢量合成天然
+        // 提供，无需几何前置点：前置点方案在近场会把期望方向掰离目标方向，
+        // 船被持续往侧向推形成绕转动量，误差方向随之旋转、推力修正互相抵消）
         const rlx = (targetPos[0] - probe.pos[0]) / dToTarget;
         const rly = (targetPos[1] - probe.pos[1]) / dToTarget;
         const rlz = (targetPos[2] - probe.pos[2]) / dToTarget;
@@ -502,7 +590,6 @@ function renderFrame(now) {
         // 引力井安全包线（最高优先级）：向最强井俯冲时无条件全推力反井心拉起。
         // 触发按制动需求距离判定——当前向井速度需要的停止距离一旦吃掉井面余量，
         // 立即拉起（固定半径要么太晚要么误伤正常伴飞）
-        const acc = curWorld.thrustAccWorldPerS2 || 1.2;
         let guardPull = false;
         let gwr = Infinity, vWell = 0, safeR = 0.4;
         if (well && wellC && well.GM > 0) {
@@ -510,10 +597,12 @@ function renderFrame(now) {
           gwr = dist3(probe.pos, wellC) || 1e-6;
           vWell = ((probe.pos[0] - wellC[0]) * probe.vel[0] + (probe.pos[1] - wellC[1]) * probe.vel[1] + (probe.pos[2] - wellC[2]) * probe.vel[2]) / gwr;
           const vIn = Math.max(0, -vWell);
-          const aBrake = Math.max(0.15, acc - wellG);
+          // 真实推力口径：远离井心方向的制动能力 = 推力（井引力超出推力时
+          // 只剩推力的一半裕量可谈），绝不用绝对常数下限——任何尺度都成立
+          const aBrake = Math.max(acc * 0.5, acc - wellG);
           const need = vIn * vIn / (2 * aBrake);
           if (gwr - safeR < need + safeR * 0.5) {
-            steerTowardsDir([(probe.pos[0] - wellC[0]) / gwr, (probe.pos[1] - wellC[1]) / gwr, (probe.pos[2] - wellC[2]) / gwr], dtReal, 2.2);
+            steerTowardsDir([(probe.pos[0] - wellC[0]) / gwr, (probe.pos[1] - wellC[1]) / gwr, (probe.pos[2] - wellC[2]) / gwr], dtReal, autoTurn(2.2));
             autoFwdThrust = true;
             autoThrustScale = 1.0;
             flightStatus = `防井坠毁 · 拉起 (${well.name})`;
@@ -522,95 +611,132 @@ function renderFrame(now) {
         }
 
         if (!guardPull) {
-          // 泊位/悬停区判定：2 倍泊距圈（自身井目标在圈内做防坠/轨道收拢，
-          // 圈外由带反井心分量的巡航接管——占优边界/固定大倍数圈都会让进场
-          // 刹车或收拢刹车误伤合法的巡航/转移速度）；无自身井目标用驻点悬停圈
-          const inParkZone = station ? dToTarget <= safeParkDistance * 2 : dNav <= safeParkDistance * 2;
+          // 泊位/悬停区判定：交会模式滞回（2.5 泊距进入、3.5 泊距退出）——
+          // 若按单一阈值硬切换，船在边界振荡时近场/巡航制导反复互换，
+          // 期望速度矢量随之摆动，推力方向翻转成抖振
+          if (station) rendMode = false;
+          else if (!rendMode && dToTarget <= safeParkDistance * 2.5) rendMode = true;
+          else if (rendMode && dToTarget > safeParkDistance * 3.5) rendMode = false;
+          const inParkZone = station ? dToTarget <= safeParkDistance * 2 : rendMode;
           if (inParkZone) {
             // 抵达泊位/驻位区：伴飞/悬停（各分支独占转向权，防坠的反向转向
             // 若与对准转向叠加会互相抵消，机头永远调不离目标）
-            if (!station && closingIn > 0.06 * maxSp && dToTarget > safeParkDistance * 0.55) {
-              // 进场末段快速接近：反推刹车吸能。仅限泊位外半区——深处刹车会杀掉
-              // 切向轨道动量，近心点逐圈降低形成衰变螺旋直至撞毁
-              steerTowards(targetPos, dtReal, 1.4);
-              autoBrake = true;
-              flightStatus = `抵达泊位 · 制动伴飞 ${selected.name}`;
-            } else if (station) {
-              // 驻点悬停伴飞：驻点 PD 回归 + 全速度阻尼 + 反井心引力抵消 +
-              // 目标斥力（防 PD 直线穿越目标天体）
-              let ax = 0, ay = 0, az = 0;
+            if (station) {
+              // 驻点悬停伴飞（第三方井主导区的背井驻点接应）：与交会/巡航段
+              // 同一「期望速度矢量 + 引力前馈」结构。教学尺度遗留的全速阻尼
+              //（vel×0.8 直接当加速度、pd 线性 PD）在真实尺度（vel~1e-7、
+              // acc~4e-12）会饱和成反向全推，机头 180° 背逃，必须按加速度量纲合成
+              const TAU = Math.max(9, 3 * dtSim);
               const px = station[0] - probe.pos[0], py = station[1] - probe.pos[1], pz = station[2] - probe.pos[2];
-              const pd = Math.hypot(px, py, pz) || 1e-6;
-              const pdPull = Math.min(pd, 1) * 0.8;
-              ax += px / pd * pdPull; ay += py / pd * pdPull; az += pz / pd * pdPull;
-              ax -= probe.vel[0] * 0.8; ay -= probe.vel[1] * 0.8; az -= probe.vel[2] * 0.8;
+              const pd = Math.hypot(px, py, pz) || 1e-9;
+              // 期望速度：朝驻点的 √ 制动剖面；贴近目标转斥退（防穿越天体）
+              const vAppSt = dToTarget < safeParkDistance * 1.2
+                ? -maxSp * 0.2
+                : Math.min(Math.sqrt(2 * acc * 0.5 * pd), maxSp * 0.5);
+              let ax = (px / pd * vAppSt - probe.vel[0]) / TAU;
+              let ay = (py / pd * vAppSt - probe.vel[1]) / TAU;
+              let az = (pz / pd * vAppSt - probe.vel[2]) / TAU;
               const wx = probe.pos[0] - wellC[0], wy = probe.pos[1] - wellC[1], wz = probe.pos[2] - wellC[2];
-              const wr = Math.hypot(wx, wy, wz) || 1e-6;
-              const g = well.GM / (wr * wr);
-              ax += wx / wr * g; ay += wy / wr * g; az += wz / wr * g;
-              const rep = Math.max(0, safeParkDistance * 0.8 - dToTarget) * 3;
-              ax += rlx * rep; ay += rly * rep; az += rlz * rep;
+              const wr = Math.hypot(wx, wy, wz) || 1e-9;
+              const gFeed = Math.min(well.GM / (wr * wr), acc);
+              ax += wx / wr * gFeed; ay += wy / wr * gFeed; az += wz / wr * gFeed;
               const aMag = Math.hypot(ax, ay, az);
-              if (aMag > acc * 0.03) {
-                steerTowardsDir([ax, ay, az], dtReal, 1.4);
+              navDbg = { branch: 'station', rendMode, d: dToTarget, vApp: vAppSt, aMag: aMag / acc, rate: clock.rate };
+              if (aMag > acc * 0.02) {
+                steerTowardsDir([ax, ay, az], dtReal, autoTurn(2.2));
                 autoFwdThrust = true;
                 autoThrustScale = Math.min(1.0, aMag / acc);
-                flightStatus = aMag > acc ? `伴飞防坠 · 退避 ${selected.name}` : `安全伴飞 · 悬停 ${selected.name}`;
+                flightStatus = vAppSt < 0 ? `伴飞防坠 · 退避 ${selected.name}` : `安全伴飞 · 悬停 ${selected.name}`;
               } else {
-                steerTowards(targetPos, dtReal, 1.4);
+                steerTowards(targetPos, dtReal, autoTurn(1.4));
                 flightStatus = `安全伴飞 · ${selected.name}`;
               }
-            } else if (closingIn > 0.02 * maxSp || (dToTarget < safeParkDistance * 0.55 && closingIn > -0.02 * maxSp)) {
-              // 目标自身井内防坠退避：低速悬停会坠向天体，机头调离目标反向撑住
-              // （若已明显远离则放行，交由跟随分支收回）
-              steerTowardsDir([-rlx, -rly, -rlz], dtReal, 1.4);
-              autoFwdThrust = true;
-              autoThrustScale = Math.min(1.0, closingIn / (maxSp * 0.2) + 0.3);
-              flightStatus = `伴飞防坠 · 退避 ${selected.name}`;
-            } else if (ownWell && ownWell.GM > 0 && currentSpeed > 1.3 * Math.sqrt(ownWell.GM / Math.max(dToTarget, 1e-6))) {
-              // 轨道收拢：偏心轨道远地点速度超过当地圆轨道速度 1.5 倍即泄速，
-              // 逐圈压低远心点，把松散椭圆收拢进泊位圈（否则远地点漂出目标
-              // 引力占优区后被第三方井甩回，近心点逐圈衰减直至撞毁）
-              steerTowards(targetPos, dtReal, 1.4);
-              autoBrake = true;
-              flightStatus = `抵达泊位 · 制动伴飞 ${selected.name}`;
-            } else if (dToTarget > safeParkDistance * 0.9) {
-              // 目标公转逐渐远离：微推跟住，保持伴飞
-              steerTowards(targetPos, dtReal, 1.4);
-              autoFwdThrust = true;
-              autoThrustScale = 0.12;
-              flightStatus = `安全伴飞 · 跟随 ${selected.name}`;
             } else {
-              steerTowards(targetPos, dtReal, 1.4);
-              flightStatus = `安全伴飞 · ${selected.name}`;
+              // ===== 交会末段：目标参考系相对速度制导（轨道交会标准做法）=====
+              // 惯性系刹车/退避会把与目标公转匹配的切向速度一并刹掉——刹完即被
+              // 目标甩开、追上再刹，形成「恒距尾随」共振极限环。改为直接控制
+              // 相对速度：期望值 = 径向接近剖面（√制动能量，随距离归零）+ 切向
+              // 分量（自身井引力超出悬停推力时取当地圆轨道速度，改为入轨伴飞），
+              // 推进指令 = (vRelDes − vRel)/τ + 引力前馈（悬停段全额抵消下坠、
+              // 圆轨道段按向心需求自然归零）。稳态即速度匹配伴飞，闭环无极限环。
+              const vT = selected.vel || [0, 0, 0];
+              const vCx = probe.vel[0] - vT[0], vCy = probe.vel[1] - vT[1], vCz = probe.vel[2] - vT[2];
+              // 径向期望：制动能量剖面（半推力保守裕量），泊距内归零；
+              // 真实半径 1.3 倍内转强斥退（防坠地板）
+              let vApp = Math.min(
+                Math.sqrt(2 * acc * 0.5 * Math.max(0, dToTarget - safeParkDistance)),
+                maxSp * 0.8,
+              );
+              if (dToTarget < targetRadius * 1.3) vApp = -maxSp * 0.2;
+              // 悬停可行性：自身井引力 ≤0.6 推力才悬停得住（地球泊位 ≈0.9×、
+              // 火星 ≈0.2×、太阳 ≈4×——太阳旁只能入轨伴飞，无法驻停）
+              const gOwn = ownWell && ownWell.GM > 0 ? ownWell.GM / (dToTarget * dToTarget) : 0;
+              const canHover = gOwn <= acc * 0.6;
+              // 切向期望沿当前相对角动量的轨道面方向（正对目标时以黄道面兜底）
+              let hx = rly * vCz - rlz * vCy, hy = rlz * vCx - rlx * vCz, hz = rlx * vCy - rly * vCx;
+              const hl = Math.hypot(hx, hy, hz);
+              if (hl < 1e-12) { hx = 0; hy = 1; hz = 0; } else { hx /= hl; hy /= hl; hz /= hl; }
+              let ttx = hy * rlz - hz * rly, tty = hz * rlx - hx * rlz, ttz = hx * rly - hy * rlx;
+              const ttl = Math.hypot(ttx, tty, ttz) || 1;
+              ttx /= ttl; tty /= ttl; ttz /= ttl;
+              const vTanDes = canHover || gOwn <= 0 ? 0
+                : Math.sqrt(ownWell.GM / Math.max(dToTarget, targetRadius));
+              // 加速度指令：相对速度误差 / τ（模拟时间轴收敛时标，近场自动倍率
+              // ~10²-10³× 下每帧模拟秒数与 τ 同量级，τ 取大防欠采样震荡）
+              const vTanNow = vCx * ttx + vCy * tty + vCz * ttz;
+              const ff = Math.max(0, gOwn - vTanNow * vTanNow / Math.max(dToTarget, 1e-9));
+              const TAU = Math.max(9, 3 * dtSim);
+              const ax = (rlx * vApp + ttx * vTanDes - vCx) / TAU + rlx * ff;
+              const ay = (rly * vApp + tty * vTanDes - vCy) / TAU + rly * ff;
+              const az = (rlz * vApp + ttz * vTanDes - vCz) / TAU + rlz * ff;
+              const aMag = Math.hypot(ax, ay, az);
+              navDbg = { branch: 'rendezvous', rendMode, d: dToTarget, park: safeParkDistance,
+                vApp: vApp, vRel: Math.hypot(vCx, vCy, vCz), vRad: vCx * rlx + vCy * rly + vCz * rlz,
+                vTanDes, ff, aMag: aMag / acc, rate: clock.rate };
+              if (aMag > acc * 0.02) {
+                // 推力沿模拟时间轴积分而转向按真实秒进行，高倍率下转向必须
+                // 同步提速，否则机头永远滞后于制导指令方向
+                steerTowardsDir([ax, ay, az], dtReal, autoTurn(2.2));
+                autoFwdThrust = true;
+                autoThrustScale = Math.min(1.0, aMag / acc);
+                flightStatus = vApp < 0 ? `伴飞防坠 · 退避 ${selected.name}`
+                  : dToTarget > safeParkDistance * 1.1 ? `交会接近 · ${selected.name}`
+                  : `安全伴飞 · ${selected.name}`;
+              } else {
+                steerTowards(targetPos, dtReal, autoTurn(1.4));
+                flightStatus = `安全伴飞 · ${selected.name}`;
+              }
             }
           } else {
-            // 巡航飞向导航点：制动能量曲线约束总速度（防过冲/防极限环，系数 0.45
-            // 保留一半以上制动裕量——向站区边缘的到达速度必须可被悬停 PD 吸收），
-            // 并受主导井安全速度约束——向井一侧按到井面余量的制动能量限速，
-            // 从源头杜绝以巡航速度向井俯冲（包线拉起只作异常兜底）。
-            // 期望方向混入反井心分量（按最强井引力权重）——机头指向目标的纯追踪
-            // 没有侧向分量抵消第三方引力拖拽，会形成绕目标的动力环绕极限环
-            let ax = nlx, ay = nly, az = nlz;
+            // ===== 巡航拦截：期望速度 = 目标速度矢量 + 朝目标的接近剖面 =====
+            // 「vTarget + r̂×vApp」的矢量合成天然包含拦截前置（船自动飞向
+            // 交会点）。接近剖面 √(2×½acc×剩余距离) 到泊位归零（半推力制动
+            // 裕量，与交会段 vApp 同式，交会圈边界期望速度无跳变），上限
+            // maxSp×0.8。控制律与交会段同构：aCmd=(vDes−vel)/τ + 引力前馈，
+            // τ 随 dtSim 自适应（每帧最多消除 1/3 误差，离散收敛不抖振）
+            const vAppC = Math.min(
+              Math.sqrt(Math.max(0, 2 * acc * 0.5 * (dToTarget - safeParkDistance))),
+              maxSp * 0.8,
+            );
+            const vT = selected.vel || [0, 0, 0];
+            const TAU = Math.max(9, 3 * dtSim);
+            let ax = (vT[0] + rlx * vAppC - probe.vel[0]) / TAU;
+            let ay = (vT[1] + rly * vAppC - probe.vel[1]) / TAU;
+            let az = (vT[2] + rlz * vAppC - probe.vel[2]) / TAU;
             if (well && wellC && well.GM > 0 && well !== ownWell) {
-              const gw = Math.min(1.2, wellG / acc) * 1.1;
-              ax += (probe.pos[0] - wellC[0]) / gwr * gw;
-              ay += (probe.pos[1] - wellC[1]) / gwr * gw;
-              az += (probe.pos[2] - wellC[2]) / gwr * gw;
+              // 最强非目标井引力前馈：抑制恒定外力造成的稳态跟踪偏差
+              const gFeed = Math.min(wellG, acc);
+              ax += (probe.pos[0] - wellC[0]) / gwr * gFeed;
+              ay += (probe.pos[1] - wellC[1]) / gwr * gFeed;
+              az += (probe.pos[2] - wellC[2]) / gwr * gFeed;
             }
-            const al = Math.hypot(ax, ay, az) || 1;
-            steerTowardsDir([ax / al, ay / al, az / al], dtReal, 1.4);
-            const approachSpeed = Math.sqrt(Math.max(0, 2 * acc * (dNav - (station ? bandMid : safeParkDistance)))) * (station ? 0.35 : 0.45);
-            const wellSafe = well && wellC && well.GM > 0
-              ? Math.max(0.25, Math.sqrt(Math.max(0, 2 * acc * 0.8 * Math.max(0, gwr - safeR * 2.5))))
-              : Infinity;
-            const desiredSpeed = Math.min(maxSp * 0.8, Math.max(0.15 * maxSp, approachSpeed), wellSafe);
-            if (vClose > desiredSpeed * 1.15 || currentSpeed > desiredSpeed ||
-                (station && dToTarget < safeParkDistance * 0.8 && closingIn > 0.02 * maxSp)) {
-              autoBrake = true;
-            } else if (vClose < desiredSpeed) {
+            const aMag = Math.hypot(ax, ay, az);
+            navDbg = { branch: 'cruise', rendMode, d: dToTarget, park: safeParkDistance,
+              vDes: vAppC, aMag: aMag / acc, rate: clock.rate };
+            if (aMag > acc * 0.02) {
+              steerTowardsDir([ax, ay, az], dtReal, autoTurn(2.2));
               autoFwdThrust = true;
-              autoThrustScale = Math.min(1.0, (desiredSpeed - vClose) / (maxSp * 0.3));
+              autoThrustScale = Math.min(1.0, aMag / acc);
             }
             flightStatus = `自动导向 · ${selected.name}`;
           }
@@ -657,16 +783,29 @@ function renderFrame(now) {
 
       // 执行自动飞控推力或引力积分
       if (autoBrake) {
-        probe.brake(dtReal);
+        probe.brake(dtSim);
         probe.thrustOn = true;
-        probe.step(dtReal, { fwd: false, bwd: false, left: false, right: false, up: false, down: false }, 0, dtReal);
+        probe.step(dtReal, { fwd: false, bwd: false, left: false, right: false, up: false, down: false }, 0, dtSim);
       } else if (autoFwdThrust) {
         probe.thrustOn = true;
-        probe.step(dtReal, { fwd: true, bwd: false, left: false, right: false, up: false, down: false }, autoThrustScale, dtReal);
+        probe.step(dtReal, { fwd: true, bwd: false, left: false, right: false, up: false, down: false }, autoThrustScale, dtSim);
       } else {
         probe.thrustOn = false;
-        probe.step(dtReal, { fwd: false, bwd: false, left: false, right: false, up: false, down: false }, 0, dtReal);
+        probe.step(dtReal, { fwd: false, bwd: false, left: false, right: false, up: false, down: false }, 0, dtSim);
       }
+
+      // 自动时间倍率：真实物理速度的节奏引擎（详见 autoWarpTick）
+      autoWarpTick();
+    }
+
+    // 数值守卫：手动/自动两条物理路径任一产生 NaN/Inf 时回滚本帧状态并
+    // 停推（推力指令残留会把 NaN 重新引入），防止污染相机与渲染管线
+    if (!Number.isFinite(probe.pos[0] + probe.pos[1] + probe.pos[2] +
+      probe.vel[0] + probe.vel[1] + probe.vel[2])) {
+      probe.pos = posSnap.slice();
+      probe.vel = velSnap.slice();
+      probe.thrustOn = false;
+      toastMsg('数值异常 · 已回滚本帧状态');
     }
 
     // 飞船模型可见性与位姿同步
@@ -681,7 +820,7 @@ function renderFrame(now) {
 
     // 天体自转公转动力学推进
     clock.advance(dtReal);
-    simulate(dtReal);
+    simulate(dtReal, dtSim);
 
     // 准星与拾取更新
     updateHover();
@@ -734,7 +873,10 @@ function renderFrame(now) {
     }
 
     ui.setHud({ speedText: spText, distText, modeText });
-    const rateLabel = clock.paused ? '已暂停' : TIME_RATE_LABELS[curTimeIdx] || `×${clock.rate}`;
+    let rateLabel = clock.paused
+      ? '已暂停'
+      : (warpMode === 'auto' ? clock.rateLabel() : (TIME_RATE_LABELS[curTimeIdx] || `×${clock.rate}`));
+    if (!clock.paused) rateLabel += warpMode === 'auto' ? ' · 自动' : ' · 手动';
     ui.setTimeHud({ clockLabel: clock.timeLabel(), rateLabel });
   }
 
@@ -767,8 +909,7 @@ canvas.addEventListener('click', (ev) => {
   if (hit) {
     // 用户点击其他天体 = 改选目标，终止大巡游（点击巡游当前站目标不受影响）
     if (tour && hit !== selected) stopTour('已改选目标 · 巡游结束');
-    selected = hit;
-    ui.showInfo(hit);
+    selectEntity(hit);
   }
 });
 
@@ -807,10 +948,11 @@ window.__universe = { engine, probe, clock, nav, ui, input, chaseCam, ship,
   get world() { return nav.world; },
   get selected() { return selected; },
   get tour() { return tour; },
+  get dbg() { return navDbg; },
   get controlMode() { return controlMode; },
   select(id) {
     const e = nav.world?.entities.find((x) => x.id === id);
-    if (e) { selected = e; ui.showInfo(e); }
+    if (e) selectEntity(e);
     return !!e;
   },
   startTour,
