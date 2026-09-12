@@ -68,6 +68,68 @@ function clearSelection() {
   ui.hideInfo();
 }
 
+// ==========================================================
+// 大巡游模式（T 键）：按各层预设站点自动串联巡游——
+// 到站泊车伴飞 → 停留观赏 → 下一站，循环往复；任何手动飞行干预
+// 或用户改选目标即终止巡游（观察类操作与上帝视角不受影响）
+// ==========================================================
+const TOUR_DWELL_S = 12; // 每站停留时长（真实秒）
+const TOUR_ARRIVE_S = 1.2; // 进入泊位圈持续该时长判定到站
+let tour = null; // { stops, idx, phase: 'enroute'|'dwell', dwellLeft, nearS }
+let lastParkDist = 0; // 自动导航最近一帧计算的泊距（到站判定基准）
+let toastText = '';
+let toastUntil = 0;
+
+function toastMsg(text, secs = 4) {
+  toastText = text;
+  toastUntil = performance.now() / 1000 + secs;
+}
+
+function startTour() {
+  if (tour) { stopTour('巡游结束'); return; }
+  const stops = (curWorld?.tourStops || [])
+    .map((id) => curWorld.entities.find((e) => e.id === id))
+    .filter(Boolean);
+  if (stops.length < 2) { toastMsg('此尺度层没有巡游路线'); return; }
+  tour = { stops, idx: 0, phase: 'enroute', dwellLeft: 0, nearS: 0 };
+  selected = stops[0];
+  ui.showInfo(selected);
+  toastMsg(`大巡游启程 · 共 ${stops.length} 站`);
+}
+
+function stopTour(msg) {
+  if (!tour) return;
+  tour = null;
+  if (msg) toastMsg(msg);
+}
+
+function tourNextStop() {
+  tour.idx = (tour.idx + 1) % tour.stops.length;
+  tour.phase = 'enroute';
+  tour.nearS = 0;
+  selected = tour.stops[tour.idx];
+  ui.showInfo(selected);
+}
+
+// 每帧推进巡游状态机（仅在 AUTO 自动分支调用；到站判定复用自动导航泊距）
+function updateTour(dtReal) {
+  if (!tour || !selected) return;
+  // 站点实体失效（异常清理）→ 跳下一站
+  if (!curWorld.entities.includes(selected)) { tourNextStop(); return; }
+  if (tour.phase === 'enroute') {
+    const d = dist3(probe.pos, selected.pos);
+    if (lastParkDist > 0 && d <= lastParkDist * 1.5) {
+      tour.nearS += dtReal;
+      if (tour.nearS >= TOUR_ARRIVE_S) { tour.phase = 'dwell'; tour.dwellLeft = TOUR_DWELL_S; }
+    } else {
+      tour.nearS = 0;
+    }
+  } else {
+    tour.dwellLeft -= dtReal;
+    if (tour.dwellLeft <= 0) tourNextStop();
+  }
+}
+
 function enterGodMode() {
   if (controlMode === MODE_GOD) return;
   controlMode = MODE_GOD;
@@ -92,6 +154,7 @@ const ui = new UI(engine, {
 
 // 跃迁前清理指向旧世界实体的目标锁定（防止自动飞控追逐幽灵目标）
 nav.onBeforeWorldChange = () => {
+  stopTour(); // 巡游路线按层定义，跨层即失效
   clearSelection();
   if (controlMode === MODE_GOD) exitGodMode();
 };
@@ -118,6 +181,7 @@ let prevBracketL = false;
 let prevBracketR = false;
 let prevBackslash = false;
 let prevG = false;
+let prevT = false;
 
 // 有限角速度平滑转向给定三维方向向量
 function steerTowardsDir(dir, dtReal, maxTurn = 1.2) {
@@ -264,6 +328,13 @@ function renderFrame(now) {
     }
     prevG = gDown;
 
+    // T 键（边沿触发）：大巡游 启程/结束（系统类操作，任何模式下均可）
+    const tDown = input.keys.has('t');
+    if (tDown && !prevT) {
+      startTour();
+    }
+    prevT = tDown;
+
     if (controlMode === MODE_GOD) {
       // ===== 上帝视角：相机自由浏览，飞船在背景中继续全自动飞行 =====
       if (steer.steerX !== 0 || steer.steerY !== 0) {
@@ -311,7 +382,9 @@ function renderFrame(now) {
 
     if (isIntervening) {
       // 玩家主动进行「飞行操控类」干预：
-      // 仅当存在实际推进/刹车输入时才解除目标锁定（纯 Q/E 横滚保持锁定）
+      // 手动接管即终止大巡游；仅当存在实际推进/刹车输入时才解除目标锁定
+      // （纯 Q/E 横滚保持锁定）
+      stopTour('手动接管 · 巡游结束');
       if (selected && input.hasThrustInput()) {
         clearSelection();
       }
@@ -345,6 +418,7 @@ function renderFrame(now) {
       }
     } else {
       // 全自动航行（AUTO；上帝视角下飞船同样在此分支自动飞行）
+      updateTour(dtReal); // 大巡游状态机（到站/停留/下一站）
       const currentSpeed = probe.speedWorldPerS();
       const f = probe.forward();
       const fwdSpeed = probe.vel[0] * f[0] + probe.vel[1] * f[1] + probe.vel[2] * f[2];
@@ -383,6 +457,7 @@ function renderFrame(now) {
           const maxOrbitD = Math.sqrt(ownWell.GM / (2 * gOther));
           safeParkDistance = Math.max(targetRadius * 1.8, Math.min(safeParkDistance, maxOrbitD));
         }
+        lastParkDist = safeParkDistance; // 供大巡游到站判定复用
 
         // 最强井（按引力加速度而非井心距离——行星泊位处最近的是行星井，
         // 最强的可能是太阳井），供安全包线与驻点方案使用
@@ -649,6 +724,15 @@ function renderFrame(now) {
       modeText = `⚠ 撞入 ${probe.crashEvent.name}！已在安全轨道部署`;
     }
 
+    // 大巡游进度前缀 + 系统提示（巡游启程/结束/无路线等）
+    if (tour) {
+      const dwell = tour.phase === 'dwell' ? ` · 停留 ${Math.ceil(tour.dwellLeft)}s` : '';
+      modeText = `大巡游 ${tour.idx + 1}/${tour.stops.length}${dwell} · ${modeText}`;
+    }
+    if (nowSec < toastUntil) {
+      modeText = `${toastText} · ${modeText}`;
+    }
+
     ui.setHud({ speedText: spText, distText, modeText });
     const rateLabel = clock.paused ? '已暂停' : TIME_RATE_LABELS[curTimeIdx] || `×${clock.rate}`;
     ui.setTimeHud({ clockLabel: clock.timeLabel(), rateLabel });
@@ -681,6 +765,8 @@ canvas.addEventListener('click', (ev) => {
     hit = pickObject(o, d, pickMaxDist());
   }
   if (hit) {
+    // 用户点击其他天体 = 改选目标，终止大巡游（点击巡游当前站目标不受影响）
+    if (tour && hit !== selected) stopTour('已改选目标 · 巡游结束');
     selected = hit;
     ui.showInfo(hit);
   }
@@ -720,11 +806,14 @@ window.addEventListener('resize', () => engine._resize());
 window.__universe = { engine, probe, clock, nav, ui, input, chaseCam, ship,
   get world() { return nav.world; },
   get selected() { return selected; },
+  get tour() { return tour; },
   select(id) {
     const e = nav.world?.entities.find((x) => x.id === id);
     if (e) { selected = e; ui.showInfo(e); }
     return !!e;
-  }
+  },
+  startTour,
+  stopTour,
 };
 
 boot();

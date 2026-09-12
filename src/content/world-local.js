@@ -106,6 +106,8 @@ export function buildLocalWorld() {
     id: 'local', title: '本星系群', unitName: 'Mpc', kmPerUnit: MPC_KM,
     intro: '跨度的数百万光年。银河系与仙女座星系正以约 110 km/s 相互接近，预计约 45 亿年后合并。飞近星系可下潜进入。',
     worldRadius: 1.2,
+    // 大巡游路线（T 键）：银河系 → 麦哲伦云 → 三角座 → 仙女座压轴
+    tourStops: ['milkyway', 'lmc', 'smc', 'm33', 'm31'],
     spawn: [0.9, 0.3, 0.9],
     spawnLookAt: [0, 0, 0], // 兴趣中心：银河系（原点）
     viewDist: 0.6,

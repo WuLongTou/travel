@@ -116,6 +116,8 @@ export function buildGalaxyWorld() {
     id: 'galaxy', title: '银河系', unitName: 'kpc', kmPerUnit: KPC_KM,
     intro: '直径约 10 万光年的棒旋星系。我们位于猎户臂，距银心约 2.6 万光年，正以约 220 km/s 绕银心运动（图中自转为演示速率）。',
     worldRadius: diskR,
+    // 大巡游路线（T 键）：太阳邻域 → 银心 → 盘外全景
+    tourStops: ['solar-neighborhood', 'sgrA', 'milkyway'],
     gravityWells: [{ center: [0, 0, 0], GM: 0.12, minR: 0.6, name: '银心' }],
     spawn: [diskR * 0.75, diskR * 0.45, diskR * 0.75],
     spawnLookAt: [0, 0, 0],

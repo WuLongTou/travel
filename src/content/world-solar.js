@@ -307,6 +307,8 @@ export function buildSolarWorld() {
     id: 'solar', title: '太阳系', unitName: 'AU', kmPerUnit: AU_KM,
     intro: '尺度 ~120 AU。八大行星沿真实轨道公转，行星大小为教学缩放（真实比例仅约万分之一）。把时间调到 1月/秒，看行星、卫星转动起来。',
     worldRadius: 55,
+    // 大巡游路线（T 键）：由内向外造访太阳，再按轨道距离逐一行星，哈雷彗星压轴
+    tourStops: ['sun', 'mercury', 'venus', 'earth', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'halley'],
     // 轨道飞行模式的多引力井（教学校准，实时积分）：主井=太阳（木星轨道
     // 圆速度 ≈0.3 AU/s，实时约 35 秒绕一圈）；行星井 GM ∝ 可视半径²——
     // 飞近行星轨迹明显偏转，贴太近会被行星引力捕获（HUD 提示，R 重生）。

@@ -155,6 +155,8 @@ export function buildStellarWorld() {
     id: 'stellar', title: '星际近邻', unitName: 'ly', kmPerUnit: LY_KM,
     intro: '半径约 60 光年。这里是太阳的邻居圈：比邻星 4.2 光年、天狼星 8.6 光年……每颗恒星按真实方位与表面色温呈现，点选可查看详情。',
     worldRadius: 40,
+    // 大巡游路线（T 键）：按距离由近及远造访邻星
+    tourStops: ['proxima-centauri', 'alpha-centauri-a', 'barnards-star', 'sirius-a', 'procyon', 'altair', 'vega', 'arcturus', 'tau-ceti'],
     spawn: [3, 1.2, 3],
     spawnLookAt: [0, 0, 0], // 兴趣中心：太阳（本层原点）
     viewDist: 6,
