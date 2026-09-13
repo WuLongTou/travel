@@ -8,8 +8,7 @@ import { buildCosmicWeb, buildStarSwarm } from './galaxy-gen.js';
 import { makeGlowSprite } from '../render/bodies.js';
 import { makeTextSprite, labelScaleFor } from '../render/labels.js';
 import { SUPER_STRUCTURES } from './data/super-structures.js';
-
-const MPC_KM = 3.0857e19;
+import { GM_SUN_MPC, MPC_KM, shipMaxSpeed, shipAcc } from './physics.js';
 
 export function buildSuperWorld() {
   const group = new THREE.Group();
@@ -77,10 +76,23 @@ export function buildSuperWorld() {
   };
   entities.push(localGroupEnt);
 
-  // 分层引力真实化（LOD）：本层的「天体」= 星系团。
+  // 真实物理口径：星系团井 GM = 总质量 × GM☉（Mpc³/s² 换算），质量取
+  // 核实量级（ Virgo ≈1.5e15、Fornax ≈7e13、Coma ≈2e15、Hydra ≈1e14、
+  // Centaurus ≈1e14、Perseus ≈1e15 M☉）。碰撞半径 = 团核心半径（上限
+  // 3 Mpc——拉尼亚凯亚这类超大结构是「标注」不是可撞天体，其中心就在
+  // 本地群附近，给碰撞半径会让浮升落点立即「撞入」）。16.5 Mpc 外室女
+  // 团的圆速度 ≈600+ km/s——与真实本地群下落/逃逸速度量级一致。
+  const CLUSTER_MASS_SUN = {
+    'virgo-cluster': 1.5e15, 'fornax-cluster': 7e13, 'coma-cluster': 2e15,
+    'hydra-cluster': 1e14, 'centaurus-cluster': 1e14, 'perseus-cluster': 1e15,
+  };
   const gravityWells = entities
-    .filter((e) => e.type === 'clusterMark')
-    .map((e) => ({ ref: e, GM: 10, minR: 1.5, capR: 8, name: e.name }));
+    .filter((e) => CLUSTER_MASS_SUN[e.id])
+    .map((e) => {
+      const st = SUPER_STRUCTURES.find((x) => x.id === e.id);
+      const coreR = Math.min(3, Math.max(0.5, (st?.sizeKpc ?? 3000) * 0.15 / 1000)); // 团核心半径（Mpc，上限 3）
+      return { ref: e, GM: GM_SUN_MPC * CLUSTER_MASS_SUN[e.id], minR: coreR, capR: 8, name: e.name };
+    });
 
   return {
     id: 'super', title: '室女·宇宙网', unitName: 'Mpc', kmPerUnit: MPC_KM,
@@ -93,7 +105,10 @@ export function buildSuperWorld() {
     viewDist: 26,
     shipViewDist: 0.35, // 飞船跟拍视距
     labelFadeDist: 110,
-    maxSpeedWorldPerS: 3.2, thrustAccWorldPerS2: 1.4, timeScaleMax: 365 * 86400,
+    // 飞船性能与全层同一真实口径（300 km/s、0.6 m/s²，按 Mpc 单位换算）；
+    // 宇宙网尺度航行的节奏由时间倍率承担（百亿年/秒档下 100 Mpc ≈ 5 分钟）
+    maxSpeedWorldPerS: shipMaxSpeed(MPC_KM),
+    thrustAccWorldPerS2: shipAcc(MPC_KM), timeScaleMax: 3.15576e17,
     ambient: { starCount: 700, starSpread: 120 },
     gravityWells,
     group, entities,

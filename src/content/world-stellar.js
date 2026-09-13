@@ -9,6 +9,7 @@ import { LY_KM, tempToHex } from '../util/units.js';
 import { makeGlowSprite } from '../render/bodies.js';
 import { makeTextSprite, labelScaleFor } from '../render/labels.js';
 import { STAR_CATALOG } from './data/stars.js';
+import { GM_SUN_LY, shipMaxSpeed, shipAcc, starRadiusLy } from './physics.js';
 
 export function buildStellarWorld() {
   const group = new THREE.Group();
@@ -146,10 +147,13 @@ export function buildStellarWorld() {
   sunLabel.position.set(0, 0.9, 0);
   group.add(sunLabel);
 
-  // 分层引力真实化（LOD）：本层的「天体」= 恒星，每颗都有引力井
+  // 真实物理口径：每颗恒星一井，GM = GM☉ × 真实质量（换算到 ly³/s²），
+  // 碰撞半径 = 真实恒星半径（主序 M-R 近似）——贴近恒星表面才会撞毁。
+  // 真实 GM 下恒星引力只在近距离可感（1 ly 外绕行速度 ~0.4 km/s），
+  // 星际航行的「快」是真实物理：引力弹弓需要贴到 AU 量级才明显
   const gravityWells = entities
     .filter((e) => e.type === 'star')
-    .map((e) => ({ ref: e, GM: 0.8 * (e.mass ?? 1), minR: 0.5, capR: 2.5, name: e.name }));
+    .map((e) => ({ ref: e, GM: GM_SUN_LY * (e.mass ?? 1), minR: starRadiusLy(e.mass), capR: 2.5, name: e.name }));
 
   return {
     id: 'stellar', title: '星际近邻', unitName: 'ly', kmPerUnit: LY_KM,
@@ -162,7 +166,10 @@ export function buildStellarWorld() {
     viewDist: 6,
     shipViewDist: 0.35, // 飞船第三人称跟拍视距
     labelFadeDist: 14,
-    maxSpeedWorldPerS: 1.6, thrustAccWorldPerS2: 0.7, timeScaleMax: 365 * 86400,
+    // 飞船性能与全层同一真实口径（300 km/s、0.6 m/s²，按 ly 单位换算）；
+    // 跨恒星航行的节奏由时间倍率承担（千年/秒档下 60 ly ≈ 60 墙上秒）
+    maxSpeedWorldPerS: shipMaxSpeed(LY_KM), thrustAccWorldPerS2: shipAcc(LY_KM),
+    timeScaleMax: 3.15576e10,
     ambient: { starCount: 1800, starSpread: 260, milkyWay: true },
     gravityWells,
     group, entities,

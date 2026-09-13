@@ -41,8 +41,11 @@ export class Probe {
         if (r < bestR) { bestR = r; best = { c, GM: w.GM, ref: w.ref }; }
       }
       if (best && best.GM > 0) {
-        // 圆轨道速度 v = sqrt(GM / r)
-        const v = Math.sqrt(best.GM / bestR);
+        // 圆轨道速度 v = sqrt(GM / r)；真实口径下深层井的圆速度可能超出
+        // 飞船性能上限（星系团近旁 400+ km/s > 300），clamp 后成为椭圆
+        // 轨道近/远心点——物理合法且初始速度不失控
+        const vmax = (this.world.maxSpeedWorldPerS || Infinity) * 0.9;
+        const v = Math.min(Math.sqrt(best.GM / bestR), vmax);
         const dx = this.pos[0] - best.c[0], dy = this.pos[1] - best.c[1], dz = this.pos[2] - best.c[2];
         let tx = dz, ty = 0, tz = -dx;
         const tl = Math.hypot(tx, ty, tz) || 1;
@@ -196,7 +199,10 @@ export class Probe {
         const r = Math.hypot(dx, dy, dz) || 1e-9;
         tau = Math.min(tau, Math.sqrt(r * r * r / well.GM));
       }
-      const h = Math.min(remain, Math.min(Math.max(tau * 0.05, 0.5), 1.5e6));
+      // 步长 = 1/20 局部轨道时标（20 步/圈，半隐式欧拉精度足够）；0.5s 下限
+      // 防极深井步长过小耗尽预算。无井（tau=∞）时整帧一步。不设绝对值上限：
+      // 星系/宇宙网层轨道时标巨大（~1e16 s），硬 cap 会让高倍率下时间打折
+      const h = Math.min(remain, Math.max(tau * 0.05, 0.5));
 
       // 万有引力合力加速度计算：a = sum(GM / r^2 * r_hat)
       let gx = 0, gy = 0, gz = 0;

@@ -9,8 +9,8 @@ import { buildCosmicWeb } from './galaxy-gen.js';
 import { makeTextSprite, labelScaleFor } from '../render/labels.js';
 import { cmbShell } from '../render/background.js';
 import { COSMOS_INFO } from './data/cosmos.js';
+import { GPC_KM, shipMaxSpeed, shipAcc } from './physics.js';
 
-const GPC_KM = 3.0857e22;
 export const OBSERVABLE_RADIUS_GPC = 14.2; // ≈46.5 Gly（research 校准）
 
 export function buildCosmosWorld() {
@@ -95,7 +95,10 @@ export function buildCosmosWorld() {
     viewDist: 12,
     shipViewDist: 0.35, // 飞船第三人称跟拍视距
     labelFadeDist: 45,
-    maxSpeedWorldPerS: 2.4, thrustAccWorldPerS2: 1.0, timeScaleMax: 365 * 86400,
+    // 飞船性能与全层同一真实口径（300 km/s、0.6 m/s²，按 Gpc 单位换算）；
+    // 本层无引力井（纯导航层，跨层用导航跃迁），时间倍率上限取千亿年/秒
+    maxSpeedWorldPerS: shipMaxSpeed(GPC_KM),
+    thrustAccWorldPerS2: shipAcc(GPC_KM), timeScaleMax: 3.15576e18,
     ambient: { starCount: 0, starSpread: 0, cmb: false },
     group, entities,
     update() {},

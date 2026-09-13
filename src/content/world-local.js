@@ -6,8 +6,8 @@ import { registerWorld } from './worlds.js';
 import { mpcToLy } from '../util/units.js';
 import { buildGalaxy, buildStarSwarm } from './galaxy-gen.js';import { makeTextSprite, labelScaleFor } from '../render/labels.js';
 import { LOCAL_GROUP } from './data/local-group.js';
+import { GM_SUN_MPC, MPC_KM, shipMaxSpeed, shipAcc } from './physics.js';
 
-const MPC_KM = 3.0857e19;
 
 // 星系渲染：M31 与银河是对等的棒旋；远近不同给大小/倾斜。简化：全部用一个
 // 可配置盘。视觉示意：真实半径 ~kpc 级，但在 Mpc 尺度不可见 → 用「示意大小」
@@ -92,15 +92,16 @@ export function buildLocalWorld() {
     dive: { toWorld: 'galaxy', at: [0, 0, 0], dist: 0.35, targetName: '银河系内部' },
   });
 
-  // 分层引力真实化（LOD）：本层的「天体」= 星系。大质量星系给教学演示
-  // GM（Mpc³/s²，无逐星系质量数据）：银河系/仙女座 3e-5——圆轨道速度
-  // v=√(GM/r) 在 0.3 Mpc 处 ≈0.01 u/s（层速上限 0.02），实时约 3 分钟
-  // 一圈；三角座减半，矮星系忽略。探测器可绕仙女座弹弓/被俘获。
+  // 真实物理口径：星系井 GM = 总质量（含暗晕）× GM☉（Mpc³/s² 换算）。
+  // 质量取核实值：银河系 ≈1.15e12 M☉、仙女座 ≈1.5e12 M☉（信息卡一致）、
+  // 三角座 ≈5e10 M☉、大麦云 ≈1.38e10 M☉（信息卡）、小麦云 ≈7e9 M☉。
+  // 碰撞半径 = 星系盘半径（kpc→Mpc）。0.77 Mpc 处仙女座圆速度 ≈290 km/s，
+  // 与真实本星系群逃逸速度量级一致——银河系与仙女座相互绕行/接近全部真实。
+  const GALAXY_MASS_SUN = { milkyway: 1.15e12, m31: 1.5e12, m33: 5e10, lmc: 1.38e10, smc: 7e9 };
+  const DISK_R_MPC = { milkyway: 1.5e-2, m31: 1.5e-2, m33: 9.2e-3, lmc: 4.3e-3, smc: 3.7e-3 }; // kpc→Mpc
   const gravityWells = entities
-    .filter((e) => e.id === 'milkyway' || e.id === 'm31')
-    .map((e) => ({ ref: e, GM: 3e-5, minR: 0.06, capR: 0.25, name: e.name }));
-  const m33Ent = entities.find((e) => e.id === 'm33');
-  if (m33Ent) gravityWells.push({ ref: m33Ent, GM: 6e-6, minR: 0.05, capR: 0.15, name: m33Ent.name });
+    .filter((e) => GALAXY_MASS_SUN[e.id])
+    .map((e) => ({ ref: e, GM: GM_SUN_MPC * GALAXY_MASS_SUN[e.id], minR: DISK_R_MPC[e.id], capR: 0.25, name: e.name }));
 
   return {
     id: 'local', title: '本星系群', unitName: 'Mpc', kmPerUnit: MPC_KM,
@@ -108,11 +109,15 @@ export function buildLocalWorld() {
     worldRadius: 1.2,
     // 大巡游路线（T 键）：银河系 → 麦哲伦云 → 三角座 → 仙女座压轴
     tourStops: ['milkyway', 'lmc', 'smc', 'm33', 'm31'],
-    spawn: [0.9, 0.3, 0.9],
+    // 出生在浮升阈值（85% 半径 ≈1.02 Mpc）内侧，靠近银河系一侧
+    spawn: [0.45, 0.15, 0.45],
     spawnLookAt: [0, 0, 0], // 兴趣中心：银河系（原点）
     viewDist: 0.6,
     labelFadeDist: 2.4, // 本星系群全景下成员标签可见
-    maxSpeedWorldPerS: 0.02, thrustAccWorldPerS2: 0.008, timeScaleMax: 365 * 86400 * 100,
+    // 飞船性能与全层同一真实口径（300 km/s、0.6 m/s²，按 Mpc 单位换算）；
+    // 星系间航行的节奏由时间倍率承担（亿年/秒档下 1 Mpc ≈ 33 墙上秒）
+    maxSpeedWorldPerS: shipMaxSpeed(MPC_KM),
+    thrustAccWorldPerS2: shipAcc(MPC_KM), timeScaleMax: 3.15576e15,
     ambient: { starCount: 1200, starSpread: 4 },
     gravityWells,
     group, entities,

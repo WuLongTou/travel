@@ -7,8 +7,8 @@ import { registerWorld } from './worlds.js';
 import { buildGalaxy, buildStarSwarm } from './galaxy-gen.js';
 import { makeGlowSprite } from '../render/bodies.js';
 import { makeTextSprite, labelScaleFor } from '../render/labels.js';
-
-const KPC_KM = 3.0857e16; // 1 kpc km
+import { GM_SUN_KPC, KPC_KM, shipMaxSpeed, shipAcc } from './physics.js';
+import { C_KM_S } from '../util/units.js';
 
 // 世界内容构造（engine 渲染），返回：group / entities / update
 export function buildGalaxyWorld() {
@@ -65,6 +65,12 @@ export function buildGalaxyWorld() {
   // 太阳系/星际层。我们把「下潜」交给子世界导航，由导航器提供）。这里只放两个
   // 点选目标：银心与太阳系（无下潜，展示 info）。
 
+  // 银心真实质量（GRAVITY 合作组 2019/2022：约 4.3e6 M☉）；
+  // 碰撞半径 = 史瓦西半径 r_s = 2GM/c²（换算到 kpc）
+  const SGR_A_SUN = 4.3e6;
+  const GM_SGR_A = GM_SUN_KPC * SGR_A_SUN;
+  const RS_SGR_A_KPC = 2 * GM_SGR_A * KPC_KM / (C_KM_S * C_KM_S);
+
   const coreEntity = {
     id: 'sgrA', name: '人马座 A*', en: 'Sagittarius A*', type: 'blackhole',
     pos: centerPos, pickRadius: 0.8,
@@ -78,6 +84,7 @@ export function buildGalaxyWorld() {
   entities.push(coreEntity);
   coreGlow.userData.entity = coreEntity;
 
+  let _lastPos = null, _lastT = 0; // 动点差分用
   // 太阳系及星际邻域实体（可自动下潜至星际近邻）
   const sunSysEntity = {
     id: 'solar-neighborhood', name: '太阳系与星际邻域', en: 'Solar Neighborhood', type: 'system',
@@ -118,14 +125,25 @@ export function buildGalaxyWorld() {
     worldRadius: diskR,
     // 大巡游路线（T 键）：太阳邻域 → 银心 → 盘外全景
     tourStops: ['solar-neighborhood', 'sgrA', 'milkyway'],
-    gravityWells: [{ center: [0, 0, 0], GM: 0.12, minR: 0.6, name: '银心' }],
-    spawn: [diskR * 0.75, diskR * 0.45, diskR * 0.75],
+    // 真实物理口径两井（分层 LOD）：
+    // - 银河系井：GM 按太阳轨道旋转曲线匹配（v=220 km/s @ 8.2 kpc，
+    //   等效核球+暗晕在盘内的质量 ≈9.2e10 M☉）——太阳轨道圆速度真实；
+    //   碰撞半径取银心核区 1 pc（更深处由 Sgr A* 井接管）
+    // - Sgr A* 井：真实质量 4.3e6 M☉，碰撞半径 = 史瓦西半径
+    gravityWells: [
+      { center: [0, 0, 0], GM: (220 / KPC_KM) ** 2 * 8.2, minR: 1e-3, name: '银心' }, // 1 pc 核区
+      { ref: coreEntity, GM: GM_SGR_A, minR: RS_SGR_A_KPC, name: '人马座 A*' },
+    ],
+    // 出生在盘内（>85% 盘半径会触发自动浮升）：近太阳方位、约 0.46 盘半径
+    spawn: [diskR * 0.3, diskR * 0.18, diskR * 0.3],
     spawnLookAt: [0, 0, 0],
     viewDist: 12,
     shipViewDist: 0.35, // 飞船第三人称跟拍视距
     labelFadeDist: 40,
-    maxSpeedWorldPerS: 0.35,
-    thrustAccWorldPerS2: 0.12, timeScaleMax: 1,
+    // 飞船性能与全层同一真实口径（300 km/s、0.6 m/s²，按 kpc 单位换算）；
+    // 星系内航行的节奏由时间倍率承担（亿年/秒档下 10 kpc ≈ 3 墙上秒）
+    maxSpeedWorldPerS: shipMaxSpeed(KPC_KM),
+    thrustAccWorldPerS2: shipAcc(KPC_KM), timeScaleMax: 3.15576e15,
     ambient: { starCount: 1500, starSpread: 60 },
     group, entities,
     update(dtSim, clock) {
@@ -134,6 +152,13 @@ export function buildGalaxyWorld() {
       const sx = Math.cos(sunAng) * SUN_R_LOCAL * diskR;
       const sz = Math.sin(sunAng) * SUN_R_LOCAL * diskR;
       sunLabel.position.set(sx, 0.5, sz);
+      // 动点速度（中心差分口径：制导拦截需要目标公转速度矢量）
+      const dt = clock.t - _lastT;
+      if (dt > 0 && _lastPos) {
+        sunSysEntity.vel = [(sx - _lastPos[0]) / dt, 0, (sz - _lastPos[1]) / dt];
+      }
+      _lastPos = [sx, sz];
+      _lastT = clock.t;
       sunSysEntity.pos[0] = sx;
       sunSysEntity.pos[2] = sz;
     },

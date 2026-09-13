@@ -31,9 +31,12 @@ import { TrailRibbon } from './render/trail.js';
 import { makeShip, updateShipFlame } from './render/ship.js';
 
 // 时间倍率阶梯（[ ] 键步进切换）。真实物理口径下飞船速度远低于光速，
-// 跨行星/星际航行的节奏全部由时间倍率承担（AUTO 自动管理，见 autoWarpTick）
-const TIME_RATES = [1, 60, 3600, 21600, 86400, 604800, 2629800, 31557600, 315576000, 3155760000, 31557600000];
-const TIME_RATE_LABELS = ['实时', '1分/秒', '1时/秒', '6时/秒', '1天/秒', '1周/秒', '1月/秒', '1年/秒', '10年/秒', '100年/秒', '千年/秒'];
+// 从行星际到宇宙网的航行节奏全部由时间倍率承担（AUTO 自动管理，见 autoWarpTick）：
+// 太阳系用天/年级档位，星系/宇宙网尺度需要亿年/千亿年级档位
+const TIME_RATES = [1, 60, 3600, 21600, 86400, 604800, 2629800, 31557600, 315576000, 3155760000, 31557600000,
+  3.15576e11, 3.15576e13, 3.15576e15, 3.15576e17, 3.15576e18];
+const TIME_RATE_LABELS = ['实时', '1分/秒', '1时/秒', '6时/秒', '1天/秒', '1周/秒', '1月/秒', '1年/秒', '10年/秒', '100年/秒', '千年/秒',
+  '万年/秒', '百万年/秒', '亿年/秒', '百亿年/秒', '千亿年/秒'];
 
 const canvas = document.getElementById('scene');
 const engine = new CosmicEngine(canvas);
@@ -254,19 +257,27 @@ function autoWarpTick() {
     if (dSel < lastParkDist * 3) target = Math.min(target, 3600);
   }
   // 物理硬包线：接近中速度/视线角波动会让 ETA 公式瞬时爆表，必须约束
-  // 单帧位移（≤2% 剩余距离，防瞬移越过目标）与单帧 Δv（≤5% 巡航速度，
-  // 防推力瞬跳）——包线与 ETA 取最小，任何瞬态都无法突破
+  // 单帧位移 ≤2% 剩余距离（防瞬移越过目标）——帧内 Δv=acc×dtSim 是
+  // 高倍率快进的连续物理推演而非推力瞬跳（矢量制导 τ 已自适应帧长），
+  // 不再另设 Δv 包线（绝对值上限会把星系/宇宙网层的配速钳死不可玩）
   if (selected) {
     const dSel = dist3(probe.pos, selected.pos);
     const vNow = probe.speedWorldPerS();
     if (vNow > 1e-14) target = Math.min(target, dSel * 0.02 / (vNow * 0.016));
   }
-  const accW = curWorld.thrustAccWorldPerS2 || 1.2;
-  const maxSpW = curWorld.maxSpeedWorldPerS || 5.0;
-  target = Math.min(target, maxSpW * 0.05 / (accW * 0.016));
   // 连续倍率（不吸附档位）：ETA 恒定 ≈25 墙上秒，制动曲线全程平滑变速；
   // curTimeIdx 同步到最近档位供 [ ] 步进起点
-  const rate = Math.min(Math.max(target, 1), TIME_RATES[TIME_RATES.length - 1]);
+  // 普适位移包线：每墙秒位移 ≤5% 层半径。无目标的井配速 r/(vCirc×60)
+  // 对径向逃离存在正反馈（r 涨→rate 涨→位移涨→r 更快涨），船会在数十
+  // 墙秒内指数式飞出层触发连环浮升——包线只切断失控，正常泊车配速
+  //（远低于此）不受影响
+  if (curWorld.worldRadius > 0) {
+    const vCap = probe.speedWorldPerS();
+    if (vCap > 1e-14) target = Math.min(target, curWorld.worldRadius * 0.05 / (vCap * 0.016));
+  }
+  // 层级上限：timeScaleMax 是每层的合理倍率顶（navigator 换层同款钳制）
+  // ——真实 GM 的远场井 vCirc≈0，井配速公式会给出无界倍率，必须兜住
+  const rate = Math.min(Math.max(target, 1), curWorld.timeScaleMax || TIME_RATES[TIME_RATES.length - 1]);
   let best = 0;
   for (let i = 0; i < TIME_RATES.length; i++) {
     if (Math.abs(TIME_RATES[i] - rate) < Math.abs(TIME_RATES[best] - rate)) best = i;
@@ -459,6 +470,7 @@ function renderFrame(now) {
     // 上帝视角下 Shift 加速只作用于相机移动，绝不让背景中的飞船尾焰呈现加力
     const isBoosting = controlMode !== MODE_GOD && a.boost && manualThrustKeys;
     const maxSp = curWorld.maxSpeedWorldPerS || 5.0;
+    const acc = curWorld.thrustAccWorldPerS2 || 1.2; // 推进加速度（各分支共用）
     controlMode = isIntervening ? MODE_MANUAL : (controlMode === MODE_MANUAL ? MODE_AUTO : controlMode);
 
     let autoFwdThrust = false;
@@ -528,7 +540,6 @@ function renderFrame(now) {
         const targetPos = selected.pos;
         const dToTarget = dist3(probe.pos, targetPos);
         const targetRadius = selected.pickRadius || 0.2;
-        const acc = curWorld.thrustAccWorldPerS2 || 1.2;
 
         // 泊车物理：泊距必须落在「目标自身引力占优」的范围内（g_own ≥ 2×最强
         // 第三方井，近似希尔球），泊位轨道才开普勒稳定——行星泊位若悬停在
@@ -642,7 +653,10 @@ function renderFrame(now) {
               ax += wx / wr * gFeed; ay += wy / wr * gFeed; az += wz / wr * gFeed;
               const aMag = Math.hypot(ax, ay, az);
               navDbg = { branch: 'station', rendMode, d: dToTarget, vApp: vAppSt, aMag: aMag / acc, rate: clock.rate };
-              if (aMag > acc * 0.02) {
+              // 不设推力死区：scale=aMag/acc 连续自适应（远层自动微推、
+              // 近层饱和），帧内 Δv 由 τ=3dtSim 保证 ≤误差/3，任何死区
+              // 阈值在跨尺度环境都会误伤某个层的工作点
+              if (aMag > 0) {
                 steerTowardsDir([ax, ay, az], dtReal, autoTurn(2.2));
                 autoFwdThrust = true;
                 autoThrustScale = Math.min(1.0, aMag / acc);
@@ -693,7 +707,8 @@ function renderFrame(now) {
               navDbg = { branch: 'rendezvous', rendMode, d: dToTarget, park: safeParkDistance,
                 vApp: vApp, vRel: Math.hypot(vCx, vCy, vCz), vRad: vCx * rlx + vCy * rly + vCz * rlz,
                 vTanDes, ff, aMag: aMag / acc, rate: clock.rate };
-              if (aMag > acc * 0.02) {
+              // 不设推力死区（同驻点段注释）
+              if (aMag > 0) {
                 // 推力沿模拟时间轴积分而转向按真实秒进行，高倍率下转向必须
                 // 同步提速，否则机头永远滞后于制导指令方向
                 steerTowardsDir([ax, ay, az], dtReal, autoTurn(2.2));
@@ -733,7 +748,8 @@ function renderFrame(now) {
             const aMag = Math.hypot(ax, ay, az);
             navDbg = { branch: 'cruise', rendMode, d: dToTarget, park: safeParkDistance,
               vDes: vAppC, aMag: aMag / acc, rate: clock.rate };
-            if (aMag > acc * 0.02) {
+            // 不设推力死区（同交会/驻点段注释：跨尺度下任何阈值都会误伤）
+            if (aMag > 0) {
               steerTowardsDir([ax, ay, az], dtReal, autoTurn(2.2));
               autoFwdThrust = true;
               autoThrustScale = Math.min(1.0, aMag / acc);
@@ -773,7 +789,9 @@ function renderFrame(now) {
           const cruiseSpeed = maxSp * 0.35;
           if (fwdSpeed < cruiseSpeed * 0.6) {
             autoFwdThrust = true;
-            autoThrustScale = Math.min(1.0, Math.max(0.15, (cruiseSpeed - fwdSpeed) / (maxSp * 0.25)));
+            // 差额限幅：帧内 Δv 不超过到巡航速度的差额（防极端倍率一帧超调）
+            autoThrustScale = Math.min(1.0, Math.max(0.15, (cruiseSpeed - fwdSpeed) / (maxSp * 0.25)),
+              Math.max(0, cruiseSpeed - fwdSpeed) / (acc * Math.max(dtSim, 1e-9)));
             flightStatus = '全自动航行 · 巡航推进 (保持航向)';
           } else {
             flightStatus = '全自动航行 · 惯性巡航 (保持航向)';
