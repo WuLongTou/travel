@@ -44,7 +44,7 @@ export function makeRing(innerWorld, outerWorld, color = '#d9cbb0') {
   const geo = new THREE.RingGeometry(innerWorld, outerWorld, 96, 1);
   // RingGeometry 的 UV 沿径向分布：把条纹贴图画成径向明暗 + 内外缘透明
   const mat = new THREE.MeshBasicMaterial({
-    map: ringTexture(color),
+    map: ringTexture({ color }),
     color: 0xffffff,
     side: THREE.DoubleSide,
     transparent: true,

@@ -192,6 +192,7 @@ nav.onWorldChanged = (world, idx) => {
   engine.loadWorld(world, world.group, []);
   ui.setCrumb(idx);
   ui.setScaleHud(`${world.title} · 1单位≈${unitRulerText(world.unitName)}`);
+  ui.showLayerIntro(world.intro); // 层教学文案横幅（各层 build 时声明）
   selected = null;
   ui.hideInfo();
 

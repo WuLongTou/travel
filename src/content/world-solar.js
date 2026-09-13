@@ -65,7 +65,6 @@ function keplerPos(o, t, out = _orbTmp) {
 export function buildSolarWorld() {
   const group = new THREE.Group();
   const entities = [];
-  const pickables = [];
   const moonAnims = []; // 卫星公转动画：{ mesh(相对行星), aAU, periodS, phase }
   const spins = []; // 行星自转：{ tex, rotPeriodS }（贴图 offset 驱动，不带动卫星/标签）
   const clockHandles = []; // 额外模拟回调（彗星轨道等），update 时以 (dtSim, clock.t) 调用
@@ -350,7 +349,7 @@ export function buildSolarWorld() {
     maxSpeedWorldPerS: 2.005e-6,
     thrustAccWorldPerS2: 4.01e-12, timeScaleMax: 3.156e10,
     ambient: { starCount: 1400, starSpread: 600, milkyWay: true },
-    group, entities, pickables,
+    group, entities,
     spawnLookAt: (() => {
       const earth = entities.find((e) => e.id === 'earth');
       return earth.pos.slice();

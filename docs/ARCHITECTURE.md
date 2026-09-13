@@ -80,8 +80,8 @@ src/
     world-*.js       # 六个世界构建器（每层一个文件）
     galaxy-gen.js    # buildGalaxy（棒旋点云）/buildStarSwarm/buildCosmicWeb
     data/*.js        # 核实数据：solar/stars/local-group/super-structures/cosmos
-  ui/controller.js   # 层级栏/时间栏/飞行快捷按钮/HUD/信息卡
-                     # （飞行快捷=合成键盘事件复用 input 管线）
+  ui/controller.js   # 层级栏/时间栏/飞行快捷按钮/HUD/信息卡/层介绍横幅
+                     # （进入新尺度层时展示该层 intro 教学文案后淡出）
   util/              # units（AU/ly/pc/km 换算、色温→hex）、math（mulberry32）
 ```
 

@@ -8,7 +8,7 @@ export class UI {
     const ids = ['crumb','infocard','info-title','info-sub',
       'info-facts','info-text','info-actions','info-close','info-schematic',
       'hud-speed','hud-dist','hud-clock','hud-mode','hud-rate','hud-scale',
-      'fade','loading','controls-hint','cockpit-frame'];
+      'fade','loading','controls-hint','cockpit-frame','layer-intro'];
     for (const id of ids) this.el[id] = document.getElementById(id);
     this._bindInfoClose();
     this._setupHintToggle();
@@ -77,6 +77,15 @@ export class UI {
   // 座舱框显隐：仅飞船座舱视角显示（上帝视角/追尾/环绕隐藏）
   setCockpitFrame(on) {
     if (this.el['cockpit-frame']) this.el['cockpit-frame'].classList.toggle('hidden', !on);
+  }
+  // 层介绍横幅：进入新尺度层时展示该层教学文案，数秒后淡出
+  showLayerIntro(text, secs = 7) {
+    const el = this.el['layer-intro'];
+    if (!el || !text) return;
+    el.textContent = text;
+    el.classList.add('show');
+    clearTimeout(this._introTimer);
+    this._introTimer = setTimeout(() => el.classList.remove('show'), secs * 1000);
   }
 
   // ---- 信息卡 ----

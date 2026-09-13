@@ -2,12 +2,11 @@
 // 每个尺度层（world）是一个独立坐标空间（世界单位 = 该层 kmPerUnit）。
 // world 由 build 函数产出（见 src/worlds/*.js），返回：
 //   {
-//     id, title, subtitle, kmPerUnit,             // 1 世界单位 = ? km（真实比例用）
+//     id, title, intro, kmPerUnit,                // 1 世界单位 = ? km（真实比例用）
 //     unitName,                                    // 显示单位名（如 AU / ly / kpc）
 //     worldRadius,                                 // 内容活动半径（世界单位，用于相机与边界）
 //     spawn,                                       // 探测球出生点 [x,y,z]
-//     cruiseKmS,                                   // 探测球巡航速度（真实 km/s 折算，用于 HUD 光速对照）
-//     maxCruiseWorldPerS,                          // 探测球世界速度上限（世界单位/真实秒）
+//     maxSpeedWorldPerS,                           // 探测球世界速度上限（世界单位/真实秒，=300 km/s 换算）
 //     timeScaleMax,                                // 本层时间倍率上限（模拟钟）
 //     ambient: { starDensity, milkyWay, cmb },     // 背景装饰
 //     build(engine) => { group, entities, update(dtSim), labelPolicy }  // group 加入场景
