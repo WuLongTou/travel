@@ -31,12 +31,14 @@ export class Input {
     this.buttons = new Set();      // 按下的鼠标键集合 (0: 左键, 1: 中键, 2: 右键)
     this.mouseDown = false;
     this.mouse = { x: 0, y: 0 };
+    this.dragged = false; // 左键按住期间拖拽是否超过点击阈值（抑制松手误拾取）
+    this._dragDist = 0;
     this.pointerLocked = false;
     this.onLockChange = null; // UI 提示回调
     const kd = (e) => {
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
       const k = e.key.toLowerCase();
-      if ([' ', 'w', 'a', 's', 'd', 'q', 'e', 'c', 'g', 'r', 'x', 'v', 'h', 'z', 't',
+      if ([' ', 'w', 'a', 's', 'd', 'q', 'e', 'c', 'g', 'r', 'x', 'v', 'z', 't',
         'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift', 'f',
         '[', ']', '\\', 'tab', 'backspace'].includes(k)) {
         e.preventDefault();
@@ -54,7 +56,13 @@ export class Input {
 
     const md = (e) => {
       this.buttons.add(e.button);
+      // 每次按下刷新拖拽起点并重置拖拽标记：指针锁定期间 mouse 不更新，
+      // 不刷新会让解锁后/首次拖拽的第一帧位移从陈旧起点累计成巨量跳变
+      this.mouse.x = e.clientX;
+      this.mouse.y = e.clientY;
       if (e.button === 0) {
+        this.dragged = false;
+        this._dragDist = 0;
         // 未锁定时：首次左键点击请求指针锁定（游戏惯例）；锁定状态下左键仅用于拾取
         if (!this.pointerLocked && canvas.requestPointerLock) {
           const pr = canvas.requestPointerLock();
@@ -82,6 +90,10 @@ export class Input {
         } else if (this.mouseDown) {
           this.steer.dx += dx;
           this.steer.dy += dy;
+          // 累计左键拖拽距离：超过 5px 判定为拖拽环视而非点击（松手时
+          // click 事件据此抑制天体拾取，防止拖拽看风景误锁目标）
+          this._dragDist += Math.hypot(dx, dy);
+          if (this._dragDist > 5) this.dragged = true;
         }
         this.mouse.x = e.clientX;
         this.mouse.y = e.clientY;

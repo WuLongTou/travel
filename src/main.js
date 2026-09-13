@@ -15,7 +15,8 @@ import { Probe } from './core/probe.js';
 import { SimClock } from './core/clock.js';
 import { Navigator } from './core/navigator.js';
 import { UI } from './ui/controller.js';
-import { worldFactories } from './content/worlds.js';
+import { worldFactories, LAYER_CHAIN } from './content/worlds.js';
+import { WORLD_BY_ID } from './content/schema.js';
 // 世界模块（副作用自注册）
 import './content/world-solar.js';
 import './content/world-stellar.js';
@@ -37,6 +38,10 @@ const TIME_RATES = [1, 60, 3600, 21600, 86400, 604800, 2629800, 31557600, 315576
   3.15576e11, 3.15576e13, 3.15576e15, 3.15576e17, 3.15576e18];
 const TIME_RATE_LABELS = ['实时', '1分/秒', '1时/秒', '6时/秒', '1天/秒', '1周/秒', '1月/秒', '1年/秒', '10年/秒', '100年/秒', '千年/秒',
   '万年/秒', '百万年/秒', '亿年/秒', '百亿年/秒', '千亿年/秒'];
+// 手动接管的时间倍率上限：高倍率下按住推进键会在一帧内获得超光速 Δv
+//（数值爆炸触发回滚），手动机动只需近景精度，钳到「1时/秒」档；
+// 松手后 autoWarpTick 按配速公式自动恢复高倍率，跨层航行不受影响
+const MANUAL_MAX_RATE = 3600;
 
 const canvas = document.getElementById('scene');
 const engine = new CosmicEngine(canvas);
@@ -69,6 +74,8 @@ let rendMode = false; // 交会模式滞回：2.5 泊距进入、3.5 泊距退�
 let navDbg = null; // 自动导航诊断快照（__universe.dbg 暴露，无头验证用）
 let hoveredId = null;
 let warpMode = 'auto'; // 自动时间倍率：'auto'（按 ETA 自选档）| 'user'（用户 [ ] 接管）
+let prevManual = false; // 上一帧是否人工干预（进入干预的边沿用于钳制倍率）
+let edgeHintShown = false; // 层界浮升提示每层只提示一次（换层重置）
 
 function clearSelection() {
   selected = null;
@@ -181,6 +188,7 @@ nav.onBeforeWorldChange = () => {
 nav.onWorldChanged = (world, idx) => {
   curWorld = world;
   warpMode = 'auto'; // 换层恢复自动时间倍率
+  edgeHintShown = false; // 新层重新允许层界提示
   engine.loadWorld(world, world.group, []);
   ui.setCrumb(idx);
   ui.setScaleHud(`${world.title} · 1单位≈${unitRulerText(world.unitName)}`);
@@ -202,6 +210,7 @@ let prevBracketR = false;
 let prevBackslash = false;
 let prevG = false;
 let prevT = false;
+let prevF = false;
 
 // 有限角速度平滑转向给定三维方向向量
 function steerTowardsDir(dir, dtReal, maxTurn = 1.2) {
@@ -374,12 +383,23 @@ function renderFrame(now) {
   }
   prevR = rDown;
 
-  // V 键（边沿触发）：循环切换视角（追尾 chase ⇄ 座舱 cockpit ⇄ 环绕 orbit）
+  // V 键（边沿触发）：循环切换视角（追尾 chase ⇄ 座舱 cockpit ⇄ 环绕 orbit）。
+  // 上帝视角下不响应——此时追逐相机处于休眠状态，误切会导致返回飞船后视角莫名改变
   const vDown = input.keys.has('v');
-  if (vDown && !prevV && curWorld) {
+  if (vDown && !prevV && curWorld && controlMode !== MODE_GOD) {
     chaseCam.cycleView();
   }
   prevV = vDown;
+
+  // F 键（边沿触发）：下潜进入当前选中/准星目标的子系统层（跨层旅行快捷键，
+  // 与信息卡「进入…」按钮同效）
+  const fDown = input.keys.has('f');
+  if (fDown && !prevF && curWorld) {
+    const target = selected || (hoveredId && curWorld.entities.find((e) => e.id === hoveredId));
+    if (target && target.dive) nav.diveInto(target);
+    else if (target) toastMsg('该天体没有可进入的内层世界');
+  }
+  prevF = fDown;
 
   // [ 键：时间减速步进（用户手动设置后自动倍率挂起，重选目标/换层恢复）
   const blDown = input.keys.has('[');
@@ -472,6 +492,19 @@ function renderFrame(now) {
     const maxSp = curWorld.maxSpeedWorldPerS || 5.0;
     const acc = curWorld.thrustAccWorldPerS2 || 1.2; // 推进加速度（各分支共用）
     controlMode = isIntervening ? MODE_MANUAL : (controlMode === MODE_MANUAL ? MODE_AUTO : controlMode);
+
+    // 进入人工干预的边沿：把倍率钳到手动可控档（见 MANUAL_MAX_RATE 注释），
+    // 避免宇宙层巡航的千亿年/秒倍率被带进手动机动——一帧 Δv 即超光速
+    if (isIntervening && !prevManual && clock.rate > MANUAL_MAX_RATE) {
+      clock.setRate(MANUAL_MAX_RATE);
+      let best = 0;
+      for (let i = 0; i < TIME_RATES.length; i++) {
+        if (Math.abs(TIME_RATES[i] - MANUAL_MAX_RATE) < Math.abs(TIME_RATES[best] - MANUAL_MAX_RATE)) best = i;
+      }
+      curTimeIdx = best;
+      toastMsg(`手动接管 · 倍率暂降至 ${TIME_RATE_LABELS[curTimeIdx]}（松手恢复自动）`);
+    }
+    prevManual = isIntervening;
 
     let autoFwdThrust = false;
     // 自动飞控的转向速率按模拟时间轴对齐：推力沿机头方向在模拟时间轴上
@@ -826,8 +859,8 @@ function renderFrame(now) {
       toastMsg('数值异常 · 已回滚本帧状态');
     }
 
-    // 飞船模型可见性与位姿同步
-    ship.visible = chaseCam.mode !== 'cockpit';
+    // 飞船模型可见性与位姿同步（上帝视角下无论休眠视角是哪种都保持可见）
+    ship.visible = controlMode === MODE_GOD || chaseCam.mode !== 'cockpit';
     if (ship.visible) {
       syncShip();
       updateShipFlame(ship, probe.thrustOn ? 1 : 0, isBoosting);
@@ -835,6 +868,19 @@ function renderFrame(now) {
 
     // 自动 LOD 尺度跃迁检测
     nav.checkAutoTransition(dtReal);
+
+    // 层界提示：飞船越过层半径 60% 后提示继续向外将浮升上一层（每层一次，
+    // 换层重置）——六层宇宙（太阳系→星际→银河系→本星系群→宇宙网→可观测
+    // 宇宙）靠「飞出层界自动浮升 / 飞近天体自动下潜」穿越，不给提示玩家
+    // 容易一直困在太阳系里不知道往哪飞
+    if (!edgeHintShown && nav.idx < LAYER_CHAIN.length - 1) {
+      const rCenter = Math.hypot(probe.pos[0], probe.pos[1], probe.pos[2]);
+      if (rCenter > curWorld.worldRadius * 0.6 && rCenter < curWorld.worldRadius * 0.85) {
+        const nextId = LAYER_CHAIN[nav.idx + 1];
+        edgeHintShown = true;
+        toastMsg(`接近层界 · 继续向外将浮升至「${WORLD_BY_ID[nextId].name}」`, 6);
+      }
+    }
 
     // 天体自转公转动力学推进
     clock.advance(dtReal);
@@ -848,9 +894,12 @@ function renderFrame(now) {
     // ==========================================
     const spKmS = probe.speedKmS();
     const cfrac = spKmS / C_KM_S;
-    const spText = spKmS < C_KM_S
-      ? Math.max(spKmS, 0).toLocaleString('zh-CN', { maximumFractionDigits: 0 }) + ' km/s'
-      : '≈' + cfrac.toFixed(2) + ' c';
+    // 速度自适应单位：亚 km/s 的近景机动用 m/s 表达，避免显示「0 km/s」
+    const spText = spKmS >= C_KM_S
+      ? '≈' + cfrac.toFixed(2) + ' c'
+      : spKmS >= 1
+        ? Math.max(spKmS, 0).toLocaleString('zh-CN', { maximumFractionDigits: 0 }) + ' km/s'
+        : Math.max(spKmS * 1000, 0).toFixed(spKmS * 1000 >= 100 ? 0 : 2) + ' m/s';
 
     let distText = '无目标（点击天体锁定）';
     const showEnt = selected || (hoveredId && curWorld.entities.find((e) => e.id === hoveredId));
@@ -910,8 +959,10 @@ function renderFrame(now) {
   engine.render(dtReal);
 }
 
-// 点击天体拾取目标
+// 点击天体拾取目标（左键拖拽环视后的松手不算点击——拖拽超过 5px 即抑制，
+// 防止「拖一圈看风景」误锁目标触发自动泊车）
 canvas.addEventListener('click', (ev) => {
+  if (input.dragged) { input.dragged = false; return; }
   if (!curWorld) return;
   let hit;
   if (input.pointerLocked) {
@@ -959,7 +1010,7 @@ async function boot() {
   requestAnimationFrame(loop);
 }
 
-window.addEventListener('resize', () => engine._resize());
+// （窗口 resize 由 engine 构造函数内注册的监听统一处理）
 
 // 全局调试挂载
 window.__universe = { engine, probe, clock, nav, ui, input, chaseCam, ship,

@@ -1,9 +1,12 @@
 // 游戏式相机：追踪 / 座舱 / 环绕三视角（V 键循环切换）
-//   chase   追踪（第三人称默认）：飞船后上方跟拍，相机随横滚小幅倾斜，
-//           加力时 FOV 拉宽营造速度感；滚轮缩放跟拍距离。
-//   cockpit 座舱（第一人称）：眼位在船头、朝向与飞船一致（准星即航向）。
-//   orbit   环绕观察：以飞船为目标自由环绕（鼠标增量转角、滚轮距离），
-//           只看不转——不改变飞船航向。
+//   chase   追踪（第三人称默认）：真追尾——相机锚在机尾后上方并随飞船
+//           航向转动（orbitYaw/Pitch 是相对机尾的偏移角），飞船转向时
+//           相机跟着绕到新机尾；加力时 FOV 拉宽营造速度感；滚轮缩放距离。
+//   cockpit 座舱（第一人称）：眼位在船头、朝向与飞船一致（准星即航向），
+//           鼠标 = 舱内转头环顾。
+//   orbit   环绕观察：以飞船为球心、世界系固定方位自由环绕（鼠标增量转角、
+//           滚轮距离），不随飞船航向转——只看不转，适合纯观察。
+//   三视角的鼠标方向统一遵循游戏常识：鼠标右移 = 视线向右，鼠标下移 = 视线向下。
 import * as THREE from 'three';
 
 export const VIEW_MODES = ['chase', 'cockpit', 'orbit'];
@@ -91,17 +94,19 @@ export class ChaseCam {
     const k = Math.min(1, dtReal * 12); // 平滑跟随系数
 
     if (this.mode === 'cockpit') {
-      // 座舱视角：眼位在船头，支持驾驶员在舱内 360° 自由转头环顾窗外星空
+      // 座舱视角：眼位在船头，支持驾驶员在舱内 360° 自由转头环顾窗外星空。
+      // 符号约定与 chase/orbit 一致：orbitYaw 正 = 向右看、orbitPitch 正 =
+      // 向下看（鼠标右移时 orbitBy 令 yaw 减小，故此处 right 分量取负号），
+      // 机头航向本身不被扰动
       const f = p.forward(), r = p.right(), u = p.up();
       const eye = [px + f[0] * 0.02, py + f[1] * 0.02, pz + f[2] * 0.02];
       this.camera.position.set(eye[0], eye[1], eye[2]);
 
-      // 观察朝向由飞船基底叠加玩家鼠标环顾角决定，机头航向本身不被扰动
       const cy = Math.cos(this.orbitYaw), sy = Math.sin(this.orbitYaw);
       const cp = Math.cos(this.orbitPitch), sp = Math.sin(this.orbitPitch);
-      const lx = f[0] * cy * cp + r[0] * sy * cp + u[0] * sp;
-      const ly = f[1] * cy * cp + r[1] * sy * cp + u[1] * sp;
-      const lz = f[2] * cy * cp + r[2] * sy * cp + u[2] * sp;
+      const lx = f[0] * cy * cp - r[0] * sy * cp - u[0] * sp;
+      const ly = f[1] * cy * cp - r[1] * sy * cp - u[1] * sp;
+      const lz = f[2] * cy * cp - r[2] * sy * cp - u[2] * sp;
 
       this._look.set(eye[0] + lx, eye[1] + ly, eye[2] + lz);
       this.camera.up.set(u[0], u[1], u[2]);
@@ -116,9 +121,20 @@ export class ChaseCam {
     const cy = py + this.panOffset.y;
     const cz = pz + this.panOffset.z;
 
-    // 追尾（chase）与环绕（orbit）：相机在以 (cx, cy, cz) 为球心的球面上全向自由环视
-    const cyaw = Math.cos(this.orbitYaw), syaw = Math.sin(this.orbitYaw);
-    const cpitch = Math.cos(this.orbitPitch), spitch = Math.sin(this.orbitPitch);
+    // 球面偏移角：
+    //   chase 真追尾——基准 = 机尾反方向（机尾方向球坐标恰为 (p.yaw, -p.pitch)），
+    //   叠加鼠标偏移后相机始终锚在机尾后上方，飞船转向时相机随之绕到新机尾；
+    //   orbit 世界系环绕——基准 = 世界 -Z 方向，方位固定，适合纯观察
+    let effYaw, effPitch;
+    if (this.mode === 'chase') {
+      effYaw = p.yaw + this.orbitYaw;
+      effPitch = THREE.MathUtils.clamp(-p.pitch + this.orbitPitch, -1.56, 1.56);
+    } else {
+      effYaw = this.orbitYaw;
+      effPitch = THREE.MathUtils.clamp(this.orbitPitch, -1.56, 1.56);
+    }
+    const cyaw = Math.cos(effYaw), syaw = Math.sin(effYaw);
+    const cpitch = Math.cos(effPitch), spitch = Math.sin(effPitch);
     const eye = [
       cx + syaw * cpitch * this.followDist,
       cy + spitch * this.followDist,

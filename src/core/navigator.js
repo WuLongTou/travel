@@ -34,8 +34,11 @@ export class Navigator {
     const prevAnchor = this.anchors[worldId];
     let spawn = opts.spawn || world.spawn;
     if (opts.escapeDir) {
-      // 从微观子系统冲出：在母系统中心天体外围沿逃逸矢量方向出现，继续向外航行
-      const r = Math.max(world.worldRadius * 0.08, 1.5);
+      // 从微观子系统冲出：在母系统中心天体外围沿逃逸矢量方向出现，继续向外航行。
+      // 最小间距下限按层半径缩放（≤30% 半径）：固定的 1.5 下限对小半径层是
+      // 灾难——本星系群层（半径 1.2 Mpc）会被顶到 1.5 Mpc，越过 85% 浮升
+      // 阈值，浮升进来 2 秒后立即被弹射到更上层，该层永远无法飞入
+      const r = Math.max(world.worldRadius * 0.08, Math.min(1.5, world.worldRadius * 0.3));
       spawn = [opts.escapeDir[0] * r, opts.escapeDir[1] * r, opts.escapeDir[2] * r];
     } else if (opts.approachDir) {
       // 从宏观系统深入微观：从子系统外边缘沿逼近方向切入
@@ -43,6 +46,20 @@ export class Navigator {
       spawn = [opts.approachDir[0] * r, opts.approachDir[1] * r, opts.approachDir[2] * r];
     } else if (opts.keepAnchor && prevAnchor) {
       spawn = prevAnchor.pos;
+    }
+
+    // 落点防下潜圈（所有进入方式统一兜底）：落点若落在某可下潜实体的
+    // 自动下潜触发圈内（reach×0.4），2 秒冷却一过立即被拽入下一层，
+    // 形成换层弹跳——沿「实体→落点」方向推出到触发圈外
+    for (const e of world.entities) {
+      if (!e.dive) continue;
+      const reach = (e.dive.reach ?? (e.pickRadius * 2.2)) * 0.4;
+      const dx = spawn[0] - e.pos[0], dy = spawn[1] - e.pos[1], dz = spawn[2] - e.pos[2];
+      const d = Math.hypot(dx, dy, dz) || 1e-9;
+      if (d < reach) {
+        const push = (reach * 1.3 - d) / d;
+        spawn = [spawn[0] + dx * push, spawn[1] + dy * push, spawn[2] + dz * push];
+      }
     }
 
     const defaultShipDist = world.shipViewDist || 0.35;
