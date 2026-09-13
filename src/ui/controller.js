@@ -9,7 +9,8 @@ export class UI {
       'info-facts','info-text','info-actions','info-close','info-schematic',
       'hud-speed','hud-dist','hud-clock','hud-mode','hud-rate','hud-scale',
       'fade','loading','controls-hint','cockpit-frame','layer-intro',
-      'mission-box','mission-idx','mission-title','mission-desc'];
+      'mission-box','mission-idx','mission-title','mission-desc','discoveries',
+      'hud-orbit','toast'];
     for (const id of ids) this.el[id] = document.getElementById(id);
     this._bindInfoClose();
     this._setupHintToggle();
@@ -63,10 +64,23 @@ export class UI {
   }
 
   // ---- HUD 飞行仪表 ----
-  setHud({ speedText, distText, modeText }) {
+  setHud({ speedText, distText, modeText, orbitText }) {
     if (this.el['hud-speed']) this.el['hud-speed'].textContent = speedText;
     if (this.el['hud-dist']) this.el['hud-dist'].textContent = distText;
     if (this.el['hud-mode'] && modeText !== undefined) this.el['hud-mode'].textContent = modeText;
+    if (this.el['hud-orbit'] && orbitText !== undefined) this.el['hud-orbit'].textContent = orbitText;
+  }
+  // 瞬时提示 toast：独立元素展示并自动淡出，不再挤占 HUD 模式行
+  toast(text, secs = 4) {
+    const el = this.el['toast'];
+    if (!el) return;
+    el.textContent = text;
+    el.classList.add('show');
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => el.classList.remove('show'), secs * 1000);
+  }
+  setDiscoveries(n) {
+    if (this.el['discoveries']) this.el['discoveries'].textContent = n;
   }
   setTimeHud({ clockLabel, rateLabel }) {
     if (this.el['hud-clock']) this.el['hud-clock'].textContent = clockLabel;

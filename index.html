@@ -22,7 +22,11 @@
     <div class="mission-k">任务 <span id="mission-idx">1/8</span></div>
     <div class="mission-title" id="mission-title">—</div>
     <div class="mission-desc" id="mission-desc">—</div>
+    <div class="mission-d">🛰 已发现天体 <span id="discoveries">0</span></div>
   </div>
+
+  <!-- 瞬时提示 toast：独立元素，不再挤占 HUD 模式行 -->
+  <div class="toast" id="toast"></div>
 
   <!-- 目标信息卡 -->
   <aside class="infocard hidden" id="infocard">
@@ -48,6 +52,7 @@
     <div class="hud-row"><span class="hud-k">速度</span><span class="hud-v" id="hud-speed">—</span></div>
     <div class="hud-row"><span class="hud-k">距选择</span><span class="hud-v" id="hud-dist">—</span></div>
     <div class="hud-row"><span class="hud-k">模式</span><span class="hud-v" id="hud-mode">巡航</span></div>
+    <div class="hud-row"><span class="hud-k">轨道</span><span class="hud-v" id="hud-orbit">—</span></div>
     <div class="hud-row hud-sep"></div>
     <div class="hud-row"><span class="hud-k">时间</span><span class="hud-v" id="hud-clock">—</span></div>
     <div class="hud-row"><span class="hud-k">倍率</span><span class="hud-v" id="hud-rate">实时</span></div>
@@ -76,6 +81,7 @@
       <span class="hint-key">R</span><span>安全重置</span>
       <span class="hint-key">[ ]</span><span>时间倍率（巡航自动调节）</span>
       <span class="hint-key">\</span><span>时钟暂停</span>
+      <span class="hint-key">M</span><span>静音开关</span>
       <span class="hint-key">Tab</span><span>显示帮助</span>
     </div>
   </div>

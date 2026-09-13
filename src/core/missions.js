@@ -9,7 +9,7 @@ export const MISSIONS = [
   },
   {
     id: 'park-planet', title: '泊入行星', desc: '自动导向伴飞任一行星（推荐：土星，带环）',
-    done: (c) => c.branch === 'rendezvous' || c.branch === 'station',
+    done: (c) => c.selType === 'planet' && (c.branch === 'rendezvous' || c.branch === 'station'),
   },
   {
     id: 'sun-graze', title: '贴日掠过', desc: '冲进距太阳 0.3 AU 以内并存活（自动导航会替你拉起）',

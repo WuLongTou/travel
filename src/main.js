@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import { CosmicEngine } from './render/engine.js';
 import { Input } from './core/input.js';
 import { MISSIONS } from './core/missions.js';
+import { SoundFX } from './core/audio.js';
 import { Probe } from './core/probe.js';
 import { SimClock } from './core/clock.js';
 import { Navigator } from './core/navigator.js';
@@ -60,6 +61,10 @@ const _m4 = new THREE.Matrix4();
 const _ndc = new THREE.Vector3();
 
 const input = new Input(canvas);
+const sfx = new SoundFX();
+// 音频需用户手势后才能启动：任意按键/点击时初始化或恢复
+window.addEventListener('keydown', () => sfx.ensure());
+window.addEventListener('mousedown', () => sfx.ensure());
 const freeCam = new FreeCam(engine.camera);
 let curTimeIdx = 0;
 
@@ -77,6 +82,10 @@ let hoveredId = null;
 let warpMode = 'auto'; // 自动时间倍率：'auto'（按 ETA 自选档）| 'user'（用户 [ ] 接管）
 let prevManual = false; // 上一帧是否人工干预（进入干预的边沿用于钳制倍率）
 let missionIdx = 0; // 当前主线任务下标（MISSIONS 线性推进）
+const discovered = new Set(); // 已泊入发现的天体（收集玩法，会话内累计）
+let prevParked = false; // 上一帧是否处于伴飞/悬停泊车态（边沿触发泊车音与新发现）
+let prevCrashTime = 0; // 最近一次撞毁时间戳（边沿触发撞毁音效与红闪）
+let prevM = false; // M 键上一帧状态（静音切换边沿）
 let everLeft = false; // 是否曾离开太阳系层（「回到家园」任务判定用）
 let edgeHintShown = false; // 层界浮升提示每层只提示一次（换层重置）
 
@@ -109,12 +118,8 @@ const TOUR_DWELL_S = 12; // 每站停留时长（真实秒）
 const TOUR_ARRIVE_S = 1.2; // 进入泊位圈持续该时长判定到站
 let tour = null; // { stops, idx, phase: 'enroute'|'dwell', dwellLeft, nearS }
 let lastParkDist = 0; // 自动导航最近一帧计算的泊距（到站判定基准）
-let toastText = '';
-let toastUntil = 0;
-
 function toastMsg(text, secs = 4) {
-  toastText = text;
-  toastUntil = performance.now() / 1000 + secs;
+  ui.toast(text, secs);
 }
 
 function startTour() {
@@ -196,6 +201,7 @@ nav.onWorldChanged = (world, idx) => {
   ui.setCrumb(idx);
   ui.setScaleHud(`${world.title} · 1单位≈${unitRulerText(world.unitName)}`);
   ui.showLayerIntro(world.intro); // 层教学文案横幅（各层 build 时声明）
+  sfx.warp(); // 跨层跃迁扫频
   selected = null;
   ui.hideInfo();
 
@@ -411,6 +417,13 @@ function renderFrame(now) {
     else if (target) toastMsg('该天体没有可进入的内层世界');
   }
   prevF = fDown;
+
+  // M 键（边沿触发）：静音开关
+  const mDown = input.keys.has('m');
+  if (mDown && !prevM) {
+    toastMsg(sfx.toggleMute() ? '🔇 已静音' : '🔊 声音开启', 2);
+  }
+  prevM = mDown;
 
   // [ 键：时间减速步进（用户手动设置后自动倍率挂起，重选目标/换层恢复）
   const blDown = input.keys.has('[');
@@ -917,6 +930,7 @@ function renderFrame(now) {
       const ctx = {
         layer: curWorld.id, idx: nav.idx,
         selectedId: selected ? selected.id : null,
+        selType: selected ? selected.type : null,
         branch: navDbg ? navDbg.branch : null,
         distToSel: selected ? dist3(probe.pos, selected.pos) : Infinity,
         distToSun: sun ? dist3(probe.pos, sun.pos) : Infinity,
@@ -925,6 +939,7 @@ function renderFrame(now) {
       };
       if (MISSIONS[missionIdx].done(ctx)) {
         toastMsg(`✅ 任务完成：${MISSIONS[missionIdx].title}`);
+        sfx.chime();
         missionIdx++;
       }
     }
@@ -985,16 +1000,47 @@ function renderFrame(now) {
       modeText = `⚠ 撞入 ${probe.crashEvent.name}！已在安全轨道部署`;
     }
 
-    // 大巡游进度前缀 + 系统提示（巡游启程/结束/无路线等）
+    // 大巡游进度前缀（系统提示已拆分到独立 toast 元素）
     if (tour) {
       const dwell = tour.phase === 'dwell' ? ` · 停留 ${Math.ceil(tour.dwellLeft)}s` : '';
       modeText = `大巡游 ${tour.idx + 1}/${tour.stops.length}${dwell} · ${modeText}`;
     }
-    if (nowSec < toastUntil) {
-      modeText = `${toastText} · ${modeText}`;
+    // 轨道行：主导井 + 束缚/逃逸能量态独立展示
+    let orbitText = '—';
+    if (probe.dominantWell) {
+      const well = probe.dominantWell;
+      const c = well.ref ? well.ref.pos : well.center;
+      const r = Math.hypot(probe.pos[0] - c[0], probe.pos[1] - c[1], probe.pos[2] - c[2]) || 1;
+      const speedSq = probe.vel[0] ** 2 + probe.vel[1] ** 2 + probe.vel[2] ** 2;
+      orbitText = `${well.name} · ${speedSq / 2 - well.GM / r < 0 ? '束缚' : '逃逸'}轨道`;
     }
 
-    ui.setHud({ speedText: spText, distText, modeText });
+    // 泊车边沿：进圈一次性的泊车音 + 新发现收集（同一目标只记一次）
+    const parked = navDbg ? (navDbg.branch === 'rendezvous' || navDbg.branch === 'station') : false;
+    if (parked && !prevParked && selected) {
+      if (!discovered.has(selected.id)) {
+        discovered.add(selected.id);
+        ui.setDiscoveries(discovered.size);
+        toastMsg(`🛰 新发现：${selected.name}`);
+      }
+      sfx.dock();
+    }
+    prevParked = parked;
+
+    // 撞毁边沿：爆响 + 红闪
+    if (probe.lastCrashTime !== prevCrashTime) {
+      prevCrashTime = probe.lastCrashTime;
+      if (probe.lastCrashTime > 0) {
+        sfx.crash();
+        document.body.classList.add('danger');
+        setTimeout(() => document.body.classList.remove('danger'), 700);
+      }
+    }
+
+    // 引擎音随推力/加力平滑变化（撞毁后 probe 已 thrustOn=false 自然静音）
+    sfx.setEngine(probe.thrustOn && !clock.paused ? (isBoosting ? 1 : 0.55) : 0, isBoosting);
+
+    ui.setHud({ speedText: spText, distText, modeText, orbitText });
     let rateLabel = clock.paused
       ? '已暂停'
       : (warpMode === 'auto' ? clock.rateLabel() : (TIME_RATE_LABELS[curTimeIdx] || `×${clock.rate}`));
@@ -1068,7 +1114,7 @@ async function boot() {
 // （窗口 resize 由 engine 构造函数内注册的监听统一处理）
 
 // 全局调试挂载
-window.__universe = { engine, probe, clock, nav, ui, input, chaseCam, ship,
+window.__universe = { engine, probe, clock, nav, ui, input, chaseCam, ship, sfx, discovered,
   get world() { return nav.world; },
   get selected() { return selected; },
   get tour() { return tour; },
