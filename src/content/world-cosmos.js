@@ -52,7 +52,7 @@ export function buildCosmosWorld() {
 
   // 重要尺度标注：壳上放几个「我们到那里的光年」标尺标记（离中心半径处）
   const marks = [
-    { f: 0.055, label: '~0.8 Gly（近期星系）' },
+    { f: 0.055, label: '~2.5 Gly' },
     { f: 0.3, label: '~14 Gly' },
     { f: 0.6, label: '~28 Gly' },
     { f: 0.92, label: '~43 Gly' },
@@ -72,8 +72,8 @@ export function buildCosmosWorld() {
     schematic: true,
     info: {
       kind: '超星系团', sub: '包含银河系在内的宏观结构',
-      facts: [['范围', '跨度约 5.2 亿光年（160 Mpc）'], ['总质量', '约 10^17 太阳质量'], ['引力枢纽', '巨引源（Great Attractor）']],
-      text: '拉尼亚凯亚超星系团是包含银河系、仙女座星系及约 10 万个星系的大尺度结构。飞近可深入内部宇宙网。',
+      facts: [['范围', '跨度约 4 亿光年（120 Mpc）'], ['总质量', '约 10^17 太阳质量'], ['引力流向', '巨引源／矩尺—半人马方向']],
+      text: '拉尼亚凯亚超星系团是包含银河系、仙女座星系及约 10 万个星系的大尺度结构（2014 年本动速度场重构提出）。飞近可深入内部宇宙网。',
     },
     dive: { toWorld: 'super', at: [20, 10, 20], dist: 0.35, targetName: '室女超星系团' },
     visual: { color: '#7fe8ff' },

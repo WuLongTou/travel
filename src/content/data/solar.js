@@ -14,10 +14,10 @@ export const PLANETS = [
   { id: 'venus', name: '金星', en: 'Venus', type: 'planet', aAU: 0.723, e: 0.007, rKm: 6051.8, massKg: 4.87e24, periodD: 224.70, rotH: -5832.5, moons: 0, rings: false, tempK: 737, color: '#e3c896', desc: '浓厚 CO₂ 大气与失控温室效应；自转方向相反且极慢。' },
   { id: 'earth', name: '地球', en: 'Earth', type: 'planet', aAU: 1.000, e: 0.017, rKm: 6371, massKg: 5.97e24, periodD: 365.25, rotH: 23.93, moons: 1, rings: false, tempK: 288, color: '#4f8fd8', desc: '目前已知唯一孕育生命的行星；液态水覆盖 71% 表面。' },
   { id: 'mars', name: '火星', en: 'Mars', type: 'planet', aAU: 1.524, e: 0.093, rKm: 3389.5, massKg: 6.42e23, periodD: 686.98, rotH: 24.62, moons: 2, rings: false, tempK: 210, color: '#d2824a', desc: '红色源于氧化铁；奥林帕斯山为太阳系最高火山。' },
-  { id: 'jupiter', name: '木星', en: 'Jupiter', type: 'planet', aAU: 5.203, e: 0.048, rKm: 69911, massKg: 1.898e27, periodD: 4332.6, rotH: 9.93, moons: 95, rings: false, tempK: 165, color: '#e0b88e', desc: '太阳系最大行星，质量是其余行星总和的 2.5 倍。' },
-  { id: 'saturn', name: '土星', en: 'Saturn', type: 'planet', aAU: 9.537, e: 0.054, rKm: 58232, massKg: 5.68e26, periodD: 10759.2, rotH: 10.66, moons: 146, rings: true, tempK: 134, color: '#e6d3a8', desc: '壮观行星环主要由冰粒构成，平均密度小于水。' },
-  { id: 'uranus', name: '天王星', en: 'Uranus', type: 'planet', aAU: 19.19, e: 0.047, rKm: 25362, massKg: 8.68e25, periodD: 30688.5, rotH: -17.24, moons: 28, rings: false, tempK: 76, color: '#9ad9dc', desc: '自转轴倾斜 98°，几乎“躺着”绕太阳公转。' },
-  { id: 'neptune', name: '海王星', en: 'Neptune', type: 'planet', aAU: 30.07, e: 0.009, rKm: 24622, massKg: 1.02e26, periodD: 60182, rotH: 16.11, moons: 16, rings: false, tempK: 72, color: '#5f86d6', desc: '太阳系最远的行星，风速可达 2100 km/h。' },
+  { id: 'jupiter', name: '木星', en: 'Jupiter', type: 'planet', aAU: 5.203, e: 0.048, rKm: 69911, massKg: 1.898e27, periodD: 4332.6, rotH: 9.93, moons: 95, rings: true, tempK: 165, color: '#e0b88e', desc: '太阳系最大行星，质量是其余行星总和的 2.5 倍。' },
+  { id: 'saturn', name: '土星', en: 'Saturn', type: 'planet', aAU: 9.537, e: 0.054, rKm: 58232, massKg: 5.68e26, periodD: 10759.2, rotH: 10.66, moons: 274, rings: true, tempK: 134, color: '#e6d3a8', desc: '壮观行星环主要由冰粒构成，平均密度小于水。' },
+  { id: 'uranus', name: '天王星', en: 'Uranus', type: 'planet', aAU: 19.19, e: 0.047, rKm: 25362, massKg: 8.68e25, periodD: 30688.5, rotH: -17.24, moons: 28, rings: true, tempK: 76, color: '#9ad9dc', desc: '自转轴倾斜 98°，几乎“躺着”绕太阳公转。' },
+  { id: 'neptune', name: '海王星', en: 'Neptune', type: 'planet', aAU: 30.07, e: 0.009, rKm: 24622, massKg: 1.02e26, periodD: 60182, rotH: 16.11, moons: 16, rings: true, tempK: 72, color: '#5f86d6', desc: '太阳系最远的行星，风速可达 2100 km/h。' },
 ];
 // 主要卫星（随母行星渲染小点）
 export const MOONS = {
@@ -40,5 +40,5 @@ export const MOONS = {
 // 小行星带示意（半径范围 AU）
 export const ASTEROID_BELT = { id: 'belt', name: '小行星带', en: 'Asteroid belt', aMin: 2.2, aMax: 3.2, count: 1400, color: '#a89880' };
 // 柯伊伯带示意
-export const KUIPER_BELT = { id: 'kuiper', name: '柯伊伯带', en: 'Kuiper belt', aMin: 34, aMax: 48, count: 2000, color: '#8fb8d8' };
+export const KUIPER_BELT = { id: 'kuiper', name: '柯伊伯带', en: 'Kuiper belt', aMin: 30, aMax: 50, count: 2000, color: '#8fb8d8' };
 export const SOURCE_NOTE = '数值为 IAU/NASA 常用标准值；research 回表后逐项标注来源。';

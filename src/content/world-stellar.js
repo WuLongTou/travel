@@ -80,7 +80,7 @@ export function buildStellarWorld() {
     ];
     if (s.mag !== undefined) facts.push(['视星等', s.mag]);
     if (s.id === 'alpha-centauri-a') {
-      facts.push(['双星系统', '与南门二 B 互绕，周期约 79.9 年（图中间距为演示缩放，真实约 23 AU）']);
+      facts.push(['双星系统', '与南门二 B 互绕，周期约 79.9 年（图中间距为演示缩放，真实半长轴约 17.6 AU、间距 11–36 AU 间变化）']);
     }
     const ent = {
       id: s.id, name: s.name, en: s.en, type: 'star',
@@ -157,10 +157,10 @@ export function buildStellarWorld() {
 
   return {
     id: 'stellar', title: '星际近邻', unitName: 'ly', kmPerUnit: LY_KM,
-    intro: '半径约 60 光年。这里是太阳的邻居圈：比邻星 4.2 光年、天狼星 8.6 光年……每颗恒星按真实方位与表面色温呈现，点选可查看详情。',
+    intro: '近邻恒星圈（参宿四/参宿七为远景示意，余者均在约 40 光年内）。这里是太阳的邻居圈：比邻星 4.2 光年、天狼星 8.6 光年……每颗恒星按真实方位与表面色温呈现，点选可查看详情。',
     worldRadius: 40,
     // 大巡游路线（T 键）：按距离由近及远造访邻星
-    tourStops: ['proxima-centauri', 'alpha-centauri-a', 'barnards-star', 'sirius-a', 'procyon', 'altair', 'vega', 'arcturus', 'tau-ceti'],
+    tourStops: ['proxima-centauri', 'alpha-centauri-a', 'barnards-star', 'sirius-a', 'procyon', 'tau-ceti', 'altair', 'vega', 'arcturus'],
     spawn: [3, 1.2, 3],
     spawnLookAt: [0, 0, 0], // 兴趣中心：太阳（本层原点）
     viewDist: 6,

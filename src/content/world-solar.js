@@ -195,7 +195,7 @@ export function buildSolarWorld() {
       pickRadius: rAU, // 真实半径：泊车/碰撞/引力井共用同一物理口径
       mesh, // 关键：让 update 能驱动位置
       info: {
-        kind: p.moons ? '行星 · 气态巨行星' : '行星 · 岩石行星',
+        kind: { mercury: '行星 · 岩石行星', venus: '行星 · 岩石行星', earth: '行星 · 岩石行星', mars: '行星 · 岩石行星', jupiter: '行星 · 气态巨行星', saturn: '行星 · 气态巨行星', uranus: '行星 · 冰巨星', neptune: '行星 · 冰巨星' }[p.id] || '行星',
         sub: `距太阳 ${p.aAU} AU · 公转 ${p.periodD.toFixed(1)} 天`,
         facts: [
           ['直径', (p.rKm * 2).toLocaleString() + ' km'],

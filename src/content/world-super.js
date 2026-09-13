@@ -68,8 +68,8 @@ export function buildSuperWorld() {
     schematic: true,
     info: {
       kind: '星系群', sub: '银河系与仙女座星系所在的群系',
-      facts: [['直径', '约 1000 万光年（3 Mpc）'], ['成员星系', '50+ 个'], ['主要成员', '银河系、仙女座星系(M31)、三角座星系(M33)']],
-      text: '本星系群是包含银河系在内的小型星系群，属于室女座超星系团的外围成员。飞近可自动下潜进入。',
+      facts: [['直径', '约 1000–1700 万光年（密度口径不同）'], ['成员星系', '134+（亮星系 50+）'], ['主要成员', '银河系、仙女座星系(M31)、三角座星系(M33)']],
+      text: '本星系群是包含银河系在内的小型星系群，位于室女超星系团（拉尼亚凯亚超星系团的一部分）边缘。飞近可自动下潜进入。',
     },
     dive: { toWorld: 'local', at: [0.9, 0.3, 0.9], dist: 0.35, targetName: '本星系群' },
     visual: { color: '#7fe8ff' },
@@ -83,7 +83,7 @@ export function buildSuperWorld() {
   // 本地群附近，给碰撞半径会让浮升落点立即「撞入」）。16.5 Mpc 外室女
   // 团的圆速度 ≈600+ km/s——与真实本地群下落/逃逸速度量级一致。
   const CLUSTER_MASS_SUN = {
-    'virgo-cluster': 1.5e15, 'fornax-cluster': 7e13, 'coma-cluster': 2e15,
+    'virgo-cluster': 1.2e15, // 2.2 Mpc 内约 1.2e15 'fornax-cluster': 7e13, 'coma-cluster': 1e15, // 信息框 ~7e14，取 1e15 量级
     'hydra-cluster': 1e14, 'centaurus-cluster': 1e14, 'perseus-cluster': 1e15,
   };
   const gravityWells = entities

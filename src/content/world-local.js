@@ -97,8 +97,9 @@ export function buildLocalWorld() {
   // 三角座 ≈5e10 M☉、大麦云 ≈1.38e10 M☉（信息卡）、小麦云 ≈7e9 M☉。
   // 碰撞半径 = 星系盘半径（kpc→Mpc）。0.77 Mpc 处仙女座圆速度 ≈290 km/s，
   // 与真实本星系群逃逸速度量级一致——银河系与仙女座相互绕行/接近全部真实。
+  // 质量为总质量（含暗晕）；lmc/smc 取恒星质量（总质量大一个量级，见 facts 限定）
   const GALAXY_MASS_SUN = { milkyway: 1.15e12, m31: 1.5e12, m33: 5e10, lmc: 1.38e10, smc: 7e9 };
-  const DISK_R_MPC = { milkyway: 1.5e-2, m31: 1.5e-2, m33: 9.2e-3, lmc: 4.3e-3, smc: 3.7e-3 }; // kpc→Mpc
+  const DISK_R_MPC = { milkyway: 1.5e-2, m31: 2.3e-2, m33: 9.2e-3, lmc: 2.2e-3, smc: 1.2e-3 }; // 盘半径 kpc→Mpc（与 sizeKpc 半径一致）
   const gravityWells = entities
     .filter((e) => GALAXY_MASS_SUN[e.id])
     .map((e) => ({ ref: e, GM: GM_SUN_MPC * GALAXY_MASS_SUN[e.id], minR: DISK_R_MPC[e.id], capR: 0.25, name: e.name }));

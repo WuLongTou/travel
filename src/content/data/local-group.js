@@ -21,7 +21,7 @@ export const LOCAL_GROUP = [
   },
   {
     id: 'm33', name: '三角座星系', en: 'Triangulum (M33)', type: 'spiral',
-    distMpc: 0.94, raDeg: 23.46, decDeg: 30.66, sizeKpc: 18,
+    distMpc: 0.84, raDeg: 23.46, decDeg: 30.66, sizeKpc: 18,
     seed: 33,
     extraFacts: [['距 M31', '约 200 kpc（与 M31 可能有引力相互作用）']],
     note: '本星系群第三大成员；肉眼极限可见（视星等 5.7）。其最显著的发射星云 NGC 604 是已知最大的恒星形成区之一。',
@@ -36,7 +36,7 @@ export const LOCAL_GROUP = [
     id: 'lmc', name: '大麦哲伦云', en: 'Large Magellanic Cloud', type: 'dwarf-irregular',
     distMpc: 0.050, raDeg: 80.89, decDeg: -69.76, sizeKpc: 4.3,
     seed: 50,
-    extraFacts: [['质量', '约 138 亿倍太阳质量'], ['著名天体', '蜘蛛星云（NGC 2070，超大恒星形成区）']],
+    extraFacts: [['恒星质量', '约 138 亿倍太阳质量（总质量约 1–2 千亿）'], ['著名天体', '蜘蛛星云（NGC 2070，超大恒星形成区）']],
     note: '银河系最大的卫星星系之一。位于南天极附近，北半球低纬度不可见。1987 年在 LMC 中爆发了一颗超新星（SN 1987A）。',
     source: 'NASA/NED 标准值',
   },
@@ -60,18 +60,18 @@ export const LOCAL_GROUP = [
   },
   {
     id: 'sculptor-dsph', name: '玉夫座矮星系', en: 'Sculptor Dwarf', type: 'dwarf-spheroidal',
-    distMpc: 0.090, raDeg: 11.92, decDeg: -33.71, sizeKpc: 1.2,
+    distMpc: 0.086, raDeg: 15.04, decDeg: -33.71, sizeKpc: 1.2,
     seed: 61,
     extraFacts: [['距银河', '约 29 万光年']],
-    note: '1937 年发现；位于南天银河极区。包含至少 4 个球状星团。',
+    note: '1937 年发现；位于南天银河极区。（5 个球状星团的是天炉座矮星系。）',
     source: 'NASA/NED 标准值',
   },
   {
     id: 'fornax-dsph', name: '天炉座矮星系', en: 'Fornax Dwarf', type: 'dwarf-spheroidal',
-    distMpc: 0.139, raDeg: 39.96, decDeg: -34.51, sizeKpc: 1.6,
+    distMpc: 0.149, raDeg: 39.96, decDeg: -34.51, sizeKpc: 1.6,
     seed: 62,
     extraFacts: [['球状星团', '5 个已知']],
-    note: '距银河系约 45 万光年；包含 5 个已知球状星团。',
+    note: '距银河系约 49 万光年；包含 5 个已知球状星团。',
     source: 'NASA/NED 标准值',
   },
   {
@@ -92,23 +92,23 @@ export const LOCAL_GROUP = [
   },
   {
     id: 'leo-ii', name: '狮子座 II', en: 'Leo II', type: 'dwarf-spheroidal',
-    distMpc: 0.205, raDeg: 147.78, decDeg: 22.16, sizeKpc: 0.7,
+    distMpc: 0.236, raDeg: 168.37, decDeg: 22.16, sizeKpc: 0.7,
     seed: 65,
-    note: '距银河系约 70 万光年的矮球状星系。',
+    note: '距银河系约 77 万光年的矮球状星系。',
     source: 'NASA/NED 标准值',
   },
   {
     id: 'ursa-minor', name: '小熊座矮星系', en: 'Ursa Minor Dwarf', type: 'dwarf-spheroidal',
-    distMpc: 0.220, raDeg: 227.28, decDeg: 67.23, sizeKpc: 0.8,
+    distMpc: 0.076, raDeg: 227.28, decDeg: 67.23, sizeKpc: 0.8,
     seed: 66,
-    note: '银河系卫星星系之一；距约 70 万光年。',
+    note: '银河系卫星星系之一；距约 25 万光年。',
     source: 'NASA/NED 标准值',
   },
   {
     id: 'draco-dsph', name: '天龙座矮星系', en: 'Draco Dwarf', type: 'dwarf-spheroidal',
-    distMpc: 0.260, raDeg: 260.05, decDeg: 57.92, sizeKpc: 0.8,
+    distMpc: 0.076, raDeg: 260.05, decDeg: 57.92, sizeKpc: 0.8,
     seed: 67,
-    note: '银河系卫星星系之一；距约 85 万光年。富含暗物质。',
+    note: '银河系卫星星系之一；距约 25 万光年。富含暗物质。',
     source: 'NASA/NED 标准值',
   },
 
@@ -117,7 +117,7 @@ export const LOCAL_GROUP = [
     id: 'm32', name: 'M32', en: 'M32 (Andromeda satellite)', type: 'dwarf-spheroidal',
     distMpc: 0.805, raDeg: 10.67, decDeg: 40.86, sizeKpc: 1.6,
     seed: 70,
-    extraFacts: [['距 M31', '约 22 kpc']],
+    extraFacts: [['距 M31', '投影约 5 kpc（视线距差约 22 kpc）']],
     note: 'M31 的卫星星系；视星等约 8.1，是最亮的椭圆矮星系之一。',
     source: 'NASA/NED 标准值',
   },
@@ -132,7 +132,7 @@ export const LOCAL_GROUP = [
   // --- 银河系远卫星 ---
   {
     id: 'ic-10', name: 'IC 10', en: 'IC 10', type: 'dwarf-irregular',
-    distMpc: 0.700, raDeg: 5.10, decDeg: 59.30, sizeKpc: 1.5,
+    distMpc: 0.76, raDeg: 5.10, decDeg: 59.30, sizeKpc: 1.5,
     seed: 80,
     note: '本星系群中一个恒星形成活跃的矮不规则星系；富含沃尔夫-拉叶星。',
     source: 'NASA/NED 标准值',
@@ -148,9 +148,9 @@ export const LOCAL_GROUP = [
 
   {
     id: 'ngc-6822', name: '巴纳德星系', en: "Barnard's Galaxy (NGC 6822)", type: 'dwarf-irregular',
-    distMpc: 0.640, raDeg: 296.23, decDeg: -14.80, sizeKpc: 1.5,
+    distMpc: 0.452, raDeg: 296.23, decDeg: -14.80, sizeKpc: 1.5,
     seed: 82,
-    note: '距银河系约 160 万光年；富含恒星形成区。',
+    note: '距银河系约 147 万光年；富含恒星形成区。',
     source: 'NASA/NED 标准值',
   },
 ];

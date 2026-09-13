@@ -76,8 +76,8 @@ export function buildGalaxyWorld() {
     pos: centerPos, pickRadius: 0.8,
     info: {
       kind: '超大质量黑洞', sub: '银河系中心引力枢纽',
-      facts: [['质量', '约 430 万倍太阳质量'], ['距离', '约 26000 光年'], ['视直径', '事件视界约 0.1 AU 级']],
-      text: '人马座 A* 是银河系中心的超大质量黑洞，位于人马座方向约 2.6 万光年处，掌控着银河系中心的极强引力势阱。',
+      facts: [['质量', '约 430 万倍太阳质量'], ['距离', '约 2.67 万光年（8.2 kpc）'], ['视直径', '视界半径约 0.08 AU']],
+      text: '人马座 A* 是银河系中心的超大质量黑洞，位于人马座方向约 2.67 万光年处，掌控着银河系中心的极强引力势阱。',
     },
     visual: { color: '#ffcf7f' },
   };
@@ -90,8 +90,8 @@ export function buildGalaxyWorld() {
     id: 'solar-neighborhood', name: '太阳系与星际邻域', en: 'Solar Neighborhood', type: 'system',
     pos: [sunPos[0], sunPos[1], sunPos[2]], pickRadius: 0.8,
     info: {
-      kind: '恒星系统', sub: '猎户臂 · 距银心 2.6 万光年',
-      facts: [['公转速度', '约 220 km/s'], ['银河年', '约 2.3 亿年'], ['位置', '猎户臂内侧']],
+      kind: '恒星系统', sub: '猎户臂 · 距银心约 2.67 万光年',
+      facts: [['公转速度', '约 220–230 km/s'], ['银河年', '约 2.3 亿年'], ['位置', '猎户臂内侧']],
       text: '太阳系位于猎户臂，带着整颗母星系高速绕银心公转。飞近可自动下潜进入星际近邻与太阳系。',
     },
     dive: { toWorld: 'stellar', at: [3, 1.2, 3], dist: 0.35, targetName: '星际近邻' },
@@ -111,8 +111,8 @@ export function buildGalaxyWorld() {
         ['太阳位置', '距银心约 2.6 万光年'],
         ['绕银心一周', '约 2.2–2.5 亿年（银河年）'],
       ],
-      text: '银河系是一个棒旋星系，直径约 10 万光年，包含数千亿颗恒星。太阳带着整个太阳系以约 220 km/s 绕银心公转。图中为程序化示意。',
-      source: 'research 回表后标注',
+      text: '银河系是一个棒旋星系，直径约 10 万光年（亮盘约 8.7 万光年），包含数千亿颗恒星。太阳带着整个太阳系以约 220–230 km/s 绕银心公转。图中为程序化示意。',
+      source: 'NASA/McConnachie+2012/GRAVITY 公开数据',
     },
     visual: { color: '#cfe0ff' },
   };
@@ -121,7 +121,7 @@ export function buildGalaxyWorld() {
   // 世界返回（group 用于 engine 装载）
   return {
     id: 'galaxy', title: '银河系', unitName: 'kpc', kmPerUnit: KPC_KM,
-    intro: '直径约 10 万光年的棒旋星系。我们位于猎户臂，距银心约 2.6 万光年，正以约 220 km/s 绕银心运动（图中自转为演示速率）。',
+    intro: '直径约 10 万光年的棒旋星系。我们位于猎户臂，距银心约 2.67 万光年，正以约 220–230 km/s 绕银心运动（图中自转为演示速率）。',
     worldRadius: diskR,
     // 大巡游路线（T 键）：太阳邻域 → 银心 → 盘外全景
     tourStops: ['solar-neighborhood', 'sgrA', 'milkyway'],
