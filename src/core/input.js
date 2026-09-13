@@ -25,7 +25,7 @@ export class Input {
     this.canvas = canvas;
     this.keys = new Set();
     // 飞船动作语义：每帧由 main 计算
-    this.actions = { fwd: false, bwd: false, left: false, right: false, up: false, down: false, dive: false, boost: false };
+    this.actions = { fwd: false, bwd: false, left: false, right: false, up: false, down: false, boost: false };
     this.steer = { dx: 0, dy: 0 }; // 每帧累计的视角转向（像素）
     this.pan = { dx: 0, dy: 0 };   // 每帧累计的视角平移位移（像素）
     this.buttons = new Set();      // 按下的鼠标键集合 (0: 左键, 1: 中键, 2: 右键)
@@ -124,7 +124,6 @@ export class Input {
     // 上浮/下沉：Space 上、C 下（Q/E 让位给横滚；Shift 只做加力，不再复用为下沉）
     a.up = this.keys.has(' ');
     a.down = this.keys.has('c');
-    a.dive = this.keys.has('f');
     a.boost = this.keys.has('shift');
     a.rollL = this.keys.has('q');
     a.rollR = this.keys.has('e');

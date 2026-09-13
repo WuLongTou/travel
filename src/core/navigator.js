@@ -40,8 +40,9 @@ export class Navigator {
       // 阈值，浮升进来 2 秒后立即被弹射到更上层，该层永远无法飞入
       const r = Math.max(world.worldRadius * 0.08, Math.min(1.5, world.worldRadius * 0.3));
       spawn = [opts.escapeDir[0] * r, opts.escapeDir[1] * r, opts.escapeDir[2] * r];
-    } else if (opts.approachDir) {
-      // 从宏观系统深入微观：从子系统外边缘沿逼近方向切入
+    } else if (opts.approachDir && !opts.spawn) {
+      // 从宏观系统深入微观：从子系统外边缘沿逼近方向切入（显式指定
+      // spawn 时以精选落点优先，不用边缘切入公式覆盖）
       const r = world.worldRadius * 0.55;
       spawn = [opts.approachDir[0] * r, opts.approachDir[1] * r, opts.approachDir[2] * r];
     } else if (opts.keepAnchor && prevAnchor) {
@@ -85,7 +86,26 @@ export class Navigator {
       spawn[2] - f[2] * dist + u[2] * dist * 0.35,
     ];
     this.engine.chaseCam.snapTo(eye, spawn);
-    this.clock.rate = Math.min(this.clock.rate, world.timeScaleMax || Infinity);
+    // 换层首帧防护：dtSim 在帧首已按上一层倍率算出，autoWarpTick 本帧末
+    // 才按新层重配速——先把倍率钳到安全包线（同时不超过本层上限）：
+    //   1) 轨道采样：首帧模拟时长 ≤ 局部轨道时标 τ 的 1/20（否则一帧内
+    //      积分几十圈，数值误差泵入能量把飞船甩出数 AU）
+    //   2) 位移包线：首帧位移 ≤ 0.5% 层半径
+    const v0 = this.probe.speedWorldPerS();
+    let cap = world.timeScaleMax || Infinity;
+    let tau = Infinity;
+    for (const w of this.probe._wells()) {
+      if (w.GM <= 0) continue;
+      const c = w.ref ? w.ref.pos : w.center;
+      const dxc = spawn[0] - c[0], dyc = spawn[1] - c[1], dzc = spawn[2] - c[2];
+      const r = Math.hypot(dxc, dyc, dzc) || 1e-12;
+      tau = Math.min(tau, Math.sqrt(r * r * r / w.GM));
+    }
+    if (Number.isFinite(tau)) cap = Math.min(cap, tau * 3.125); // τ×0.05 ÷ 0.016s 帧长
+    if (v0 > 1e-15 && world.worldRadius > 0) {
+      cap = Math.min(cap, world.worldRadius * 0.005 / (v0 * 0.016));
+    }
+    this.clock.rate = Math.min(this.clock.rate, cap);
     // 跃迁后设置 2 秒冷却
     this._autoCooldown = 2.0;
     if (this.onWorldChanged) this.onWorldChanged(world, idx);
@@ -107,21 +127,18 @@ export class Navigator {
     await this._guard(() => this.enter(target, { escapeDir }));
   }
 
-  // 下潜到目标实体（进入更微观的子系统）：按逼近方向自然切入子世界边缘
+  // 下潜到目标实体（进入更微观的子系统）：落到 dive.at 精选的层内落点，
+  // 航向朝该层兴趣中心（world.spawnLookAt 兜底）。不传 approachDir/lookAt
+  // ——边缘切入公式会覆盖 dive.at（历史后果：银河系层出生在银心黑洞引力
+  // 半径内即坠毁、太阳系层落在海王星轨道外），lookAt=dive.at 则退化为
+  // 「看自己」（yaw/pitch 归零）
   async diveInto(entity) {
     const dive = entity.dive;
     if (!dive) return;
     const target = dive.toWorld;
-    // 计算逼近实体的相对方位向量
-    const p = this.probe.pos;
-    const dx = p[0] - entity.pos[0], dy = p[1] - entity.pos[1], dz = p[2] - entity.pos[2];
-    const dl = Math.hypot(dx, dy, dz) || 1;
-    const approachDir = [dx / dl, dy / dl, dz / dl];
     await this._guard(() => this.enter(target, {
-      approachDir,
       spawn: dive.at,
       dist: dive.dist || 0.35,
-      lookAt: dive.lookAt || dive.at,
     }));
   }
 

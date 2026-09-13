@@ -89,7 +89,7 @@ export function buildLocalWorld() {
       text: '在本尺度（约 250 万光年 = 0.77 Mpc 量级）里，银河系和仙女座星系是相距约 250 万光年的两个邻居，且正在相互接近——约 45 亿年后可能合并。',
       source: 'research 回表后标注',
     },
-    dive: { toWorld: 'galaxy', at: [0, 0, 0], dist: 0.35, targetName: '银河系内部' },
+    dive: { toWorld: 'galaxy', at: [5, 1.5, 5], dist: 0.35, targetName: '银河系内部' }, // 银盘内 ≈7.3 kpc（出生在 [0,0,0] 会落进 Sgr A* 引力半径内即坠毁）
   });
 
   // 真实物理口径：星系井 GM = 总质量（含暗晕）× GM☉（Mpc³/s² 换算）。

@@ -75,7 +75,7 @@ export function buildCosmosWorld() {
       facts: [['范围', '跨度约 4 亿光年（120 Mpc）'], ['总质量', '约 10^17 太阳质量'], ['引力流向', '巨引源／矩尺—半人马方向']],
       text: '拉尼亚凯亚超星系团是包含银河系、仙女座星系及约 10 万个星系的大尺度结构（2014 年本动速度场重构提出）。飞近可深入内部宇宙网。',
     },
-    dive: { toWorld: 'super', at: [20, 10, 20], dist: 0.35, targetName: '室女超星系团' },
+    dive: { toWorld: 'super', at: [10, 5, 10], dist: 0.35, targetName: '室女超星系团' }, // ≈15 Mpc（本地群与室女团之间）
     visual: { color: '#7fe8ff' },
   };
   entities.push(superClusterEnt);
@@ -90,7 +90,7 @@ export function buildCosmosWorld() {
     id: 'cosmos', title: '可观测宇宙', unitName: 'Gpc', kmPerUnit: GPC_KM,
     intro: '半径约 465 亿光年。橙色边界是宇宙微波背景——大爆炸后 38 万年的余晖；网中的每一个亮点都是一整个星系。',
     worldRadius: OBSERVABLE_RADIUS_GPC * 1.4,
-    spawn: [19, 7, 24],
+    spawn: [6.9, 2.5, 8.7], // CMB 壳内 0.8 倍半径（同方向），出生即被可观测宇宙边界环绕
     spawnLookAt: [0, 0, 0],
     viewDist: 12,
     shipViewDist: 0.35, // 飞船第三人称跟拍视距

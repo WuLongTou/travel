@@ -865,6 +865,8 @@ function renderFrame(now) {
       syncShip();
       updateShipFlame(ship, probe.thrustOn ? 1 : 0, isBoosting);
     }
+    // 座舱框：仅飞船座舱视角显示（上帝视角下休眠座舱不显示）
+    ui.setCockpitFrame(controlMode !== MODE_GOD && chaseCam.mode === 'cockpit');
 
     // 自动 LOD 尺度跃迁检测
     nav.checkAutoTransition(dtReal);
@@ -906,6 +908,8 @@ function renderFrame(now) {
     if (showEnt) {
       const dkm = dist3(probe.pos, showEnt.pos) * curWorld.kmPerUnit;
       distText = `${showEnt.name} · ${formatKm(dkm)} · 光 ${lightTravelText(dkm)}`;
+      // 锁定的目标可下潜时提示 F 快捷键（与信息卡「进入…」按钮同效）
+      if (selected === showEnt && showEnt.dive) distText += ' · F 下潜进入';
     }
 
     const viewName = controlMode === MODE_GOD ? '上帝视角' : (VIEW_NAMES[chaseCam.mode] || '');

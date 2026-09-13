@@ -136,7 +136,7 @@ export function buildStellarWorld() {
       ],
       text: '太阳系是以太阳为中心，由八大行星、数百颗卫星、矮行星及数以亿计的小天体组成的恒星行星系统。飞近可自动下潜深入太阳系内部。',
     },
-    dive: { toWorld: 'solar', at: [22, 7, 26], dist: 0.35, targetName: '太阳系内部' },
+    dive: { toWorld: 'solar', at: [1.3, 0.15, 0.55], dist: 0.35, targetName: '太阳系内部' }, // 内太阳系（≈1.4 AU，日地区域）
     visual: { color: '#ffd27f' },
   };
   entities.push(sunEntity);

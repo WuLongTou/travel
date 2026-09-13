@@ -71,7 +71,7 @@ export function buildSuperWorld() {
       facts: [['直径', '约 1000–1700 万光年（密度口径不同）'], ['成员星系', '134+（亮星系 50+）'], ['主要成员', '银河系、仙女座星系(M31)、三角座星系(M33)']],
       text: '本星系群是包含银河系在内的小型星系群，位于室女超星系团（拉尼亚凯亚超星系团的一部分）边缘。飞近可自动下潜进入。',
     },
-    dive: { toWorld: 'local', at: [0.9, 0.3, 0.9], dist: 0.35, targetName: '本星系群' },
+    dive: { toWorld: 'local', at: [0.3, 0.1, 0.3], dist: 0.35, targetName: '本星系群' }, // 群内 ≈0.44 Mpc（银河系近旁）
     visual: { color: '#7fe8ff' },
   };
   entities.push(localGroupEnt);
