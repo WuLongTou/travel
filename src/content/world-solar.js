@@ -159,8 +159,10 @@ export function buildSolarWorld() {
       mesh.add(ring);
     }
     // 远场 LOD：真实半径球在远处是亚像素点，辉光 sprite 承担"望远镜里
-    // 的行星就是一个亮点"的真实观感；接近后（<80R，视角 >0.7°）隐藏
-    const farDot = makeGlowSprite(rAU * 30, p.color, 0.8);
+    // 的行星就是一个亮点"的真实观感；接近后（<80R，视角 >0.7°）隐藏。
+    // 尺寸取 55R：交会段（数十 R～数百 R 距离）目标保持可辨，抵达切换
+    // 真实球体时"揭晓时刻"不被过大的光斑糊住
+    const farDot = makeGlowSprite(rAU * 55, p.color, 0.85);
     mesh.add(farDot);
     planetLods.push({ sprite: farDot, rAU });
     // 轨道线：真实椭圆（太阳在焦点）
@@ -337,10 +339,19 @@ export function buildSolarWorld() {
     // 真实口径下地球轨道速度 29.8 km/s、希尔球 ~0.01 AU，泊车/俘获/
     // 弹弓全部按真实引力开场。
     gravityWells,
-    // 出生在地球旁 ~1.6e-3 AU（约 24 万 km，≈38 个地球半径），望向地球
+    // 出生在地球背阳侧 ≈24 万 km（≈38 个地球半径），望向地球：从这个
+    // 距离看，太阳与地球几乎同向（角距 ~0.1°）——开局镜头即「地球剪影
+    // 衬在整片太阳光晕前」的同框构图，首屏有明确可点目标（地球）
     spawn: (() => {
       const earth = entities.find((e) => e.id === 'earth');
-      return [earth.pos[0] + 1.1e-3, 3.2e-4, earth.pos[2] + 1.1e-3];
+      const l = Math.hypot(earth.pos[0], earth.pos[2]) || 1;
+      const ux = earth.pos[0] / l, uz = earth.pos[2] / l; // 日→地 单位矢量
+      const tx = -uz, tz = ux;                            // 黄道面切向单位矢量
+      return [
+        earth.pos[0] + ux * 1.3e-3 + tx * 2.2e-4,
+        earth.pos[1] + 3.2e-4,
+        earth.pos[2] + uz * 1.3e-3 + tz * 2.2e-4,
+      ];
     })(),
     viewDist: 30, // 宏观全景视距（供地图/全景参考）
     shipViewDist: 6.4e-4, // 跟拍视距（≈15 个地球半径，真实尺度特写）

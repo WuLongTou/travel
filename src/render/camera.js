@@ -45,6 +45,14 @@ export class ChaseCam {
     this.orbitPitch = 0.25;
   }
 
+  // 环视偏移指数回正（时间常数 ≈0.45s）：追尾视角按 W 转向时由 main 调用，
+  // 偏移作为转向指令消耗掉——转向到位后相机稳定停在新机尾正后方
+  recenter(dtReal) {
+    const k = 1 - Math.exp(-dtReal * 2.2);
+    this.orbitYaw -= this.orbitYaw * k;
+    this.orbitPitch -= this.orbitPitch * k;
+  }
+
   cycleView() {
     const i = VIEW_MODES.indexOf(this.mode);
     this.mode = VIEW_MODES[(i + 1) % VIEW_MODES.length];

@@ -8,7 +8,8 @@ export class UI {
     const ids = ['crumb','infocard','info-title','info-sub',
       'info-facts','info-text','info-actions','info-close','info-schematic',
       'hud-speed','hud-dist','hud-clock','hud-mode','hud-rate','hud-scale',
-      'fade','loading','controls-hint','cockpit-frame','layer-intro'];
+      'fade','loading','controls-hint','cockpit-frame','layer-intro',
+      'mission-box','mission-idx','mission-title','mission-desc'];
     for (const id of ids) this.el[id] = document.getElementById(id);
     this._bindInfoClose();
     this._setupHintToggle();
@@ -78,6 +79,23 @@ export class UI {
   setCockpitFrame(on) {
     if (this.el['cockpit-frame']) this.el['cockpit-frame'].classList.toggle('hidden', !on);
   }
+  // 任务链挂件：主线任务序号/标题/描述；info=null 时转通关态
+  setMission(info) {
+    const box = this.el['mission-box'];
+    if (!box) return;
+    if (!info) {
+      box.classList.add('cleared');
+      if (this.el['mission-idx']) this.el['mission-idx'].textContent = '✓';
+      if (this.el['mission-title']) this.el['mission-title'].textContent = '全部完成';
+      if (this.el['mission-desc']) this.el['mission-desc'].textContent = '已通关 · 自由航行';
+      return;
+    }
+    box.classList.remove('cleared');
+    if (this.el['mission-idx']) this.el['mission-idx'].textContent = `${info.idx}/${info.total}`;
+    if (this.el['mission-title']) this.el['mission-title'].textContent = info.title;
+    if (this.el['mission-desc']) this.el['mission-desc'].textContent = info.desc;
+  }
+
   // 层介绍横幅：进入新尺度层时展示该层教学文案，数秒后淡出
   showLayerIntro(text, secs = 7) {
     const el = this.el['layer-intro'];

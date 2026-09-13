@@ -11,6 +11,7 @@ import './style.css';
 import * as THREE from 'three';
 import { CosmicEngine } from './render/engine.js';
 import { Input } from './core/input.js';
+import { MISSIONS } from './core/missions.js';
 import { Probe } from './core/probe.js';
 import { SimClock } from './core/clock.js';
 import { Navigator } from './core/navigator.js';
@@ -75,6 +76,8 @@ let navDbg = null; // 自动导航诊断快照（__universe.dbg 暴露，无头�
 let hoveredId = null;
 let warpMode = 'auto'; // 自动时间倍率：'auto'（按 ETA 自选档）| 'user'（用户 [ ] 接管）
 let prevManual = false; // 上一帧是否人工干预（进入干预的边沿用于钳制倍率）
+let missionIdx = 0; // 当前主线任务下标（MISSIONS 线性推进）
+let everLeft = false; // 是否曾离开太阳系层（「回到家园」任务判定用）
 let edgeHintShown = false; // 层界浮升提示每层只提示一次（换层重置）
 
 function clearSelection() {
@@ -261,10 +264,17 @@ function autoWarpTick() {
       target = 1; // 无井层：实时
     }
   }
-  // 泊位邻域封顶：伴飞/悬停段固定 ≤1时/秒，保证近景观赏与推力微调精度
+  // 泊位邻域收尾配速：伴飞/悬停段按「到目标 ETA≈2.5 墙上秒」自适应降档
+  //（下限 60×），保证近景观赏与推力微调精度。原实现是绝对 1时/秒——
+  // 泊距按拾取半径计算，星际层泊距 ~2.8 ly、3 倍邻域罩住近 1/4 层，
+  // 把跨光年接近钉死在万年尺度，自动导航实质不可用；ETA 配速任意尺度
+  // 自适应：远处不限制速、近处随剩余距离平滑收敛
   if (lastParkDist > 0 && selected) {
     const dSel = dist3(probe.pos, selected.pos);
-    if (dSel < lastParkDist * 3) target = Math.min(target, 3600);
+    const vNow = probe.speedWorldPerS();
+    if (dSel < lastParkDist * 3 && vNow > 1e-14) {
+      target = Math.min(target, Math.max(60, dSel / (vNow * 2.5)));
+    }
   }
   // 物理硬包线：接近中速度/视线角波动会让 ETA 公式瞬时爆表，必须约束
   // 单帧位移 ≤2% 剩余距离（防瞬移越过目标）——帧内 Δv=acc×dtSim 是
@@ -536,13 +546,28 @@ function renderFrame(now) {
         probe.thrustOn = true;
         flightStatus = '手动干预 · 反推制动';
       } else if (manualThrustKeys) {
-        // 玩家手动按键推进：完全按玩家意愿飞行；按 W 前进时机头平滑导向当前观察视线
+        // 玩家手动按键推进：完全按玩家意愿飞行；按 W 前进时附加转向——
+        //   座舱：机头导向观察视线（准星即航向）；
+        //   追尾：相机相对转向（见下方注释）
         probe.thrustOn = true;
         const boostScale = isBoosting ? 2.5 : 1.0;
-        if (chaseCam.mode !== 'orbit' && a.fwd) {
+        if (a.fwd && chaseCam.mode === 'cockpit') {
           const camDir = new THREE.Vector3();
           engine.camera.getWorldDirection(camDir);
           steerTowardsDir([camDir.x, camDir.y, camDir.z], dtReal, 3.2);
+        } else if (a.fwd && chaseCam.mode === 'chase') {
+          const offYaw = chaseCam.orbitYaw, offPitch = chaseCam.orbitPitch;
+          if (offYaw !== 0 || offPitch !== 0) {
+            // 相机相对转向（操纵杆模式）：环视偏移 = 转动速率指令——
+            // 鼠标右移（yaw 偏移为负）→ 右转、下拉（pitch 偏移为正）→ 低头。
+            // 偏移随 recenter 指数回零，转速同步衰减归停，总转角有界。
+            // 此前实现有两个坑：直接导向 camDir 会与「相机锚定机尾」形成
+            // 正反馈棘轮（按住 W 一路俯冲到俯仰极限）；把偏移当绝对目标
+            // 航向则会被机头以最大角速度追吃，0.3 rad 偏移转出 ~2.9 rad
+            const TURN_GAIN = 2.0; // 满偏移 1 rad ≈ 2 rad/s 转速
+            probe.steer(-offYaw * TURN_GAIN * dtReal, -offPitch * TURN_GAIN * dtReal, 0);
+            chaseCam.recenter(dtReal);
+          }
         }
         probe.step(dtReal, a, boostScale, dtSim);
         flightStatus = isBoosting ? '手动干预 · 加力推进' : '手动干预 · 推进机动';
@@ -883,6 +908,31 @@ function renderFrame(now) {
         edgeHintShown = true;
         toastMsg(`接近层界 · 继续向外将浮升至「${WORLD_BY_ID[nextId].name}」`, 6);
       }
+    }
+    if (nav.idx >= 1) everLeft = true;
+
+    // 任务链推进：条件满足即完成并 toast；全部完成转自由航行态
+    if (missionIdx < MISSIONS.length) {
+      const sun = curWorld.entities.find((e) => e.id === 'sun');
+      const ctx = {
+        layer: curWorld.id, idx: nav.idx,
+        selectedId: selected ? selected.id : null,
+        branch: navDbg ? navDbg.branch : null,
+        distToSel: selected ? dist3(probe.pos, selected.pos) : Infinity,
+        distToSun: sun ? dist3(probe.pos, sun.pos) : Infinity,
+        rFromCenter: Math.hypot(probe.pos[0], probe.pos[1], probe.pos[2]),
+        everLeft,
+      };
+      if (MISSIONS[missionIdx].done(ctx)) {
+        toastMsg(`✅ 任务完成：${MISSIONS[missionIdx].title}`);
+        missionIdx++;
+      }
+    }
+    if (missionIdx < MISSIONS.length) {
+      ui.setMission({ idx: missionIdx + 1, total: MISSIONS.length,
+        title: MISSIONS[missionIdx].title, desc: MISSIONS[missionIdx].desc });
+    } else {
+      ui.setMission(null);
     }
 
     // 天体自转公转动力学推进
