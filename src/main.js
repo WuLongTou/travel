@@ -82,7 +82,21 @@ let hoveredId = null;
 let warpMode = 'auto'; // 自动时间倍率：'auto'（按 ETA 自选档）| 'user'（用户 [ ] 接管）
 let prevManual = false; // 上一帧是否人工干预（进入干预的边沿用于钳制倍率）
 let missionIdx = 0; // 当前主线任务下标（MISSIONS 线性推进）
-const discovered = new Set(); // 已泊入发现的天体（收集玩法，会话内累计）
+const discovered = new Set(); // 已泊入发现的天体（收集玩法，localStorage 持久化）
+const PROGRESS_KEY = 'universe-roam-progress';
+// 启动时恢复进度（任务下标 + 发现列表）；格式变更/损坏则静默用默认值
+try {
+  const saved = JSON.parse(localStorage.getItem(PROGRESS_KEY) || 'null');
+  if (saved && Number.isInteger(saved.missionIdx) && saved.missionIdx >= 0 && saved.missionIdx <= MISSIONS.length) {
+    missionIdx = saved.missionIdx;
+  }
+  if (saved && Array.isArray(saved.discovered)) saved.discovered.forEach((id) => discovered.add(id));
+} catch { /* 隐私模式等存储不可用：忽略，进度仅会话内有效 */ }
+function saveProgress() {
+  try {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify({ missionIdx, discovered: [...discovered] }));
+  } catch { /* 存储不可用：忽略 */ }
+}
 let prevParked = false; // 上一帧是否处于伴飞/悬停泊车态（边沿触发泊车音与新发现）
 let prevCrashTime = 0; // 最近一次撞毁时间戳（边沿触发撞毁音效与红闪）
 let prevM = false; // M 键上一帧状态（静音切换边沿）
@@ -941,6 +955,7 @@ function renderFrame(now) {
         toastMsg(`✅ 任务完成：${MISSIONS[missionIdx].title}`);
         sfx.chime();
         missionIdx++;
+        saveProgress();
       }
     }
     if (missionIdx < MISSIONS.length) {
@@ -949,6 +964,8 @@ function renderFrame(now) {
     } else {
       ui.setMission(null);
     }
+    // 启动恢复后挂件与计数需要一次初始化
+    ui.setDiscoveries(discovered.size);
 
     // 天体自转公转动力学推进
     clock.advance(dtReal);
@@ -1022,6 +1039,7 @@ function renderFrame(now) {
         discovered.add(selected.id);
         ui.setDiscoveries(discovered.size);
         toastMsg(`🛰 新发现：${selected.name}`);
+        saveProgress();
       }
       sfx.dock();
     }
