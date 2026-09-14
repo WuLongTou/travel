@@ -1,6 +1,7 @@
 // 任务链：把「真实物理漫游」串成一条从地球到可观测宇宙边缘的玩法主线。
 // 每个任务声明 { id, title, desc, done(ctx) }，ctx 由 main 每帧构建：
-//   { layer, idx, selectedId, branch, distToSel, distToSun, rFromCenter, everLeft }
+//   { layer, idx, selectedId, selType, branch, distToSel, targetRadius,
+//     distToSun, rFromCenter, everLeft, wellId, speedKmS }
 // 线性推进；条件天然满足时自动完成（如面包屑直达会跳过中间任务）。
 export const MISSIONS = [
   {
@@ -35,5 +36,18 @@ export const MISSIONS = [
   {
     id: 'cosmos-edge', title: '宇宙边缘', desc: '抵达可观测宇宙层，直面 CMB 边界壳',
     done: (c) => c.layer === 'cosmos',
+  },
+  // ---- 挑战任务：只有手动飞行才能完成（自动导航永远减速泊车）----
+  {
+    id: 'slingshot', title: '挑战 · 引力弹弓', desc: '手动贴飞木星，借引力把自己甩到 45 km/s 以上',
+    done: (c) => c.wellId === 'jupiter' && c.speedKmS > 45,
+  },
+  {
+    id: 'sun-knight', title: '挑战 · 掠日骑士', desc: '手动冲进距太阳 0.05 AU 以内并活到下一帧',
+    done: (c) => c.layer === 'solar' && c.distToSun < 0.05,
+  },
+  {
+    id: 'low-orbit', title: '挑战 · 低轨信使', desc: '贴近任一天体至 1.5 倍半径内伴飞（比自动泊距近得多）',
+    done: (c) => !!c.targetRadius && c.branch === 'rendezvous' && c.distToSel < c.targetRadius * 1.5,
   },
 ];

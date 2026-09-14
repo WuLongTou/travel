@@ -950,6 +950,9 @@ function renderFrame(now) {
         distToSun: sun ? dist3(probe.pos, sun.pos) : Infinity,
         rFromCenter: Math.hypot(probe.pos[0], probe.pos[1], probe.pos[2]),
         everLeft,
+        wellId: probe.dominantWell && probe.dominantWell.ref ? probe.dominantWell.ref.id : null,
+        speedKmS: probe.speedKmS(),
+        targetRadius: selected ? selected.pickRadius : 0,
       };
       if (MISSIONS[missionIdx].done(ctx)) {
         toastMsg(`✅ 任务完成：${MISSIONS[missionIdx].title}`);
@@ -1055,8 +1058,15 @@ function renderFrame(now) {
       }
     }
 
-    // 引擎音随推力/加力平滑变化（撞毁后 probe 已 thrustOn=false 自然静音）
-    sfx.setEngine(probe.thrustOn && !clock.paused ? (isBoosting ? 1 : 0.55) : 0, isBoosting);
+    // 引擎音随推力/加力平滑变化，并叠一层随速度升高的频率感
+    // （撞毁后 probe 已 thrustOn=false 自然静音）
+    sfx.setEngine(
+      probe.thrustOn && !clock.paused ? (isBoosting ? 1 : 0.55) : 0,
+      isBoosting,
+      curWorld.maxSpeedWorldPerS > 0
+        ? Math.min(1, probe.speedWorldPerS() / curWorld.maxSpeedWorldPerS)
+        : 0,
+    );
 
     ui.setHud({ speedText: spText, distText, modeText, orbitText });
     let rateLabel = clock.paused
@@ -1132,7 +1142,7 @@ async function boot() {
 // （窗口 resize 由 engine 构造函数内注册的监听统一处理）
 
 // 全局调试挂载
-window.__universe = { engine, probe, clock, nav, ui, input, chaseCam, ship, sfx, discovered,
+window.__universe = { engine, probe, clock, nav, ui, input, chaseCam, ship, sfx, discovered, MISSIONS,
   get world() { return nav.world; },
   get selected() { return selected; },
   get tour() { return tour; },

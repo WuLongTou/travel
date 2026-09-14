@@ -45,13 +45,15 @@ export class SoundFX {
     src.start();
   }
 
-  // 油门 0..1（0=滑行静音），boost 时滤波抬频+增益加大
-  setEngine(level, boost) {
+  // 油门 0..1（0=滑行静音），boost 时滤波抬频+增益加大，speedFrac
+  // （当前速度/本层极速 0..1）再叠一层随速度升高的频率感
+  setEngine(level, boost, speedFrac = 0) {
     if (!this.ctx || !this._engineGain) return;
     const t = this.ctx.currentTime;
     this._engineLevel += (level - this._engineLevel) * 0.15; // 平滑防咔哒
     this._engineGain.gain.setTargetAtTime(this._engineLevel * (boost ? 0.34 : 0.2), t, 0.08);
-    this._engineFilter.frequency.setTargetAtTime(160 + this._engineLevel * (boost ? 420 : 160), t, 0.1);
+    this._engineFilter.frequency.setTargetAtTime(
+      160 + this._engineLevel * (boost ? 420 : 160) + speedFrac * 260, t, 0.1);
   }
 
   // 单音（频率/时长/类型/峰值）：各提示音的积木
