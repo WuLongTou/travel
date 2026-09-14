@@ -62,6 +62,22 @@ const _ndc = new THREE.Vector3();
 
 const input = new Input(canvas);
 const sfx = new SoundFX();
+// 用户设置（音量/震屏）：localStorage 持久化，缺失用默认值
+const SETTINGS_KEY = 'universe-roam-settings';
+function loadSettings() {
+  try {
+    const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+    return {
+      volume: Number.isFinite(s.volume) ? Math.min(1, Math.max(0, s.volume)) : 0.5,
+      shake: s.shake !== false,
+    };
+  } catch { return { volume: 0.5, shake: true }; }
+}
+function saveSettings() {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* 忽略 */ }
+}
+const settings = loadSettings();
+sfx.volume = settings.volume;
 // 音频需用户手势后才能启动：任意按键/点击时初始化或恢复（标题画面的
 // 「开始航行」是标准入口——真实点击手势，音频随之解锁）
 window.addEventListener('keydown', () => sfx.ensure());
@@ -204,23 +220,36 @@ const ui = new UI(engine, {
   onDiveTo: (entity) => nav.diveInto(entity),
   onInfoClose: () => { selected = null; },
 });
+// 设置面板：音量滑条/震屏开关实时生效并持久化；O 键或标题画面⚙打开
+function openSettings() {
+  ui.showSettings({
+    volume: Math.round(settings.volume * 100),
+    shake: settings.shake,
+    onVolume: (v) => { settings.volume = v / 100; sfx.setVolume(settings.volume); saveSettings(); },
+    onShake: (on) => { settings.shake = on; saveSettings(); },
+    onClose: () => ui.hideSettings(),
+  });
+}
 // 标题画面：有存档显示继续/重开；按钮点击（真实手势）同时解锁音频。
 // 「开始航行」「继续航行」只是收起画面——游戏在背后以吸引模式运行；
 // 「重新开始」清空进度并重载页面
 {
-  let savedIdx = 0;
+  let savedIdx = 0, savedDisc = 0;
   try {
     const saved = JSON.parse(localStorage.getItem('universe-roam-progress') || 'null');
     savedIdx = saved && Number.isInteger(saved.missionIdx) ? saved.missionIdx : 0;
+    savedDisc = saved && Array.isArray(saved.discovered) ? saved.discovered.length : 0;
   } catch { /* 存储不可用：视为无进度 */ }
   ui.setupTitleScreen({
     hasProgress: savedIdx > 0,
+    progressText: savedIdx > 0 ? `任务进度 ${savedIdx}/12 · 已发现 ${savedDisc} 个天体` : '',
     onStart: () => sfx.ensure(),
     onContinue: () => sfx.ensure(),
     onReset: () => {
       try { localStorage.removeItem('universe-roam-progress'); } catch { /* 忽略 */ }
       location.reload();
     },
+    onOpenSettings: () => openSettings(),
   });
 }
 
@@ -261,6 +290,7 @@ let prevBackslash = false;
 let prevG = false;
 let prevT = false;
 let prevF = false;
+let prevO = false; // O 键上一帧状态（设置面板开/关边沿）
 
 // 有限角速度平滑转向给定三维方向向量
 function steerTowardsDir(dir, dtReal, maxTurn = 1.2) {
@@ -464,6 +494,14 @@ function renderFrame(now) {
     toastMsg(sfx.toggleMute() ? '🔇 已静音' : '🔊 声音开启', 2);
   }
   prevM = mDown;
+
+  // O 键（边沿触发）：设置面板开/关
+  const oDown = input.keys.has('o');
+  if (oDown && !prevO) {
+    if (ui.el['settings-panel'].classList.contains('hidden')) openSettings();
+    else ui.hideSettings();
+  }
+  prevO = oDown;
 
   // [ 键：时间减速步进（用户手动设置后自动倍率挂起，重选目标/换层恢复）
   const blDown = input.keys.has('[');
@@ -1128,6 +1166,7 @@ function renderFrame(now) {
   // 撞毁震屏：随机偏移随剩余时间衰减，幅度按跟拍距离缩放（层尺度无关）
   if (crashShakeT > 0) {
     crashShakeT = Math.max(0, crashShakeT - dtReal);
+    if (!settings.shake) return;
     const s = crashShakeT * chaseCam.followDist * 0.12;
     engine.camera.position.x += (Math.random() - 0.5) * s;
     engine.camera.position.y += (Math.random() - 0.5) * s;

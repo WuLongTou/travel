@@ -38,7 +38,7 @@ export class Input {
     const kd = (e) => {
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
       const k = e.key.toLowerCase();
-      if ([' ', 'w', 'a', 's', 'd', 'q', 'e', 'c', 'g', 'r', 'x', 'v', 'z', 't', 'm',
+      if ([' ', 'w', 'a', 's', 'd', 'q', 'e', 'c', 'g', 'r', 'x', 'v', 'z', 't', 'm', 'o',
         'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift', 'f',
         '[', ']', '\\', 'tab', 'backspace'].includes(k)) {
         e.preventDefault();

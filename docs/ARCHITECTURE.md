@@ -87,9 +87,10 @@ src/
     world-*.js       # 六个世界构建器（每层一个文件）
     galaxy-gen.js    # buildGalaxy（棒旋点云）/buildStarSwarm/buildCosmicWeb
     data/*.js        # 核实数据：solar/stars/local-group/super-structures/cosmos
-  ui/controller.js   # 标题画面（开始/继续/重开）/层级栏/任务挂件（含发现
-                     # 计数）/层介绍横幅/座舱框/HUD（轨道独立行）/独立 toast/
-                     # 跨层黑场转场/准星发现脉冲/信息卡
+  ui/controller.js   # 标题画面（开始/继续/重开 + 存档概览 + 设置入口）/
+                     # 设置面板（音量滑条/震屏开关，持久化）/层级栏/任务
+                     # 挂件（含发现计数）/层介绍横幅/座舱框/HUD（轨道独立
+                     # 行）/独立 toast/跨层黑场转场/准星发现脉冲/信息卡
                      # （进入新尺度层时展示该层 intro 教学文案后淡出）
   util/              # units（AU/ly/pc/km 换算、色温→hex）、math（mulberry32）
 ```

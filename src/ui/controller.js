@@ -11,7 +11,7 @@ export class UI {
       'fade','loading','controls-hint','cockpit-frame','layer-intro',
       'mission-box','mission-idx','mission-title','mission-desc','discoveries',
       'hud-orbit','toast','title-screen','btn-start','btn-continue','btn-reset',
-      'crosshair'];
+      'crosshair','settings-panel','set-volume','set-shake','set-close','btn-title-settings','title-progress'];
     for (const id of ids) this.el[id] = document.getElementById(id);
     this._bindInfoClose();
     this._setupHintToggle();
@@ -94,10 +94,12 @@ export class UI {
   setCockpitFrame(on) {
     if (this.el['cockpit-frame']) this.el['cockpit-frame'].classList.toggle('hidden', !on);
   }
-  // 标题画面：有存档时显示继续/重开，否则仅开始；回调由 main 提供
-  setupTitleScreen({ hasProgress, onStart, onContinue, onReset }) {
+  // 标题画面：有存档时显示继续/重开与进度概览，否则仅开始；回调由 main 提供
+  setupTitleScreen({ hasProgress, progressText = '', onStart, onContinue, onReset, onOpenSettings }) {
     const scr = this.el['title-screen'];
     if (!scr) return;
+    if (this.el['title-progress'] && progressText) this.el['title-progress'].textContent = progressText;
+    this.el['btn-title-settings'].addEventListener('click', () => onOpenSettings && onOpenSettings());
     if (hasProgress) {
       this.el['btn-continue'].classList.remove('hidden');
       this.el['btn-reset'].classList.remove('hidden');
@@ -110,6 +112,21 @@ export class UI {
       if (window.confirm('确定清空进度并重新开始？')) onReset();
     });
   }
+  // 设置面板：挂滑条/开关回调并展示；hide 收起
+  showSettings({ volume, shake, onVolume, onShake, onClose }) {
+    const panel = this.el['settings-panel'];
+    if (!panel) return;
+    this.el['set-volume'].value = volume;
+    this.el['set-shake'].checked = shake;
+    this.el['set-volume'].oninput = (e) => onVolume && onVolume(Number(e.target.value));
+    this.el['set-shake'].onchange = (e) => onShake && onShake(e.target.checked);
+    this.el['set-close'].onclick = () => onClose && onClose();
+    panel.classList.remove('hidden');
+  }
+  hideSettings() {
+    if (this.el['settings-panel']) this.el['settings-panel'].classList.add('hidden');
+  }
+
   // 准星发现脉冲：新发现时的扩散反馈
   pingCrosshair() {
     const el = this.el['crosshair'];

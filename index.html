@@ -18,7 +18,9 @@
       <button id="btn-continue" class="hidden">继续航行</button>
       <button id="btn-reset" class="hidden">重新开始</button>
     </div>
+    <p class="title-progress" id="title-progress"></p>
     <p class="title-hint">点击天体锁定目标 · 松开按键自动巡航 · 12 环任务等待着你</p>
+    <button class="title-settings" id="btn-title-settings">⚙ 设置</button>
   </div>
 
   <!-- 顶栏：当前尺度面包屑 -->
@@ -39,6 +41,16 @@
 
   <!-- 瞬时提示 toast：独立元素，不再挤占 HUD 模式行 -->
   <div class="toast" id="toast"></div>
+
+  <!-- 设置面板：主音量 / 屏幕震动（localStorage 持久化） -->
+  <div class="settings-panel hidden" id="settings-panel">
+    <div class="settings-title">设置</div>
+    <label class="settings-row">主音量
+      <input type="range" id="set-volume" min="0" max="100" value="50"></label>
+    <label class="settings-row">屏幕震动
+      <input type="checkbox" id="set-shake" checked></label>
+    <button class="settings-close" id="set-close">关闭</button>
+  </div>
 
   <!-- 目标信息卡 -->
   <aside class="infocard hidden" id="infocard">
@@ -94,6 +106,7 @@
       <span class="hint-key">[ ]</span><span>时间倍率（巡航自动调节）</span>
       <span class="hint-key">\</span><span>时钟暂停</span>
       <span class="hint-key">M</span><span>静音开关</span>
+      <span class="hint-key">O</span><span>设置面板</span>
       <span class="hint-key">Tab</span><span>显示帮助</span>
     </div>
   </div>
