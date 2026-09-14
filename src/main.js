@@ -100,6 +100,9 @@ function saveProgress() {
 let prevParked = false; // 上一帧是否处于伴飞/悬停泊车态（边沿触发泊车音与新发现）
 let prevCrashTime = 0; // 最近一次撞毁时间戳（边沿触发撞毁音效与红闪）
 let prevM = false; // M 键上一帧状态（静音切换边沿）
+let slingWellId = null; // 引力弹弓计速：当前主导井实体 id
+let slingVEntry = 0; // 入井速度（km/s）
+let slingVPeak = 0; // 井内速度峰值（km/s）
 let everLeft = false; // 是否曾离开太阳系层（「回到家园」任务判定用）
 let edgeHintShown = false; // 层界浮升提示每层只提示一次（换层重置）
 
@@ -938,6 +941,19 @@ function renderFrame(now) {
     }
     if (nav.idx >= 1) everLeft = true;
 
+    // 引力弹弓计速：进入新主导井记录入场速度，井内持续更新速度峰值——
+    // 「井内峰值增速」即挑战判定口径（自动巡航入井后只减速，永远不触发）
+    {
+      const wid = probe.dominantWell && probe.dominantWell.ref ? probe.dominantWell.ref.id : null;
+      if (wid !== slingWellId) {
+        slingWellId = wid;
+        slingVEntry = probe.speedKmS();
+        slingVPeak = slingVEntry;
+      } else if (wid) {
+        slingVPeak = Math.max(slingVPeak, probe.speedKmS());
+      }
+    }
+
     // 任务链推进：条件满足即完成并 toast；全部完成转自由航行态
     if (missionIdx < MISSIONS.length) {
       const sun = curWorld.entities.find((e) => e.id === 'sun');
@@ -951,7 +967,7 @@ function renderFrame(now) {
         rFromCenter: Math.hypot(probe.pos[0], probe.pos[1], probe.pos[2]),
         everLeft,
         wellId: probe.dominantWell && probe.dominantWell.ref ? probe.dominantWell.ref.id : null,
-        speedKmS: probe.speedKmS(),
+        wellSpeedGain: slingWellId ? Math.max(0, slingVPeak - slingVEntry) : 0,
         targetRadius: selected ? selected.pickRadius : 0,
       };
       if (MISSIONS[missionIdx].done(ctx)) {
@@ -1038,6 +1054,9 @@ function renderFrame(now) {
     // 泊车边沿：进圈一次性的泊车音 + 新发现收集（同一目标只记一次）
     const parked = navDbg ? (navDbg.branch === 'rendezvous' || navDbg.branch === 'station') : false;
     if (parked && !prevParked && selected) {
+      // 弹弓基线重置：以泊入时的匹配速度为起点，此后井内加速才算「增速」
+      slingVEntry = probe.speedKmS();
+      slingVPeak = slingVEntry;
       if (!discovered.has(selected.id)) {
         discovered.add(selected.id);
         ui.setDiscoveries(discovered.size);
@@ -1152,6 +1171,15 @@ window.__universe = { engine, probe, clock, nav, ui, input, chaseCam, ship, sfx,
     const e = nav.world?.entities.find((x) => x.id === id);
     if (e) selectEntity(e);
     return !!e;
+  },
+  // 测试用：直接设置任务进度（后期任务的无头验证入口）
+  setMission(i) {
+    if (Number.isInteger(i) && i >= 0 && i <= MISSIONS.length) {
+      missionIdx = i;
+      saveProgress();
+      return true;
+    }
+    return false;
   },
   startTour,
   stopTour,

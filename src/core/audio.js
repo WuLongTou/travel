@@ -23,8 +23,37 @@ export class SoundFX {
       this.master.gain.value = this.muted ? 0 : 0.5;
       this.master.connect(this.ctx.destination);
       this._buildEngine();
+      this._buildAmbient();
     }
     if (this.ctx.state === 'suspended') this.ctx.resume();
+  }
+
+  // 环境氛围垫底：双失谐正弦低音 + 慢速 LFO 呼吸滤波——太空的"空"
+  // 用一条极低音量的持续声床表达（随 master 静音）
+  _buildAmbient() {
+    const t = this.ctx.currentTime;
+    this._ambGain = this.ctx.createGain();
+    this._ambGain.gain.value = 0;
+    const f = this.ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = 300;
+    const lfo = this.ctx.createOscillator();
+    const lfoGain = this.ctx.createGain();
+    lfo.frequency.value = 0.05; // 20 秒一个呼吸周期
+    lfoGain.gain.value = 120;
+    lfo.connect(lfoGain).connect(f.frequency);
+    lfo.start(t);
+    for (const freq of [55, 55.7]) {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const og = this.ctx.createGain();
+      og.gain.value = 0.5;
+      osc.connect(og).connect(f);
+      osc.start(t);
+    }
+    f.connect(this._ambGain).connect(this.master);
+    this._ambGain.gain.setTargetAtTime(0.05, t, 3); // 3 秒淡入
   }
 
   // 循环白噪声源 + 低通滤波 = 推进器轰鸣；电平由 setEngine 平滑驱动

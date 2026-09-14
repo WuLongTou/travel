@@ -1,7 +1,7 @@
 // 任务链：把「真实物理漫游」串成一条从地球到可观测宇宙边缘的玩法主线。
 // 每个任务声明 { id, title, desc, done(ctx) }，ctx 由 main 每帧构建：
 //   { layer, idx, selectedId, selType, branch, distToSel, targetRadius,
-//     distToSun, rFromCenter, everLeft, wellId, speedKmS }
+//     distToSun, rFromCenter, everLeft, wellId, wellSpeedGain }
 // 线性推进；条件天然满足时自动完成（如面包屑直达会跳过中间任务）。
 export const MISSIONS = [
   {
@@ -39,8 +39,8 @@ export const MISSIONS = [
   },
   // ---- 挑战任务：只有手动飞行才能完成（自动导航永远减速泊车）----
   {
-    id: 'slingshot', title: '挑战 · 引力弹弓', desc: '手动贴飞木星，借引力把自己甩到 45 km/s 以上',
-    done: (c) => c.wellId === 'jupiter' && c.speedKmS > 45,
+    id: 'slingshot', title: '挑战 · 引力弹弓', desc: '泊入木星后，手动把速度再拉高 20 km/s（贴近飞越借引力最省）',
+    done: (c) => c.wellId === 'jupiter' && c.wellSpeedGain > 20,
   },
   {
     id: 'sun-knight', title: '挑战 · 掠日骑士', desc: '手动冲进距太阳 0.05 AU 以内并活到下一帧',
