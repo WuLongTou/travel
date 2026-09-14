@@ -62,7 +62,8 @@ const _ndc = new THREE.Vector3();
 
 const input = new Input(canvas);
 const sfx = new SoundFX();
-// 音频需用户手势后才能启动：任意按键/点击时初始化或恢复
+// 音频需用户手势后才能启动：任意按键/点击时初始化或恢复（标题画面的
+// 「开始航行」是标准入口——真实点击手势，音频随之解锁）
 window.addEventListener('keydown', () => sfx.ensure());
 window.addEventListener('mousedown', () => sfx.ensure());
 const freeCam = new FreeCam(engine.camera);
@@ -99,6 +100,7 @@ function saveProgress() {
 }
 let prevParked = false; // 上一帧是否处于伴飞/悬停泊车态（边沿触发泊车音与新发现）
 let prevCrashTime = 0; // 最近一次撞毁时间戳（边沿触发撞毁音效与红闪）
+let crashShakeT = 0; // 撞毁震屏剩余时长（秒，随时间衰减的随机相机偏移）
 let prevM = false; // M 键上一帧状态（静音切换边沿）
 let slingWellId = null; // 引力弹弓计速：当前主导井实体 id
 let slingVEntry = 0; // 入井速度（km/s）
@@ -202,12 +204,32 @@ const ui = new UI(engine, {
   onDiveTo: (entity) => nav.diveInto(entity),
   onInfoClose: () => { selected = null; },
 });
+// 标题画面：有存档显示继续/重开；按钮点击（真实手势）同时解锁音频。
+// 「开始航行」「继续航行」只是收起画面——游戏在背后以吸引模式运行；
+// 「重新开始」清空进度并重载页面
+{
+  let savedIdx = 0;
+  try {
+    const saved = JSON.parse(localStorage.getItem('universe-roam-progress') || 'null');
+    savedIdx = saved && Number.isInteger(saved.missionIdx) ? saved.missionIdx : 0;
+  } catch { /* 存储不可用：视为无进度 */ }
+  ui.setupTitleScreen({
+    hasProgress: savedIdx > 0,
+    onStart: () => sfx.ensure(),
+    onContinue: () => sfx.ensure(),
+    onReset: () => {
+      try { localStorage.removeItem('universe-roam-progress'); } catch { /* 忽略 */ }
+      location.reload();
+    },
+  });
+}
 
 // 跃迁前清理指向旧世界实体的目标锁定（防止自动飞控追逐幽灵目标）
 nav.onBeforeWorldChange = () => {
   stopTour(); // 巡游路线按层定义，跨层即失效
   clearSelection();
   if (controlMode === MODE_GOD) exitGodMode();
+  ui.fadeOut(); // 标准场景过渡：黑场遮住世界重建，落点后淡入
 };
 
 nav.onWorldChanged = (world, idx) => {
@@ -218,6 +240,7 @@ nav.onWorldChanged = (world, idx) => {
   ui.setCrumb(idx);
   ui.setScaleHud(`${world.title} · 1单位≈${unitRulerText(world.unitName)}`);
   ui.showLayerIntro(world.intro); // 层教学文案横幅（各层 build 时声明）
+  ui.fadeIn(); // 转场淡入：世界就绪后从黑场回到画面
   sfx.warp(); // 跨层跃迁扫频
   selected = null;
   ui.hideInfo();
@@ -470,6 +493,7 @@ function renderFrame(now) {
   const bsDown = input.keys.has('\\');
   if (bsDown && !prevBackslash) {
     clock.paused = !clock.paused;
+    toastMsg(clock.paused ? '⏸ 已暂停（\\ 继续）' : '▶ 继续航行', 2.5);
   }
   prevBackslash = bsDown;
 
@@ -1059,6 +1083,7 @@ function renderFrame(now) {
       if (!discovered.has(selected.id)) {
         discovered.add(selected.id);
         ui.setDiscoveries(discovered.size);
+        ui.pingCrosshair(); // 准星扩散脉冲：收集反馈
         toastMsg(`🛰 新发现：${selected.name}`);
         saveProgress();
       }
@@ -1066,15 +1091,17 @@ function renderFrame(now) {
     }
     prevParked = parked;
 
-    // 撞毁边沿：爆响 + 红闪
+    // 撞毁边沿：爆响 + 红闪 + 震屏
     if (probe.lastCrashTime !== prevCrashTime) {
       prevCrashTime = probe.lastCrashTime;
       if (probe.lastCrashTime > 0) {
         sfx.crash();
+        crashShakeT = 0.6;
         document.body.classList.add('danger');
         setTimeout(() => document.body.classList.remove('danger'), 700);
       }
     }
+
 
     // 引擎音随推力/加力平滑变化，并叠一层随速度升高的频率感
     // （撞毁后 probe 已 thrustOn=false 自然静音）
@@ -1097,6 +1124,14 @@ function renderFrame(now) {
   // 上帝视角下相机由 FreeCam 全权控制，跳过追尾相机更新
   if (controlMode !== MODE_GOD) {
     chaseCam.update(dtReal, a.boost && probe.thrustOn);
+  }
+  // 撞毁震屏：随机偏移随剩余时间衰减，幅度按跟拍距离缩放（层尺度无关）
+  if (crashShakeT > 0) {
+    crashShakeT = Math.max(0, crashShakeT - dtReal);
+    const s = crashShakeT * chaseCam.followDist * 0.12;
+    engine.camera.position.x += (Math.random() - 0.5) * s;
+    engine.camera.position.y += (Math.random() - 0.5) * s;
+    engine.camera.position.z += (Math.random() - 0.5) * s;
   }
   trailRibbon.update(probe);
 
@@ -1161,6 +1196,7 @@ async function boot() {
 
 // 全局调试挂载
 window.__universe = { engine, probe, clock, nav, ui, input, chaseCam, ship, sfx, discovered, MISSIONS,
+  get crashShake() { return crashShakeT; },
   get world() { return nav.world; },
   get selected() { return selected; },
   get tour() { return tour; },

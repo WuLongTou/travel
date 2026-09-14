@@ -9,6 +9,18 @@
 <body>
   <canvas id="scene"></canvas>
 
+  <!-- 标题画面：开始/继续/重开（游戏标准第一屏；点击即解锁音频） -->
+  <div class="title-screen" id="title-screen">
+    <h1>宇宙航行</h1>
+    <p class="title-sub">从太阳系到可观测宇宙边缘 · 真实物理太空漫游</p>
+    <div class="title-actions">
+      <button id="btn-start">开始航行</button>
+      <button id="btn-continue" class="hidden">继续航行</button>
+      <button id="btn-reset" class="hidden">重新开始</button>
+    </div>
+    <p class="title-hint">点击天体锁定目标 · 松开按键自动巡航 · 12 环任务等待着你</p>
+  </div>
+
   <!-- 顶栏：当前尺度面包屑 -->
   <header class="topbar" id="topbar">
     <div class="crumb" id="crumb"></div>

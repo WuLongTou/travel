@@ -9,7 +9,8 @@
 换算真源 `content/physics.js`）/轨道速度全部真实（地球轨道 29.8 km/s、
 太阳轨道绕银心 220 km/s）；飞船为未来离子推进（0.6 m/s²，巡航
 ≤300 km/s ≈0.001c），速度永远低于光速——从行星际到宇宙网的航行
-节奏由**自动时间倍率**承担（接近目标按 ETA≈8 墙上秒连续配速，伴飞
+节奏由**自动时间倍率**承担（标题画面点击「开始」即解锁音频与操作；
+跨层跃迁有黑场转场；撞毁触发震屏与红闪；接近目标按 ETA≈8 墙上秒连续配速，伴飞
 按主导井 1/60 轨道周期配速、每层 timeScaleMax 封顶；[ ] 手动设置即
 挂起自动，重选目标/换层恢复；泊位邻域按「到目标 ETA≈2.5 墙上秒」
 自适应收尾配速，跨尺度通用）。物理积分走模拟时间（dtSim），子步长
@@ -86,8 +87,9 @@ src/
     world-*.js       # 六个世界构建器（每层一个文件）
     galaxy-gen.js    # buildGalaxy（棒旋点云）/buildStarSwarm/buildCosmicWeb
     data/*.js        # 核实数据：solar/stars/local-group/super-structures/cosmos
-  ui/controller.js   # 层级栏/任务挂件（含发现计数）/层介绍横幅/座舱框/
-                     # HUD（轨道独立行）/独立 toast/信息卡
+  ui/controller.js   # 标题画面（开始/继续/重开）/层级栏/任务挂件（含发现
+                     # 计数）/层介绍横幅/座舱框/HUD（轨道独立行）/独立 toast/
+                     # 跨层黑场转场/准星发现脉冲/信息卡
                      # （进入新尺度层时展示该层 intro 教学文案后淡出）
   util/              # units（AU/ly/pc/km 换算、色温→hex）、math（mulberry32）
 ```

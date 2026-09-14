@@ -10,7 +10,8 @@ export class UI {
       'hud-speed','hud-dist','hud-clock','hud-mode','hud-rate','hud-scale',
       'fade','loading','controls-hint','cockpit-frame','layer-intro',
       'mission-box','mission-idx','mission-title','mission-desc','discoveries',
-      'hud-orbit','toast'];
+      'hud-orbit','toast','title-screen','btn-start','btn-continue','btn-reset',
+      'crosshair'];
     for (const id of ids) this.el[id] = document.getElementById(id);
     this._bindInfoClose();
     this._setupHintToggle();
@@ -93,6 +94,33 @@ export class UI {
   setCockpitFrame(on) {
     if (this.el['cockpit-frame']) this.el['cockpit-frame'].classList.toggle('hidden', !on);
   }
+  // 标题画面：有存档时显示继续/重开，否则仅开始；回调由 main 提供
+  setupTitleScreen({ hasProgress, onStart, onContinue, onReset }) {
+    const scr = this.el['title-screen'];
+    if (!scr) return;
+    if (hasProgress) {
+      this.el['btn-continue'].classList.remove('hidden');
+      this.el['btn-reset'].classList.remove('hidden');
+      this.el['btn-start'].classList.add('hidden');
+    }
+    const close = () => scr.classList.add('hidden');
+    this.el['btn-start'].addEventListener('click', () => { close(); onStart(); });
+    this.el['btn-continue'].addEventListener('click', () => { close(); onContinue(); });
+    this.el['btn-reset'].addEventListener('click', () => {
+      if (window.confirm('确定清空进度并重新开始？')) onReset();
+    });
+  }
+  // 准星发现脉冲：新发现时的扩散反馈
+  pingCrosshair() {
+    const el = this.el['crosshair'];
+    if (!el) return;
+    el.classList.remove('ping');
+    void el.offsetWidth; // 强制重排以重启动画
+    el.classList.add('ping');
+    clearTimeout(this._pingTimer);
+    this._pingTimer = setTimeout(() => el.classList.remove('ping'), 750);
+  }
+
   // 任务链挂件：主线任务序号/标题/描述；info=null 时转通关态
   setMission(info) {
     const box = this.el['mission-box'];
