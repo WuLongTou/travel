@@ -3,6 +3,10 @@
 //   { layer, idx, selectedId, selType, branch, distToSel, targetRadius,
 //     distToSun, rFromCenter, everLeft, wellId, wellSpeedGain }
 // 线性推进；条件天然满足时自动完成（如面包屑直达会跳过中间任务）。
+// 卫星 id 集合（与 content/data/solar.js MOONS 对应，供巡礼任务判定）
+export const MOON_IDS = new Set([
+  'moon', 'phobos', 'deimos', 'io', 'europa', 'ganymede', 'callisto', 'titan', 'rhea',
+]);
 export const MISSIONS = [
   {
     id: 'first-lock', title: '首次接触', desc: '点击眼前的天体，锁定自动导航目标',
@@ -28,6 +32,10 @@ export const MISSIONS = [
   {
     id: 'dive-home', title: '回到家园', desc: '锁定太阳系，按 F 下潜返回内太阳系',
     done: (c) => c.everLeft && c.layer === 'solar',
+  },
+  {
+    id: 'moon-tour', title: '卫星巡礼', desc: '发现任意 3 颗卫星（月球、伽利略卫星、土卫六…泊近即计）',
+    done: (c) => c.moonsDiscovered >= 3,
   },
   {
     id: 'sgr-a', title: '银河之心', desc: '前往银河系层，点击银心的超大质量黑洞',

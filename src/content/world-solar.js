@@ -180,9 +180,35 @@ export function buildSolarWorld() {
     // km = 0.00257 AU）与真实半径——行星真实化后卫星轨道自然成立
     const moons = MOONS[p.id] || [];
     moons.forEach((m, mi) => {
-      const mm = makeSphere({ radius: rReal(m.rKm), color: m.color, roughness: 1 });
+      const rMoon = rReal(m.rKm);
+      const mm = makeSphere({ radius: rMoon, color: m.color, roughness: 1 });
       mesh.add(mm);
       moonAnims.push({ mesh: mm, aAU: m.aKm / AU_KM, periodS: m.periodD * 86400, phase: (mi * 2.399) % (Math.PI * 2) });
+      // 大卫星升级为可发现实体：真实轨道/半径/信息卡，泊近计入「新发现」
+      const moonEnt = {
+        id: m.id, name: m.name, en: m.en, type: 'moon',
+        pos: [0, 0, 0], pickRadius: rMoon,
+        info: {
+          kind: '卫星', sub: `${p.name} · ${m.en}`,
+          facts: [
+            ['直径', (m.rKm * 2).toLocaleString() + ' km'],
+            ['轨道半径', m.aKm.toLocaleString() + ' km'],
+            ['公转周期', m.periodD + ' 天'],
+          ],
+          text: `${m.name}是${p.name}的卫星，轨道半径约 ${m.aKm.toLocaleString()} km，公转周期 ${m.periodD} 天。泊近即可计入发现。`,
+        },
+        visual: { color: m.color },
+      };
+      entities.push(moonEnt);
+      moonAnims[moonAnims.length - 1].ent = moonEnt; // host 在行星实体创建后回填
+      // 主要卫星带标签（月球/伽利略卫星/土卫六），小火卫等保持无标签防杂乱
+      if (['moon', 'io', 'europa', 'ganymede', 'callisto', 'titan'].includes(m.id)) {
+        const mlbl = makeTextSprite(m.name, { color: '#dfe6ff' });
+        const mls = labelScaleFor(mlbl, 1.4e-5);
+        mlbl.scale.set(mls[0], mls[1], 1);
+        mlbl.position.y = rMoon * 5;
+        mm.add(mlbl);
+      }
     });
     // 真实引力井：GM = G·M，碰撞半径 = 真实表面
     gravityWells.push({
@@ -190,6 +216,7 @@ export function buildSolarWorld() {
       GM: gmReal(p.massKg), minR: rAU, capR: rAU * 2.4, name: p.name,
     });
 
+    const maStart = moonAnims.length - moons.length; // 本行星卫星的动画条目起点
     const entity = {
       id: p.id, name: p.name, en: p.en, type: 'planet',
       pos: [_orbTmp[0], 0, _orbTmp[2]],
@@ -215,6 +242,7 @@ export function buildSolarWorld() {
     };
     entities.push(entity);
     gravityWells[gravityWells.length - 1].ref = entity; // 引力井回填实体引用
+    for (let k = maStart; k < moonAnims.length; k++) moonAnims[k].host = entity; // 卫星宿主回填
   }
   // 构建期预计算行星轨道速度（±1 小时中心差分）：出生注入（bindWorld）
   // 先于首帧 update，必须在此就绪
@@ -390,10 +418,18 @@ export function buildSolarWorld() {
         const dz = it.sprite.parent.position.z - probe.pos[2];
         it.sprite.visible = Math.hypot(dx, dy, dz) > it.rAU * 80;
       }
-      // 卫星公转：真实周期（月 27.3 天、火卫一 0.32 天…），倍速下可见
+      // 卫星公转：真实周期（月 27.3 天、火卫一 0.32 天…），倍速下可见；
+      // 实体位置同步（行星位置 + 轨道偏移），供拾取/导向/发现
       for (const ma of moonAnims) {
         const ang = ma.phase + (clock.t / ma.periodS) * Math.PI * 2;
         ma.mesh.position.set(Math.cos(ang) * ma.aAU, 0, Math.sin(ang) * ma.aAU);
+        if (ma.ent && ma.host) {
+          ma.ent.pos = [
+            ma.host.pos[0] + ma.mesh.position.x,
+            ma.host.pos[1] + ma.mesh.position.y,
+            ma.host.pos[2] + ma.mesh.position.z,
+          ];
+        }
       }
       // 行星自转：贴图经度偏移 = 真实自转周期（木星 9.9h、金星 -5832h 逆行…）
       for (const sp of spins) {

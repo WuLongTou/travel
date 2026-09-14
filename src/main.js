@@ -11,7 +11,7 @@ import './style.css';
 import * as THREE from 'three';
 import { CosmicEngine } from './render/engine.js';
 import { Input } from './core/input.js';
-import { MISSIONS } from './core/missions.js';
+import { MISSIONS, MOON_IDS } from './core/missions.js';
 import { SoundFX } from './core/audio.js';
 import { Probe } from './core/probe.js';
 import { SimClock } from './core/clock.js';
@@ -557,13 +557,11 @@ function renderFrame(now) {
     let flightStatus = '';
 
     if (isIntervening) {
-      // 玩家主动进行「飞行操控类」干预：
-      // 手动接管即终止大巡游；仅当存在实际推进/刹车输入时才解除目标锁定
-      // （纯 Q/E 横滚保持锁定）
+      // 玩家主动进行「飞行操控类」干预：手动接管即终止大巡游。
+      // 目标锁定在手动飞行期间保持——玩家手动贴近日标后松手，自动导航
+      // 从当前位置无缝接手（低轨信使等贴身挑战依赖此语义）；取消锁定
+      // 用信息卡关闭按钮
       stopTour('手动接管 · 巡游结束');
-      if (selected && input.hasThrustInput()) {
-        clearSelection();
-      }
 
       // Q/E 机身横滚
       if (rollIn !== 0) {
@@ -969,6 +967,7 @@ function renderFrame(now) {
         wellId: probe.dominantWell && probe.dominantWell.ref ? probe.dominantWell.ref.id : null,
         wellSpeedGain: slingWellId ? Math.max(0, slingVPeak - slingVEntry) : 0,
         targetRadius: selected ? selected.pickRadius : 0,
+        moonsDiscovered: [...discovered].filter((id) => MOON_IDS.has(id)).length,
       };
       if (MISSIONS[missionIdx].done(ctx)) {
         toastMsg(`✅ 任务完成：${MISSIONS[missionIdx].title}`);
