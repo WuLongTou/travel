@@ -32,6 +32,7 @@ import { FreeCam } from './render/freecam.js';
 import { updateLabelFades } from './render/labels.js';
 import { TrailRibbon } from './render/trail.js';
 import { makeShip, updateShipFlame } from './render/ship.js';
+import { SpaceEvents } from './render/events.js';
 
 // 时间倍率阶梯（[ ] 键步进切换）。真实物理口径下飞船速度远低于光速，
 // 从行星际到宇宙网的航行节奏全部由时间倍率承担（AUTO 自动管理，见 autoWarpTick）：
@@ -53,6 +54,8 @@ const nav = new Navigator(engine, probe, clock);
 const chaseCam = new ChaseCam(engine.camera, probe);
 engine.chaseCam = chaseCam;
 const trailRibbon = new TrailRibbon(engine.scene);
+// 深空环境事件（流星雨/彗星群，纯视觉氛围；首次彗星群 toast 提示）
+const spaceEvents = new SpaceEvents(engine.scene, (t) => toastMsg(t));
 
 // 飞船 3D 模型
 const ship = makeShip();
@@ -220,6 +223,13 @@ const ui = new UI(engine, {
   onDiveTo: (entity) => nav.diveInto(entity),
   onInfoClose: () => { selected = null; },
 });
+// 手柄连接/断开提示（轮询在 renderFrame 中每帧进行）
+window.addEventListener('gamepadconnected', () => toastMsg('🎮 手柄已连接', 3));
+window.addEventListener('gamepaddisconnected', () => {
+  toastMsg('🎮 手柄已断开', 3);
+  prevGpView = false; prevGpPause = false;
+});
+
 // 设置面板：音量滑条/震屏开关实时生效并持久化；O 键或标题画面⚙打开
 function openSettings() {
   ui.showSettings({
@@ -291,6 +301,8 @@ let prevG = false;
 let prevT = false;
 let prevF = false;
 let prevO = false; // O 键上一帧状态（设置面板开/关边沿）
+let prevGpView = false; // 手柄 Y 键上一帧状态（切换视角边沿）
+let prevGpPause = false; // 手柄 Start 键上一帧状态（暂停边沿）
 
 // 有限角速度平滑转向给定三维方向向量
 function steerTowardsDir(dir, dtReal, maxTurn = 1.2) {
@@ -462,6 +474,30 @@ function renderFrame(now) {
   lastFrame = now;
   const steer = input.poll();
   const a = input.actions;
+  // 手柄合并：摇杆/扳机与键盘同管线（有任一输入即构成人工干预）
+  let gpBrake = false, gpThrust = false;
+  const gp = input.pollGamepad(dtReal);
+  if (gp) {
+    a.fwd = a.fwd || gp.fwd; a.bwd = a.bwd || gp.bwd;
+    a.left = a.left || gp.left; a.right = a.right || gp.right;
+    a.up = a.up || gp.up; a.down = a.down || gp.down;
+    a.boost = a.boost || gp.boost;
+    gpBrake = gp.brake;
+    gpThrust = gp.fwd || gp.bwd || gp.left || gp.right || gp.up || gp.down || gp.brake;
+    if (gp.viewX || gp.viewY) {
+      steer.dx += gp.viewX;
+      steer.dy += gp.viewY;
+    }
+    if (gp.viewCycle && !prevGpView && chaseCam.mode !== 'orbit' && controlMode !== MODE_GOD) {
+      chaseCam.cycleView();
+    }
+    prevGpView = gp.viewCycle;
+    if (gp.pause && !prevGpPause) {
+      clock.paused = !clock.paused;
+      toastMsg(clock.paused ? '⏸ 已暂停' : '▶ 继续航行', 2);
+    }
+    prevGpPause = gp.pause;
+  }
 
   // R 键：主动在安全轨道重置部署
   const rDown = input.keys.has('r');
@@ -586,10 +622,10 @@ function renderFrame(now) {
     // 观察视角调整（鼠标环视/平移/缩放/切视角）、时间流速调整（加速/减速/暂停）、系统复位等 100% 不算干预
     // ==========================================================
     // 上帝视角下飞行键用于移动相机，绝不干预飞船
-    const isIntervening = controlMode !== MODE_GOD && input.isFlightIntervening();
+    const isIntervening = controlMode !== MODE_GOD && (input.isFlightIntervening() || gpThrust);
     const rollIn = (input.keys.has('q') ? 1 : 0) - (input.keys.has('e') ? 1 : 0);
     const manualThrustKeys = a.fwd || a.bwd || a.left || a.right || a.up || a.down;
-    const isBraking = input.keys.has('x');
+    const isBraking = input.keys.has('x') || gpBrake;
     // 上帝视角下 Shift 加速只作用于相机移动，绝不让背景中的飞船尾焰呈现加力
     const isBoosting = controlMode !== MODE_GOD && a.boost && manualThrustKeys;
     const maxSp = curWorld.maxSpeedWorldPerS || 5.0;
@@ -1141,6 +1177,14 @@ function renderFrame(now) {
     }
 
 
+    // 深空环境事件：太阳系层调度流星雨/彗星群，尺度随跟拍距离
+    spaceEvents.update(
+      dtReal,
+      engine.camera.position,
+      Math.max(chaseCam.followDist * 12, curWorld.viewDist * 0.05),
+      curWorld.id === 'solar',
+    );
+
     // 引擎音随推力/加力平滑变化，并叠一层随速度升高的频率感
     // （撞毁后 probe 已 thrustOn=false 自然静音）
     sfx.setEngine(
@@ -1234,7 +1278,7 @@ async function boot() {
 // （窗口 resize 由 engine 构造函数内注册的监听统一处理）
 
 // 全局调试挂载
-window.__universe = { engine, probe, clock, nav, ui, input, chaseCam, ship, sfx, discovered, MISSIONS,
+window.__universe = { engine, probe, clock, nav, ui, input, chaseCam, ship, sfx, discovered, MISSIONS, events: spaceEvents,
   get crashShake() { return crashShakeT; },
   get world() { return nav.world; },
   get selected() { return selected; },

@@ -157,4 +157,27 @@ export class Input {
            this.keys.has('arrowup') || this.keys.has('arrowdown') || this.keys.has('arrowleft') || this.keys.has('arrowright') ||
            this.keys.has(' ') || this.keys.has('c') || this.keys.has('x');
   }
+
+  // 手柄轮询（标准映射，含 18% 摇杆死区）：
+  //   左摇杆=六向推进平移 · RT=加力 · LT=上升 · LB=下降 · RB=反推刹车
+  //   右摇杆=环视 · Y=切换视角 · Start=暂停
+  // 无手柄返回 null。dtReal 供右摇杆折算成像素增量（与鼠标环视同管线）。
+  pollGamepad(dtReal) {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    const pad = pads && (pads[0] || [...pads].find((p) => p && p.connected));
+    if (!pad) return null;
+    const dz = (v) => (Math.abs(v) > 0.18 ? v : 0);
+    const btn = (i) => !!(pad.buttons[i] && pad.buttons[i].pressed);
+    const ax = pad.axes || [];
+    const lx = dz(ax[0] || 0), ly = dz(ax[1] || 0);
+    const rx = dz(ax[2] || 0), ry = dz(ax[3] || 0);
+    const GAIN = 420; // 满杆 ≈ 420 px/s，与鼠标环视灵敏度同量级
+    return {
+      fwd: ly < 0, bwd: ly > 0,
+      left: lx < 0, right: lx > 0,
+      up: btn(6), down: btn(4), boost: btn(7), brake: btn(5),
+      viewX: rx * GAIN * dtReal, viewY: ry * GAIN * dtReal,
+      viewCycle: btn(3), pause: btn(9),
+    };
+  }
 }
