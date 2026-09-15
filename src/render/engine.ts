@@ -10,6 +10,16 @@ import { buildAmbient } from './background.js';
 import type { ChaseCam } from './camera.js';
 import type { AmbientSpec } from '../types.js';
 
+/** 画质档：影响像素比与 Bloom 强度（渲染参数级，即时生效不重建世界） */
+export type QualityLevel = 'low' | 'medium' | 'high';
+
+export const QUALITY_PRESETS: Record<QualityLevel, { pixelRatio: number; bloom: number }> = {
+  low: { pixelRatio: 0.75, bloom: 0.15 },
+  medium: { pixelRatio: 1.0, bloom: 0.3 },
+  // high = 出厂默认观感（Bloom 0.35 与构造初值一致，视网膜屏全像素比）
+  high: { pixelRatio: Math.min(window.devicePixelRatio || 1, 2), bloom: 0.35 },
+};
+
 export class CosmicEngine {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
@@ -92,6 +102,21 @@ export class CosmicEngine {
       }
     });
     while (g.children.length) g.remove(g.children[0]);
+  }
+
+  /** 画质档切换：即时调整像素比与 Bloom（低配设备适配） */
+  setQuality(level: QualityLevel): void {
+    const preset = QUALITY_PRESETS[level];
+    this.renderer.setPixelRatio(preset.pixelRatio);
+    this.bloom.strength = preset.bloom;
+    this._resize(); // 像素比变化后按新比率重建缓冲
+  }
+
+  get qualityLevel(): QualityLevel {
+    const pr = this.renderer.getPixelRatio();
+    if (Math.abs(pr - QUALITY_PRESETS.low.pixelRatio) < 0.01) return 'low';
+    if (Math.abs(pr - QUALITY_PRESETS.medium.pixelRatio) < 0.01) return 'medium';
+    return 'high';
   }
 
   render(_dtReal: number): void {

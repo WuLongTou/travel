@@ -13,6 +13,7 @@ import * as THREE from 'three';
 import { CosmicEngine } from './render/engine.js';
 import { Input } from './core/input.js';
 import { MISSIONS, MOON_IDS } from './core/missions.js';
+import { CODEX_LAYER_ORDER, codexProgress, getLayer, registerLayerEntities } from './core/codex.js';
 import { SoundFX } from './core/audio.js';
 import { Probe } from './core/probe.js';
 import { SimClock } from './core/clock.js';
@@ -77,22 +78,26 @@ const _ndc = new THREE.Vector3();
 
 const input = new Input(canvas);
 const sfx = new SoundFX();
-// 用户设置（音量/震屏）：localStorage 持久化，缺失用默认值
+// 用户设置（音量/震屏/画质）：localStorage 持久化，缺失用默认值
 const SETTINGS_KEY = 'universe-roam-settings';
+const QUALITIES = ['low', 'medium', 'high'] as const;
+type Quality = (typeof QUALITIES)[number];
 function loadSettings() {
   try {
     const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
     return {
       volume: Number.isFinite(s.volume) ? Math.min(1, Math.max(0, s.volume)) : 0.5,
       shake: s.shake !== false,
+      quality: (QUALITIES as readonly string[]).includes(s.quality) ? s.quality as Quality : 'high',
     };
-  } catch { return { volume: 0.5, shake: true }; }
+  } catch { return { volume: 0.5, shake: true, quality: 'high' as Quality }; }
 }
 function saveSettings() {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* 忽略 */ }
 }
 const settings = loadSettings();
 sfx.volume = settings.volume;
+engine.setQuality(settings.quality); // 画质档即时生效（high = 出厂默认观感）
 // 音频需用户手势后才能启动：任意按键/点击时初始化或恢复（标题画面的
 // 「开始航行」是标准入口——真实点击手势，音频随之解锁）
 window.addEventListener('keydown', () => sfx.ensure());
@@ -244,13 +249,15 @@ window.addEventListener('gamepaddisconnected', () => {
   prevGpView = false; prevGpPause = false;
 });
 
-// 设置面板：音量滑条/震屏开关实时生效并持久化；O 键或标题画面⚙打开
+// 设置面板：音量滑条/震屏开关/画质档实时生效并持久化；O 键或标题画面⚙打开
 function openSettings() {
   ui.showSettings({
     volume: Math.round(settings.volume * 100),
     shake: settings.shake,
+    quality: settings.quality,
     onVolume: (v) => { settings.volume = v / 100; sfx.setVolume(settings.volume); saveSettings(); },
     onShake: (on) => { settings.shake = on; saveSettings(); },
+    onQuality: (q) => { settings.quality = q; engine.setQuality(q); saveSettings(); },
     onClose: () => ui.hideSettings(),
   });
 }
@@ -293,6 +300,28 @@ let prevEsc = false; // Esc 键上一帧状态（开关边沿）
 let menuFocusIdx = 0; // 手柄 dpad 焦点位置（暂停菜单按钮下标）
 let prevGpUp = false, prevGpDown = false, prevGpConfirm = false, prevGpBack = false;
 
+// 发现图鉴打开：按层序组装渲染数据（已发现显名 / 未发现 ？？？）
+function openCodex() {
+  const layers = CODEX_LAYER_ORDER.map((id) => {
+    const snap = getLayer(id);
+    let items: { name: string; found: boolean }[] = [];
+    let f = 0, total = 0;
+    if (snap) {
+      items = [...snap.entries].map(([eid, name]) => ({ name, found: discovered.has(eid) }));
+      f = items.filter((it) => it.found).length;
+      total = snap.total;
+    }
+    return {
+      name: WORLD_BY_ID[id]?.name ?? id,
+      found: f, total,
+      items,
+      explored: !!snap,
+    };
+  });
+  const prog = codexProgress(discovered);
+  ui.showCodex(layers, `已收录 ${prog.found} / ${prog.total}`);
+}
+
 // 标题/暂停菜单/结算任一可见即视为覆盖层态（游戏冻结、输入隔离）
 function overlayActive() {
   return pauseMenuOpen || victoryOpen
@@ -307,6 +336,10 @@ function openPauseMenu() {
   if (document.pointerLockElement) document.exitPointerLock(); // 释放鼠标点菜单
   input.keys.clear();
   menuFocusIdx = 0;
+  // 统计行：任务进度 / 发现 / 航程（打开瞬间快照）
+  const mm = String(Math.floor(flightSeconds / 60)).padStart(2, '0');
+  const ss = String(Math.floor(flightSeconds % 60)).padStart(2, '0');
+  ui.setPauseStats(`任务 <b>${missionIdx}/${MISSIONS.length}</b> · 已发现 <b>${discovered.size}</b> · 航程 <b>${mm}:${ss}</b>`);
   ui.showPauseMenu();
 }
 function closePauseMenu() {
@@ -347,6 +380,7 @@ function closeVictory() {
 }
 ui.setupPauseMenu({
   onResume: () => closePauseMenu(),
+  onCodex: () => openCodex(),
   onSettings: () => openSettings(),
   onTitle: () => backToTitle(),
 });
@@ -382,6 +416,7 @@ nav.onBeforeWorldChange = () => {
 
 nav.onWorldChanged = (world, idx) => {
   curWorld = world;
+  registerLayerEntities(world.id, world.entities); // 图鉴收录本层可发现天体
   warpMode = 'auto'; // 换层恢复自动时间倍率
   edgeHintShown = false; // 新层重新允许层界提示
   engine.loadWorld(world, world.group, []);

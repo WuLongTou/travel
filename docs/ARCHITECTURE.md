@@ -48,6 +48,8 @@ src/
   core/
     game-state.ts    # UI 覆盖层状态机（title/playing/pause-menu/victory）：转换表 +
                      # 时钟暂停态恢复语义，纯逻辑无 DOM（Vitest 直测）
+    codex.ts         # 发现图鉴注册表：换层扫描 world.entities 登记可发现天体
+                     # （含 info 即可发现），按层收录 + 进度统计，纯逻辑无 DOM
     clock.ts         # 模拟钟：倍速 ×实时…×千年/秒、暂停
     input.ts         # 游戏键位与手柄轮询（左摇杆推进/右摇杆环视/扳机与
                      # 肩键升降加力刹车/Y 视角/Start 暂停菜单/覆盖层内
@@ -77,7 +79,8 @@ src/
                      # （防换层弹跳死循环），锚点记忆 +
                      # onBeforeWorldChange 跃迁前回调（清理旧世界状态）
   render/
-    engine.ts        # CosmicEngine：contentGroup + backgroundGroup + Bloom
+    engine.ts        # CosmicEngine：contentGroup + backgroundGroup + Bloom +
+                     # setQuality 画质档（pixelRatio×Bloom 预设，即时生效）
     background.ts    # 星空球壳点云/银河带/CMB 壳（跟随相机，无界天球）
     bodies.ts        # makeSphere/makeGlowSprite/makeRing/makeOrbitLine
     labels.ts        # 文本 sprite + updateLabelFades（距离淡出）
@@ -101,9 +104,10 @@ src/
                      # 全部源码为 TypeScript（strict）；scripts/smoke.mjs 为 Node 工具脚本保持 JS
   ui/controller.ts   # 标题画面（开始/继续/重开 + 存档概览 + 设置入口，
                      # 游戏中「回到标题」复用同一显示入口刷新概览）/
-                     # 暂停菜单（Esc/手柄 Start：继续/设置/回到标题）/
+                     # 暂停菜单（Esc/手柄 Start：继续/图鉴/设置/回到标题 +
+                     # 统计行）/发现图鉴（按层分节：已发现显名/???占位）/
                      # 通关结算（统计卡：任务/发现/卫星/航程时长）/
-                     # 设置面板（音量滑条/震屏开关，持久化）/层级栏/任务
+                     # 设置面板（音量滑条/震屏开关/画质三档，持久化）/层级栏/任务
                      # 挂件（含发现计数）/层介绍横幅/座舱框/HUD（轨道独立
                      # 行）/独立 toast/跨层黑场转场/准星发现脉冲/信息卡
                      # （进入新尺度层时展示该层 intro 教学文案后淡出）

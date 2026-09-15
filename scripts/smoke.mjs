@@ -132,6 +132,62 @@ async function main() {
   if (st.title) failures.push(`继续航行: ${JSON.stringify(st)}`);
   else console.log('  ✓ 标题「继续航行」：回到游戏');
 
+  // 3.6 发现图鉴：暂停菜单 → 图鉴分节渲染 → 关闭回菜单 → 继续航行
+  pressEsc();
+  await sleep(300);
+  evalJS(`document.getElementById('btn-pause-codex').click(); return 'ok';`);
+  await sleep(200);
+  const codex = evalJS(`
+    const body = document.getElementById('codex-body');
+    return JSON.stringify({
+      visible: !document.getElementById('codex-panel').classList.contains('hidden'),
+      hasSolar: body.textContent.includes('太阳系'),
+      sections: body.querySelectorAll('.codex-layer').length,
+      locked: body.querySelectorAll('.codex-item.locked').length,
+      progress: document.getElementById('codex-progress').textContent,
+    });
+  `);
+  if (!codex.visible || !codex.hasSolar || codex.sections !== 6 || codex.locked < 1
+    || !/已收录 \d+ \/ \d+/.test(codex.progress)) {
+    failures.push(`发现图鉴: ${JSON.stringify(codex)}`);
+  } else {
+    console.log(`  ✓ 发现图鉴：6 层分节渲染 + 进度（${codex.progress}）+ 未发现 ??? 占位 ${codex.locked} 项`);
+  }
+  evalJS(`document.getElementById('codex-close').click(); return 'ok';`);
+  st = uiState();
+  if (st.victory || !st.menu) failures.push(`图鉴关闭回菜单: ${JSON.stringify(st)}`);
+  else console.log('  ✓ 图鉴关闭：回到暂停菜单');
+  pressEsc();
+  await sleep(300);
+  st = uiState();
+  if (st.menu || st.paused) failures.push(`菜单关闭: ${JSON.stringify(st)}`);
+  else console.log('  ✓ Esc 继续航行');
+
+  // 3.7 画质档：切换即时生效（像素比）并持久化
+  pressEsc();
+  await sleep(300);
+  evalJS(`document.getElementById('btn-pause-settings').click(); return 'ok';`);
+  await sleep(200);
+  evalJS(`document.querySelector('#set-quality button[data-q="low"]').click(); return 'ok';`);
+  await sleep(200);
+  const q = evalJS(`
+    const u = window.__universe;
+    return JSON.stringify({
+      pr: Math.round(u.engine.renderer.getPixelRatio() * 100) / 100,
+      saved: JSON.parse(localStorage.getItem('universe-roam-settings') || '{}').quality,
+      active: document.querySelector('#set-quality button.active').dataset.q,
+    });
+  `);
+  if (q.pr !== 0.75 || q.saved !== 'low' || q.active !== 'low') {
+    failures.push(`画质切换: ${JSON.stringify(q)}`);
+  } else {
+    console.log('  ✓ 画质档「流畅」：像素比 0.75 生效并持久化');
+  }
+  evalJS(`document.querySelector('#set-quality button[data-q="high"]').click(); return 'ok';`);
+  evalJS(`document.getElementById('set-close').click(); return 'ok';`);
+  pressEsc();
+  await sleep(200);
+
   // 4. 页面错误检查
   const errs = run('agent-browser', ['errors', '--session', SESSION]).trim();
   if (errs && !/0 errors|no errors/i.test(errs)) {

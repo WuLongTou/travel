@@ -29,7 +29,9 @@ export class UI {
       'hud-orbit','toast','title-screen','btn-start','btn-continue','btn-reset',
       'crosshair','settings-panel','set-volume','set-shake','set-close','btn-title-settings','title-progress',
       'pause-menu','btn-pause-resume','btn-pause-settings','btn-pause-title',
-      'victory-screen','victory-stats','btn-victory-continue'];
+      'victory-screen','victory-stats','btn-victory-continue',
+      'btn-pause-codex','pause-stats',
+      'codex-panel','codex-progress','codex-close','codex-body','set-quality'];
     for (const id of ids) this.el[id] = document.getElementById(id) as HTMLElement;
     this._bindInfoClose();
     this._setupHintToggle();
@@ -135,10 +137,56 @@ export class UI {
     scr.classList.remove('hidden');
   }
   // 暂停菜单：Esc/手柄 Start 开关；回调绑定一次，焦点落首项供手柄/键盘导航
-  setupPauseMenu({ onResume, onSettings, onTitle }: { onResume: () => void; onSettings: () => void; onTitle: () => void }): void {
-    this.el['btn-pause-resume'].addEventListener('click', () => onResume && onResume());
-    this.el['btn-pause-settings'].addEventListener('click', () => onSettings && onSettings());
-    this.el['btn-pause-title'].addEventListener('click', () => onTitle && onTitle());
+  setupPauseMenu({ onResume, onCodex, onSettings, onTitle }: {
+    onResume: () => void; onCodex: () => void; onSettings: () => void; onTitle: () => void;
+  }): void {
+    this.el['btn-pause-resume'].addEventListener('click', () => onResume());
+    this.el['btn-pause-codex'].addEventListener('click', () => onCodex());
+    this.el['btn-pause-settings'].addEventListener('click', () => onSettings());
+    this.el['btn-pause-title'].addEventListener('click', () => onTitle());
+    this.el['codex-close'].addEventListener('click', () => this.hideCodex());
+  }
+  // 暂停菜单统计行：任务/发现/航程（main 传格式化好的 HTML 片段）
+  setPauseStats(html: string): void {
+    if (this.el['pause-stats']) this.el['pause-stats'].innerHTML = html;
+  }
+  // 发现图鉴：main 传每层渲染数据（纯展示）
+  showCodex(layers: { name: string; found: number; total: number;
+    items: { name: string; found: boolean }[]; explored: boolean }[], progressText: string): void {
+    const panel = this.el['codex-panel'];
+    if (!panel) return;
+    this.el['codex-progress'].textContent = progressText;
+    const body = this.el['codex-body'];
+    body.innerHTML = '';
+    for (const l of layers) {
+      const sec = document.createElement('div');
+      sec.className = 'codex-layer';
+      const k = document.createElement('div');
+      k.className = 'codex-layer-k';
+      k.innerHTML = `${l.name} <b>${l.explored ? `${l.found}/${l.total}` : '· 尚未抵达'}</b>`;
+      sec.appendChild(k);
+      const grid = document.createElement('div');
+      grid.className = 'codex-grid';
+      if (!l.explored) {
+        const hint = document.createElement('span');
+        hint.className = 'codex-unexplored';
+        hint.textContent = '航行抵达此尺度后收录清单';
+        grid.appendChild(hint);
+      } else {
+        for (const it of l.items) {
+          const chip = document.createElement('span');
+          chip.className = it.found ? 'codex-item' : 'codex-item locked';
+          chip.textContent = it.found ? it.name : '？？？ 未发现';
+          grid.appendChild(chip);
+        }
+      }
+      sec.appendChild(grid);
+      body.appendChild(sec);
+    }
+    panel.classList.remove('hidden');
+  }
+  hideCodex(): void {
+    if (this.el['codex-panel']) this.el['codex-panel'].classList.add('hidden');
   }
   showPauseMenu(): void {
     const m = this.el['pause-menu'];
@@ -151,7 +199,7 @@ export class UI {
   }
   // 菜单项按钮列表（手柄 dpad 焦点导航用，顺序与视觉一致）
   pauseMenuButtons(): HTMLElement[] {
-    return ['btn-pause-resume', 'btn-pause-settings', 'btn-pause-title'].map((id) => this.el[id]);
+    return ['btn-pause-resume', 'btn-pause-codex', 'btn-pause-settings', 'btn-pause-title'].map((id) => this.el[id]);
   }
   // 通关结算：stats 为 [label, value] 数组；按钮回调绑定一次
   setupVictory(onContinue: () => void): void {
@@ -175,10 +223,11 @@ export class UI {
   hideVictory(): void {
     if (this.el['victory-screen']) this.el['victory-screen'].classList.add('hidden');
   }
-  // 设置面板：挂滑条/开关回调并展示；hide 收起
-  showSettings({ volume, shake, onVolume, onShake, onClose }: {
-    volume: number; shake: boolean;
-    onVolume: (v: number) => void; onShake: (on: boolean) => void; onClose: () => void;
+  // 设置面板：挂滑条/开关/画质档回调并展示；hide 收起
+  showSettings({ volume, shake, quality, onVolume, onShake, onQuality, onClose }: {
+    volume: number; shake: boolean; quality: 'low' | 'medium' | 'high';
+    onVolume: (v: number) => void; onShake: (on: boolean) => void;
+    onQuality: (q: 'low' | 'medium' | 'high') => void; onClose: () => void;
   }): void {
     const panel = this.el['settings-panel'];
     const vol = this.el['set-volume'] as HTMLInputElement;
@@ -187,6 +236,18 @@ export class UI {
     shakeEl.checked = shake;
     vol.oninput = (e) => onVolume(Number((e.target as HTMLInputElement).value));
     shakeEl.onchange = (e) => onShake((e.target as HTMLInputElement).checked);
+    // 画质三档：当前档高亮，点击即切换
+    const qGroup = this.el['set-quality'];
+    const qBtns = [...qGroup.querySelectorAll('button')] as HTMLButtonElement[];
+    const sync = () => qBtns.forEach((b) => b.classList.toggle('active', b.dataset.q === quality));
+    sync();
+    qBtns.forEach((b) => {
+      b.onclick = () => {
+        quality = b.dataset.q as 'low' | 'medium' | 'high';
+        sync();
+        onQuality(quality);
+      };
+    });
     this.el['set-close'].onclick = () => onClose();
     panel.classList.remove('hidden');
   }
