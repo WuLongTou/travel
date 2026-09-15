@@ -458,6 +458,12 @@ nav.onWorldChanged = (world, idx) => {
 };
 
 let lastFrame = performance.now();
+// 帧率上限 60fps：模拟（自适应子步积分）+ 渲染（bloom 多 pass）每帧
+// 成本固定，120/144Hz 高刷屏全速渲染纯属 GPU 浪费。阈值留 1ms 抖动
+// 容差——60Hz 屏帧间隔 16.7±0.3ms，无容差会误跳近半数帧跌到 30fps。
+// 被跳过的 tick 不更新 lastFrame，dtReal 按真实间隔累计，模拟节奏不变
+const FRAME_MIN_MS = 1000 / 60 - 1;
+let renderedFrames = 0; // 实际渲染帧计数（帧率上限验证/性能调试）
 let prevR = false;
 let prevV = false;
 let prevBracketL = false;
@@ -649,12 +655,15 @@ function syncShip(): void {
 }
 
 function renderFrame(now: number): void {
-  const dtReal = Math.min(0.05, (now - lastFrame) / 1000);
+  const elapsed = now - lastFrame;
+  if (elapsed < FRAME_MIN_MS) return; // 帧率上限：未到 60fps 间隔，跳过本 tick
+  const dtReal = Math.min(0.05, elapsed / 1000);
   // 模拟时间增量：飞船位置动力学（引力+推进）与天体运动共用同一口径，
   // 时间倍率承担航行节奏（物理始终真实，倍率只放大时间流速）
   const dtSim = clock.paused ? 0 : dtReal * clock.rate;
   if (!clock.paused) flightSeconds += dtReal; // 航程墙上时（暂停/覆盖层不计）
   lastFrame = now;
+  renderedFrames++;
   const steer = input.poll();
   const a = input.actions;
   // 手柄合并：摇杆/扳机与键盘同管线（有任一输入即构成人工干预）；
@@ -1530,6 +1539,7 @@ async function boot() {
 // 全局调试挂载
 window.__universe = { engine, probe, clock, nav, ui, input, chaseCam, ship, shipMarker, dust, sfx, discovered, MISSIONS, events: spaceEvents,
   get crashShake() { return crashShakeT; },
+  get renderedFrames() { return renderedFrames; },
   get world() { return nav.world; },
   get selected() { return selected; },
   get tour() { return tour; },

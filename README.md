@@ -17,7 +17,8 @@ npm run smoke     # 无头冒烟 e2e（六层逐层进入断言 + 游戏 UI 流�
 技术栈（标准 web 游戏栈）：TypeScript 5（strict 全量）· three.js ·
 Vite · Vitest（单测）+ agent-browser（e2e）· WebAudio（程序化音效）。
 核心领域类型集中在 `src/types.ts`，UI 覆盖层状态机见
-`src/core/game-state.ts`。
+`src/core/game-state.ts`。帧率上限 60fps（rAF 门控，跳帧不改模拟
+节奏；高刷屏不白烧 GPU）。
 
 游戏标准特性：标题画面（开始/继续/重开 + 存档概览）、暂停菜单
 （`Esc`/手柄 Start：继续航行 / 发现图鉴 / 设置 / 回到标题，附任务·
