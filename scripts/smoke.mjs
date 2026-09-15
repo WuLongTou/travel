@@ -188,6 +188,99 @@ async function main() {
   pressEsc();
   await sleep(200);
 
+  // 3.8 真实尺度飞行器：scale = 8 m 包络的层单位换算，绝不随视距缩放
+  //（enter 返回后等几帧渲染，syncShip 才把新层的真实尺度写进 ship.scale）
+  const entered = evalJS(`
+    const u = window.__universe;
+    return u.nav.enter('solar').then(() => JSON.stringify({
+      layer: u.world.id, dist: u.chaseCam.followDist,
+    }));
+  `);
+  // 等数帧渲染后 syncShip 才把新层真实尺度写进 ship.scale（headless 慢帧轮询）
+  let real = null;
+  for (let i = 0; i < 30 && !real; i++) {
+    await sleep(100);
+    const r = evalJS(`
+      const u = window.__universe;
+      return JSON.stringify({ shipScale: u.ship.scale.x, expect: 0.008 / u.world.kmPerUnit });
+    `);
+    if (Math.abs(r.shipScale - r.expect) <= r.expect * 1e-9) real = r;
+  }
+  if (!real) real = evalJS(`
+    const u = window.__universe;
+    return JSON.stringify({ shipScale: u.ship.scale.x, expect: 0.008 / u.world.kmPerUnit });
+  `);
+  if (entered.layer !== 'solar' || !real) {
+    failures.push(`船真实尺度: ${JSON.stringify({ entered, real })}`);
+  } else {
+    console.log(`  ✓ 飞行器真实尺度：scale=${real.shipScale.toExponential(2)} 层单位（≈8 m 包络，视距 ${entered.dist.toExponential(2)}）`);
+  }
+
+  // 3.9 拉远缩放：船尺度恒定（真实物体）+ 亚像素 ◇ 标记接管可见性。
+  // headless 下 rAF 节流，标记在 zoomBy 后数帧才翻转——轮询等待而非定长休眠
+  evalJS(`window.__universe.chaseCam.zoomBy(200); return 'ok';`);
+  let markerShown = false;
+  for (let i = 0; i < 30 && !markerShown; i++) {
+    await sleep(100);
+    markerShown = evalJS(`return window.__universe.shipMarker.visible;`) === true;
+  }
+  const zoomed = evalJS(`
+    const u = window.__universe;
+    return JSON.stringify({ scale: u.ship.scale.x, marker: u.shipMarker.visible, dist: u.chaseCam.followDist });
+  `);
+  if (!markerShown || Math.abs(zoomed.scale - real.shipScale) > real.expect * 1e-9) {
+    failures.push(`缩放与标记: ${JSON.stringify(zoomed)}`);
+  } else {
+    console.log('  ✓ 拉远 200×：船尺度恒定不放大，亚像素 ◇ 标记显示');
+  }
+  evalJS(`window.__universe.chaseCam.zoomBy(1 / 200); return 'ok';`);
+  await sleep(150);
+
+  // 3.10 右键直接掌舵：右键按住 + 鼠标右移 → 机头右转（yaw 增大）。
+  // 按住状态必须跨越帧边界（renderFrame 帧首 poll 消费鼠标增量时读取
+  // 按住状态），因此按下/移动与松开分两次 eval，中间留出数帧
+  const yaw0 = evalJS(`return window.__universe.probe.yaw;`);
+  evalJS(`
+    const c = document.getElementById('scene');
+    c.dispatchEvent(new MouseEvent('mousedown', { button: 2, clientX: 200, clientY: 200, bubbles: true }));
+    window.dispatchEvent(new MouseEvent('mousemove', { button: 2, clientX: 260, clientY: 200 }));
+    return 'ok';
+  `);
+  // 帧循环消费鼠标增量需等待帧边界（headless 慢帧轮询），松开前机头应已转动
+  let yaw1 = yaw0;
+  for (let i = 0; i < 30; i++) {
+    await sleep(100);
+    yaw1 = evalJS(`return window.__universe.probe.yaw;`);
+    if (Math.abs(yaw1 - yaw0) > 0.08) break;
+  }
+  evalJS(`window.dispatchEvent(new MouseEvent('mouseup', { button: 2, bubbles: true })); return 'ok';`);
+  await sleep(100);
+  const dyaw = yaw1 - yaw0;
+  if (!(dyaw > 0.08 && dyaw < 0.7)) {
+    failures.push(`右键掌舵: Δyaw=${dyaw.toFixed(4)}（期望 ≈+0.3）`);
+  } else {
+    console.log(`  ✓ 右键直接掌舵：右移 60px → 机头右转 Δyaw=${dyaw.toFixed(3)} rad`);
+  }
+
+  // 3.11 星尘速度感：按住 W 推进（倍率钳到手动档）→ 星尘流显现
+  evalJS(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'w' })); return 'ok';`);
+  let dustOn = null;
+  for (let i = 0; i < 30 && !dustOn; i++) {
+    await sleep(100);
+    const r = evalJS(`
+      const u = window.__universe;
+      return JSON.stringify({ visible: u.dust.lines.visible, thrust: u.probe.thrustOn });
+    `);
+    if (r.visible === true && r.thrust === true) dustOn = r;
+  }
+  evalJS(`window.dispatchEvent(new KeyboardEvent('keyup', { key: 'w' })); return 'ok';`);
+  await sleep(150);
+  if (!dustOn) {
+    failures.push(`星尘流: ${JSON.stringify(dustOn)}`);
+  } else {
+    console.log('  ✓ 星尘速度感：推进时星尘流显现');
+  }
+
   // 4. 页面错误检查
   const errs = run('agent-browser', ['errors', '--session', SESSION]).trim();
   if (errs && !/0 errors|no errors/i.test(errs)) {

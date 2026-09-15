@@ -167,7 +167,6 @@ export function buildStellarWorld(): GameWorld {
     spawn: [3, 1.2, 3],
     spawnLookAt: [0, 0, 0], // 兴趣中心：太阳（本层原点）
     viewDist: 6,
-    shipViewDist: 0.35, // 飞船第三人称跟拍视距
     labelFadeDist: 14,
     // 飞船性能与全层同一真实口径（300 km/s、0.6 m/s²，按 ly 单位换算）；
     // 跨恒星航行的节奏由时间倍率承担（千年/秒档下 60 ly ≈ 60 墙上秒）

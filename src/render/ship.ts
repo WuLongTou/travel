@@ -132,3 +132,34 @@ export function updateShipFlame(ship: THREE.Object3D, throttle: number, boost: b
   const gs = 0.35 + s * 0.55;
   glow.scale.set(gs, gs, 1);
 }
+
+// 船亚像素标记：真实尺度船在拉远/宏观层时缩成一个像素都不到的点，
+// 用固定屏幕尺寸（sizeAttenuation:false → NDC 比例）的菱形光标标注船位，
+// depthTest 让行星自然遮挡。这是太空模拟的标准做法（Elite/Space Engine 同款）
+export function makeShipMarker(): THREE.Sprite {
+  const s = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = s;
+  const c = canvas.getContext('2d')!;
+  const m = s / 2;
+  // 菱形描边 + 中心亮点
+  c.beginPath();
+  c.moveTo(m, 4); c.lineTo(s - 4, m); c.lineTo(m, s - 4); c.lineTo(4, m);
+  c.closePath();
+  c.strokeStyle = 'rgba(150,205,255,0.95)';
+  c.lineWidth = 5;
+  c.stroke();
+  c.fillStyle = '#eaf4ff';
+  c.beginPath();
+  c.arc(m, m, 5, 0, Math.PI * 2);
+  c.fill();
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({
+    map: tex, transparent: true, depthTest: true, depthWrite: false,
+    sizeAttenuation: false, // scale 以屏高比例为口径（1 = 满屏高）
+  });
+  const marker = new THREE.Sprite(mat);
+  marker.scale.setScalar(0.022); // ≈2.2% 屏高
+  marker.renderOrder = 5;
+  return marker;
+}

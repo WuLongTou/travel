@@ -29,6 +29,8 @@ export class CosmicEngine {
   contentGroup = new THREE.Group();
   backgroundGroup = new THREE.Group();
   ambientGroup: THREE.Group | null = null;
+  /** 相机补光灯（真尺度船体可读性） */
+  fillLight: THREE.PointLight;
   /** 追尾相机引用（main 装配注入；navigator 用其 followDist） */
   chaseCam: ChaseCam | null = null;
 
@@ -54,6 +56,12 @@ export class CosmicEngine {
     this.scene.add(this.contentGroup);
     this.backgroundGroup = new THREE.Group();
     this.scene.add(this.backgroundGroup);
+    // 相机补光灯：真尺度飞船只有 ~10 m，背光面朝相机时（如朝太阳飞）
+    // 仅靠天体光照会渲染成黑影。相机位挂一盏零衰减弱补光保证船体任何
+    // 角度可读——太空模拟惯例（Elite 的 ship fill light）
+    this.fillLight = new THREE.PointLight(0xdfe8ff, 0.7, 0, 0);
+    this.camera.add(this.fillLight);
+    this.scene.add(this.camera); // 相机入场景图，子灯光才参与渲染
     window.addEventListener('resize', () => this._resize());
     this._resize();
   }

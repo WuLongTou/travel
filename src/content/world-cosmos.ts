@@ -95,7 +95,6 @@ export function buildCosmosWorld(): GameWorld {
     spawn: [6.9, 2.5, 8.7], // CMB 壳内 0.8 倍半径（同方向），出生即被可观测宇宙边界环绕
     spawnLookAt: [0, 0, 0],
     viewDist: 12,
-    shipViewDist: 0.35, // 飞船第三人称跟拍视距
     labelFadeDist: 45,
     // 飞船性能与全层同一真实口径（300 km/s、0.6 m/s²，按 Gpc 单位换算）；
     // 本层无引力井（纯导航层，跨层用导航跃迁），时间倍率上限取千亿年/秒

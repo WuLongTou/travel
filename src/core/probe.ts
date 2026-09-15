@@ -150,10 +150,26 @@ export class Probe {
     return [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]];
   }
 
-  // 姿态微调
+  // 姿态微调。俯仰越过 ±90° 时执行「越顶翻转」而非死墙 clamp：
+  // yaw+π、pitch 镜像、roll+π 在数学上严格保持 forward() 不变
+  //（[-sy·cp, sp, -cy·cp] 恒等式），姿态基经 roll 补偿完全连续——
+  // 拉杆翻筋斗不再被卡在垂直死角。0.02 rad 滞回防在顶点抖动连环翻转
   steer(dYaw: number, dPitch: number, dRoll = 0): void {
     this.yaw -= dYaw;
-    this.pitch = clamp(this.pitch + dPitch, -Math.PI / 2 + 0.02, Math.PI / 2 - 0.02);
+    const FLIP_H = 0.02;
+    const LIM = Math.PI / 2;
+    const np = this.pitch + dPitch;
+    if (np > LIM + FLIP_H) {
+      this.pitch = Math.PI - np;
+      this.yaw += Math.PI;
+      this.roll += Math.PI;
+    } else if (np < -LIM - FLIP_H) {
+      this.pitch = -Math.PI - np;
+      this.yaw += Math.PI;
+      this.roll += Math.PI;
+    } else {
+      this.pitch = clamp(np, -LIM + 0.02, LIM - 0.02);
+    }
     this.roll += dRoll;
     if (this.roll > Math.PI) this.roll -= Math.PI * 2;
     else if (this.roll < -Math.PI) this.roll += Math.PI * 2;

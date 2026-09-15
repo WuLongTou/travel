@@ -42,6 +42,9 @@ export class Input {
   steer = { dx: 0, dy: 0 }; // 每帧累计的视角转向（像素）
   pan = { dx: 0, dy: 0 };   // 每帧累计的视角平移位移（像素）
   buttons = new Set<number>(); // 按下的鼠标键集合 (0: 左键, 1: 中键, 2: 右键)
+  // 右键按住 = 直接掌舵：鼠标增量不经环视相机、直接转机头（松开回环视）。
+  // 掌舵属飞行操控类操作（构成人工干预），由 isFlightIntervening 计入
+  get steerHold(): boolean { return this.buttons.has(2); }
   mouseDown = false;
   mouse = { x: 0, y: 0 };
   dragged = false; // 左键按住期间拖拽是否超过点击阈值（抑制松手误拾取）
@@ -88,7 +91,7 @@ export class Input {
       }
     };
     const mm = (e: MouseEvent) => {
-      const isPan = this.buttons.has(2) || this.buttons.has(1); // 按住右键或中键即为平移
+      const isPan = this.buttons.has(1); // 中键按住=平移视角（右键让位给直接掌舵）
       if (this.pointerLocked) {
         if (isPan) {
           this.pan.dx += e.movementX || 0;
@@ -103,13 +106,15 @@ export class Input {
         if (isPan) {
           this.pan.dx += dx;
           this.pan.dy += dy;
-        } else if (this.mouseDown) {
+        } else if (this.mouseDown || this.steerHold) {
           this.steer.dx += dx;
           this.steer.dy += dy;
           // 累计左键拖拽距离：超过 5px 判定为拖拽环视而非点击（松手时
           // click 事件据此抑制天体拾取，防止拖拽看风景误锁目标）
-          this._dragDist += Math.hypot(dx, dy);
-          if (this._dragDist > 5) this.dragged = true;
+          if (this.mouseDown) {
+            this._dragDist += Math.hypot(dx, dy);
+            if (this._dragDist > 5) this.dragged = true;
+          }
         }
         this.mouse.x = e.clientX;
         this.mouse.y = e.clientY;
@@ -152,6 +157,7 @@ export class Input {
 
   // 严格仅对「飞行操控类」操作判断用户是否正在进行人工干预
   isFlightIntervening(): boolean {
+    if (this.steerHold) return true; // 右键直接掌舵=飞行干预
     for (const key of FLIGHT_CONTROL_KEYS) {
       if (this.keys.has(key)) {
         // 单独按 Shift 且未按下任何方向或平移键时，不判定为飞行干预

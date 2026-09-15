@@ -21,6 +21,7 @@ import { Navigator } from './core/navigator.js';
 import { UI } from './ui/controller.js';
 import { LAYER_CHAIN } from './content/worlds.js';
 import { WORLD_BY_ID } from './content/schema.js';
+import { shipRadiusUnits } from './content/physics.js';
 // 世界模块（副作用自注册）
 import './content/world-solar.js';
 import './content/world-stellar.js';
@@ -36,7 +37,8 @@ import { ChaseCam, VIEW_NAMES } from './render/camera.js';
 import { FreeCam } from './render/freecam.js';
 import { updateLabelFades } from './render/labels.js';
 import { TrailRibbon } from './render/trail.js';
-import { makeShip, updateShipFlame } from './render/ship.js';
+import { makeShip, makeShipMarker, updateShipFlame } from './render/ship.js';
+import { DustFlow } from './render/dust.js';
 import { SpaceEvents } from './render/events.js';
 
 // 时间倍率阶梯（[ ] 键步进切换）。真实物理口径下飞船速度远低于光速，
@@ -70,9 +72,13 @@ const trailRibbon = new TrailRibbon(engine.scene);
 // 深空环境事件（流星雨/彗星群，纯视觉氛围；首次彗星群 toast 提示）
 const spaceEvents = new SpaceEvents(engine.scene, (t) => toastMsg(t));
 
-// 飞船 3D 模型
+// 飞船 3D 模型（真实尺度渲染）+ 亚像素标记 + 星尘流（速度感）
 const ship = makeShip();
 engine.scene.add(ship);
+const shipMarker = makeShipMarker();
+engine.scene.add(shipMarker);
+const dust = new DustFlow();
+engine.scene.add(dust.lines);
 const _m4 = new THREE.Matrix4();
 const _ndc = new THREE.Vector3();
 
@@ -149,6 +155,19 @@ function clearSelection(): void {
   ui.hideInfo();
 }
 
+// 层教学横幅文案：附上「较上一层 ×N」的尺度跨度（中文万/亿纪法），
+// 把「六层宇宙 = 同一宇宙连续放大」的体感在每次跃迁时敲实
+function formatFold(n: number): string {
+  if (n >= 1e8) return `${+(n / 1e8).toFixed(1)} 亿`;
+  if (n >= 1e4) return `${+(n / 1e4).toFixed(1)} 万`;
+  return `${Math.round(n).toLocaleString('zh-CN')}`;
+}
+function layerIntroText(world: GameWorld, prevKmPerUnit: number): string {
+  const fold = prevKmPerUnit > 0 ? world.kmPerUnit / prevKmPerUnit : 0;
+  const foldText = fold > 1 ? ` · 尺度较上一层 ×${formatFold(fold)}` : '';
+  return (world.intro ?? '') + foldText;
+}
+
 // 选中目标（统一入口）：信息卡 + 跟拍视距随目标真实半径缩放 + 恢复自动倍率
 function selectEntity(e: Entity): void {
   selected = e;
@@ -156,10 +175,12 @@ function selectEntity(e: Entity): void {
   ui.showInfo(e);
   warpMode = 'auto';
   if (curWorld && e.pickRadius > 0) {
-    const base = curWorld.shipViewDist || 0.35;
+    // 跟拍视距按目标真实半径派生（14×目标半径），下限 8×船半径——
+    // 船本身不再参与放大，真尺度下船在行星旁就是一粒尘埃
+    const shipR = shipRadiusUnits(curWorld.kmPerUnit);
     chaseCam.followDist = Math.min(
-      Math.max(e.pickRadius * 14, base * 0.3),
-      Math.max(curWorld.worldRadius * 0.02, base * 0.3),
+      Math.max(e.pickRadius * 14, shipR * 8),
+      Math.max(curWorld.worldRadius * 0.02, shipR * 8),
     );
   }
 }
@@ -407,7 +428,9 @@ function gamepadMenuNav(gp: GamepadState): void {
 }
 
 // 跃迁前清理指向旧世界实体的目标锁定（防止自动飞控追逐幽灵目标）
-nav.onBeforeWorldChange = () => {
+let prevLayerKmPerUnit = 0; // 上一层 1 单位 = ? km（层间尺度跨度展示用）
+nav.onBeforeWorldChange = (world) => {
+  prevLayerKmPerUnit = world.kmPerUnit;
   stopTour(); // 巡游路线按层定义，跨层即失效
   clearSelection();
   if (controlMode === MODE_GOD) exitGodMode();
@@ -422,15 +445,14 @@ nav.onWorldChanged = (world, idx) => {
   engine.loadWorld(world, world.group, []);
   ui.setCrumb(idx);
   ui.setScaleHud(`${world.title} · 1单位≈${unitRulerText(world.unitName)}`);
-  ui.showLayerIntro(world.intro ?? ''); // 层教学文案横幅（各层 build 时声明）
+  ui.showLayerIntro(layerIntroText(world, prevLayerKmPerUnit)); // 层教学 + 层间尺度跨度
   ui.fadeIn(); // 转场淡入：世界就绪后从黑场回到画面
   sfx.warp(); // 跨层跃迁扫频
   selected = null;
   ui.hideInfo();
 
-  // 确保相机跟拍视距符合飞船比例，防止宏观视距导致视野飞出太阳系
-  const safeShipDist = world.shipViewDist || 0.35;
-  chaseCam.followDist = safeShipDist;
+  // 跟拍视距与滚轮范围已由 navigator.enter 按「船真实半径」派生设置
+  // （含 dive.at/dive.dist 精选视距），此处只复位观察偏置
   chaseCam.resetPan();
   trailRibbon.reset();
 };
@@ -594,7 +616,10 @@ function updateHover(): void {
   if (cross) cross.classList.toggle('lock', !!hit);
 }
 
-// 飞船位姿同步
+// 飞船位姿同步（真实尺度）：船模型半长 ≈1 单位，scale = 船真实半径的
+// 层单位数——船是一切层、一切缩放下尺寸恒定的真实物体，拉远即按透视
+// 缩成尘埃（太阳系层 ~10 m = 5.4e-11 AU，星际层 8.5e-16 ly），亚像素时
+// 由 shipMarker 菱形光标接管可见性（depthTest 被行星自然遮挡）
 function syncShip(): void {
   ship.position.set(probe.pos[0], probe.pos[1], probe.pos[2]);
   const f = probe.forward(), r = probe.right(), u = probe.up();
@@ -604,10 +629,23 @@ function syncShip(): void {
     new THREE.Vector3(-f[0], -f[1], -f[2]),
   );
   ship.quaternion.setFromRotationMatrix(_m4);
-  // 当视距被放大时限制最大飞船尺寸，避免遮挡深空背景
-  const maxShipScale = curWorld ? Math.max(curWorld.worldRadius * 0.03, 15) : 15;
-  const s = Math.min(Math.max(chaseCam.followDist * 0.05, 1e-4), maxShipScale);
-  ship.scale.setScalar(s);
+  const shipR = curWorld ? shipRadiusUnits(curWorld.kmPerUnit) : 1e-3;
+  ship.scale.setScalar(shipR);
+
+  // 亚像素标记：船投影角径 <14px 渐显（4px 全亮）；座舱视角船体本就
+  // 隐藏，标记同步隐藏。相机空间 z<0 判定「在相机前方」——不能 用 NDC
+  // z<1 判定：滚轮拉远瞬间 near 先扩大、相机距离平滑追赶，船短暂处在
+  // near 面之前被裁剪，恰恰是最需要标记的时刻
+  const cam = engine.camera;
+  const dx = cam.position.x - probe.pos[0], dy = cam.position.y - probe.pos[1], dz = cam.position.z - probe.pos[2];
+  const dCam = Math.hypot(dx, dy, dz) || 1e-12;
+  _ndc.set(probe.pos[0], probe.pos[1], probe.pos[2]).applyMatrix4(cam.matrixWorldInverse);
+  const inFront = _ndc.z < 0 && -_ndc.z < cam.far;
+  const pxR = shipR / dCam / Math.tan((cam.fov * Math.PI) / 360) * (canvas.clientHeight / 2);
+  const fade = Math.min(1, Math.max(0, (14 - pxR) / 10));
+  shipMarker.position.set(probe.pos[0], probe.pos[1], probe.pos[2]);
+  shipMarker.visible = inFront && fade > 0 && chaseCam.mode !== 'cockpit';
+  (shipMarker.material as THREE.SpriteMaterial).opacity = fade * 0.9;
 }
 
 function renderFrame(now: number): void {
@@ -776,8 +814,16 @@ function renderFrame(now: number): void {
         chaseCam.resetPan();
       }
 
-      // 鼠标移动自由旋转观察视角（全向环视，100% 不干扰飞船的机头航向与全自动航行）
-      if (steer.steerX !== 0 || steer.steerY !== 0) {
+      // 右键按住 = 直接掌舵：鼠标增量不经环视相机、直接转机头（灵敏度与
+      // 方向约定与环视一致：右移=右转、下拉=低头），松开回环视——巡航看
+      // 风景不受干扰、想开船按住右键即可。座舱模式机头由 W 导向准星，
+      // 覆盖层（标题/暂停）打开时不掌舵
+      if (input.steerHold && !overlayActive() && chaseCam.mode !== 'cockpit') {
+        if (steer.steerX !== 0 || steer.steerY !== 0) {
+          probe.steer(-steer.steerX * 0.005, -steer.steerY * 0.005, 0);
+        }
+      } else if (steer.steerX !== 0 || steer.steerY !== 0) {
+        // 鼠标移动自由旋转观察视角（全向环视，100% 不干扰飞船的机头航向与全自动航行）
         chaseCam.orbitBy(steer.steerX, steer.steerY);
       }
     }
@@ -847,7 +893,8 @@ function renderFrame(now: number): void {
           engine.camera.getWorldDirection(camDir);
           steerTowardsDir([camDir.x, camDir.y, camDir.z], dtReal, 3.2);
         } else if (a.fwd && chaseCam.mode === 'chase') {
-          const offYaw = chaseCam.orbitYaw, offPitch = chaseCam.orbitPitch;
+          const offYaw = Math.abs(chaseCam.orbitYaw) < 0.02 ? 0 : chaseCam.orbitYaw;
+          const offPitch = Math.abs(chaseCam.orbitPitch) < 0.02 ? 0 : chaseCam.orbitPitch;
           if (offYaw !== 0 || offPitch !== 0) {
             // 相机相对转向（操纵杆模式）：环视偏移 = 转动速率指令——
             // 鼠标右移（yaw 偏移为负）→ 右转、下拉（pitch 偏移为正）→ 低头。
@@ -855,7 +902,7 @@ function renderFrame(now: number): void {
             // 此前实现有两个坑：直接导向 camDir 会与「相机锚定机尾」形成
             // 正反馈棘轮（按住 W 一路俯冲到俯仰极限）；把偏移当绝对目标
             // 航向则会被机头以最大角速度追吃，0.3 rad 偏移转出 ~2.9 rad
-            const TURN_GAIN = 2.0; // 满偏移 1 rad ≈ 2 rad/s 转速
+            const TURN_GAIN = 3.0; // 满偏移 1 rad ≈ 3 rad/s 转速（0.02 rad 死区防微动漂移）
             probe.steer(-offYaw * TURN_GAIN * dtReal, -offPitch * TURN_GAIN * dtReal, 0);
             chaseCam.recenter(dtReal);
           }
@@ -897,7 +944,9 @@ function renderFrame(now: number): void {
         const wells = probe._wells();
         const ownWell = wells.find((w) => w.ref === selected ||
           (!w.ref && w.center && dist3(w.center, targetPos) <= targetRadius * 1.5));
-        let safeParkDistance = targetRadius * 3.5 + Math.min(chaseCam.followDist * 0.5, 2.0);
+        // 伴飞余量按目标半径计（≤0.7×目标半径）——真实尺度下视距是船尺度的
+        // 微小量，泊车物理距离绝不掺相机视距（旧实现 followDist 参与决策）
+        let safeParkDistance = targetRadius * 3.5 + Math.min(chaseCam.followDist * 0.5, targetRadius * 0.7);
         if (ownWell && ownWell.GM > 0) {
           let gOther = 0;
           for (const w of wells) {
@@ -1183,6 +1232,19 @@ function renderFrame(now: number): void {
     if (ship.visible) {
       syncShip();
       updateShipFlame(ship, probe.thrustOn ? 1 : 0, isBoosting);
+    } else {
+      shipMarker.visible = false; // 座舱视角：船体与标记一并隐藏
+    }
+
+    // 星尘流：真实宇宙的速度感来源（上帝视角相机速度口径不同，隐藏）
+    if (controlMode === MODE_GOD || !curWorld) {
+      dust.lines.visible = false;
+    } else {
+      dust.update(
+        [engine.camera.position.x, engine.camera.position.y, engine.camera.position.z],
+        probe.vel, dtSim, clock.rate,
+        chaseCam.followDist * 40, curWorld.worldRadius * 0.5,
+      );
     }
     // 座舱框：仅飞船座舱视角显示（上帝视角下休眠座舱不显示）
     ui.setCockpitFrame(controlMode !== MODE_GOD && chaseCam.mode === 'cockpit');
@@ -1392,6 +1454,22 @@ function renderFrame(now: number): void {
   if (curWorld) {
     updateLabelFades(curWorld.group, engine.camera, curWorld.labelFadeDist || curWorld.viewDist * 1.6);
   }
+
+  // 动态近裁剪面：真实尺度船（太阳系层 5.4e-11 AU）+ 贴身视距要求 near
+  // 随视距缩放（固定 1e-7 会把船整体裁掉）；对数深度缓冲覆盖 1e-12~2e7
+  // 的 19 个数量级深度范围。上帝视角相机行程按层半径走，near 取层半径
+  // 的 1e-5；座舱模式眼位贴船，按船径口径
+  {
+    const shipR = curWorld ? shipRadiusUnits(curWorld.kmPerUnit) : 1e-3;
+    const refDist = controlMode === MODE_GOD
+      ? (curWorld ? curWorld.worldRadius * 1e-5 : 1e-2)
+      : (chaseCam.mode === 'cockpit' ? shipR * 2 : chaseCam.followDist);
+    const near = Math.min(Math.max(refDist * 0.05, 1e-12), 1e6);
+    if (Math.abs(engine.camera.near - near) > near * 1e-6) {
+      engine.camera.near = near;
+      engine.camera.updateProjectionMatrix();
+    }
+  }
   engine.render(dtReal);
 }
 
@@ -1450,7 +1528,7 @@ async function boot() {
 // （窗口 resize 由 engine 构造函数内注册的监听统一处理）
 
 // 全局调试挂载
-window.__universe = { engine, probe, clock, nav, ui, input, chaseCam, ship, sfx, discovered, MISSIONS, events: spaceEvents,
+window.__universe = { engine, probe, clock, nav, ui, input, chaseCam, ship, shipMarker, dust, sfx, discovered, MISSIONS, events: spaceEvents,
   get crashShake() { return crashShakeT; },
   get world() { return nav.world; },
   get selected() { return selected; },

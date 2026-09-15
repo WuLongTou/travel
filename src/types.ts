@@ -99,8 +99,6 @@ export interface GameWorld {
   spawn?: Vec3;
   spawnLookAt?: Vec3;
   viewDist: number;
-  /** 飞船第三人称跟拍视距 */
-  shipViewDist?: number;
   labelFadeDist?: number;
   /** 探测球世界速度上限（= 300 km/s 按层单位换算） */
   maxSpeedWorldPerS: number;

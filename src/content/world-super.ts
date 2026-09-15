@@ -106,7 +106,6 @@ export function buildSuperWorld(): GameWorld {
     spawn: [20, 10, 20],
     spawnLookAt: [0, 0, 0], // 兴趣中心：本地群（原点，丝网交汇近端）
     viewDist: 26,
-    shipViewDist: 0.35, // 飞船跟拍视距
     labelFadeDist: 110,
     // 飞船性能与全层同一真实口径（300 km/s、0.6 m/s²，按 Mpc 单位换算）；
     // 宇宙网尺度航行的节奏由时间倍率承担（百亿年/秒档下 100 Mpc ≈ 5 分钟）

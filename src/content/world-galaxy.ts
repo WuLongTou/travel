@@ -139,7 +139,6 @@ export function buildGalaxyWorld(): GameWorld {
     spawn: [diskR * 0.3, diskR * 0.18, diskR * 0.3],
     spawnLookAt: [0, 0, 0],
     viewDist: 12,
-    shipViewDist: 0.35, // 飞船第三人称跟拍视距
     labelFadeDist: 40,
     // 飞船性能与全层同一真实口径（300 km/s、0.6 m/s²，按 kpc 单位换算）；
     // 星系内航行的节奏由时间倍率承担（亿年/秒档下 10 kpc ≈ 3 墙上秒）

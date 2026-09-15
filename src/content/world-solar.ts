@@ -386,7 +386,6 @@ export function buildSolarWorld(): GameWorld {
       ] as Vec3;
     })(),
     viewDist: 30, // 宏观全景视距（供地图/全景参考）
-    shipViewDist: 6.4e-4, // 跟拍视距（≈15 个地球半径，真实尺度特写）
     // 飞船性能：未来离子推进——最大 300 km/s（≈0.001c，远低于光速），
     // 推进加速度 0.6 m/s²；跨行星航行的节奏由时间倍率承担（main.js 自动管理）
     maxSpeedWorldPerS: 2.005e-6,

@@ -38,8 +38,8 @@ export class ChaseCam {
   panOffset = new THREE.Vector3(0, 0, 0);
   userInteracted = false;
   private _look = new THREE.Vector3();
-  private _inited = false;
   private _baseFov: number;
+  private _smDist: number | null = null; // 平滑后的跟拍距离（仅变焦过渡）
 
   constructor(camera: THREE.PerspectiveCamera, probe: CamTarget) {
     this.camera = camera;
@@ -47,10 +47,10 @@ export class ChaseCam {
     this._baseFov = camera.fov || 60;
   }
 
-  setDist(d: number): void {
+  setDist(d: number, min: number, max: number): void {
     this.followDist = d;
-    this.minDist = 1e-4;
-    this.maxDist = 5e6;
+    this.minDist = min;
+    this.maxDist = max;
   }
 
   // 重置视角位移与朝向回飞船正后方
@@ -60,10 +60,10 @@ export class ChaseCam {
     this.orbitPitch = 0.25;
   }
 
-  // 环视偏移指数回正（时间常数 ≈0.45s）：追尾视角按 W 转向时由 main 调用，
-  // 偏移作为转向指令消耗掉——转向到位后相机稳定停在新机尾正后方
+  // 环视偏移指数回正：追尾视角按 W 转向时由 main 调用，偏移作为转向指令
+  // 消耗掉——转向到位后相机稳定停在新机尾正后方。时间常数 ≈0.29s（3.5/s）
   recenter(dtReal: number): void {
-    const k = 1 - Math.exp(-dtReal * 2.2);
+    const k = 1 - Math.exp(-dtReal * 3.5);
     this.orbitYaw -= this.orbitYaw * k;
     this.orbitPitch -= this.orbitPitch * k;
   }
@@ -78,7 +78,6 @@ export class ChaseCam {
       this.orbitYaw = 0;
       this.orbitPitch = 0.25;
     }
-    this._inited = false;
     return this.mode;
   }
 
@@ -102,7 +101,9 @@ export class ChaseCam {
     const right = new THREE.Vector3();
     const up = new THREE.Vector3();
     this.camera.matrixWorld.extractBasis(right, up, new THREE.Vector3());
-    const factor = Math.max(this.followDist, 0.01) * 0.0016;
+    // 平移速度与视距成比例（1px ≈ 视距 0.16%）；真实视距跨 16 个数量级，
+    // 绝不设绝对下限——0.01 单位下限在微米级视距层是灾难性跳变
+    const factor = this.followDist * 0.0016;
     this.panOffset.addScaledVector(right, -dxPx * factor);
     this.panOffset.addScaledVector(up, dyPx * factor);
     this.userInteracted = true;
@@ -132,7 +133,6 @@ export class ChaseCam {
       this.camera.up.set(u[0], u[1], u[2]);
       this.camera.lookAt(this._look);
       this._kickFov(dtReal, boost);
-      this._inited = true;
       return;
     }
 
@@ -155,27 +155,22 @@ export class ChaseCam {
     }
     const cyaw = Math.cos(effYaw), syaw = Math.sin(effYaw);
     const cpitch = Math.cos(effPitch), spitch = Math.sin(effPitch);
+    // 距离平滑（仅变焦），位置刚性：真尺度视距是船径量级，高倍率巡航时
+    // 船每帧位移可达视距的数百倍——位置平滑的滞后量与视距无关，会把船
+    // 挤出视野（实测滞后 470×视距）。第三人称相机惯例：锚点零滞后、
+    // 滚轮变焦才平滑过渡
+    if (this._smDist === null) this._smDist = this.followDist;
+    this._smDist += (this.followDist - this._smDist) * k;
     const eye: Vec3 = [
-      cx + syaw * cpitch * this.followDist,
-      cy + spitch * this.followDist,
-      cz + cyaw * cpitch * this.followDist,
+      cx + syaw * cpitch * this._smDist,
+      cy + spitch * this._smDist,
+      cz + cyaw * cpitch * this._smDist,
     ];
-    this._smoothTo(eye, k);
+    this.camera.position.set(eye[0], eye[1], eye[2]);
     this._look.set(cx, cy, cz);
     this.camera.up.set(0, 1, 0);
     this.camera.lookAt(this._look);
     this._kickFov(dtReal, boost && this.mode === 'chase');
-  }
-
-  private _smoothTo(eye: Vec3, k: number): void {
-    if (!this._inited) {
-      this.camera.position.set(eye[0], eye[1], eye[2]);
-      this._inited = true;
-    } else {
-      this.camera.position.x += (eye[0] - this.camera.position.x) * k;
-      this.camera.position.y += (eye[1] - this.camera.position.y) * k;
-      this.camera.position.z += (eye[2] - this.camera.position.z) * k;
-    }
   }
 
   // 加力 FOV kick：60 → 72 平滑过渡
@@ -197,6 +192,6 @@ export class ChaseCam {
     this.camera.lookAt(this._look);
     this.camera.fov = this._baseFov;
     this.camera.updateProjectionMatrix();
-    this._inited = true;
+    this._smDist = this.followDist;
   }
 }

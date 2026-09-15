@@ -4,6 +4,7 @@
 //   zoomOut (浮升：退到更大尺度)   index+1
 // 自动 LOD 跃迁：基于飞船与可下潜实体的距离自动触发尺度切换
 import { worldFactories, LAYER_CHAIN, CHAIN_INDEX } from '../content/worlds.js';
+import { shipRadiusUnits, chaseDistFor } from '../content/physics.js';
 import type { CosmicEngine } from '../render/engine.js';
 import type { Probe } from './probe.js';
 import type { SimClock } from './clock.js';
@@ -84,12 +85,15 @@ export class Navigator {
       }
     }
 
-    const defaultShipDist = world.shipViewDist || 0.35;
+    // 跟拍视距与缩放范围全部按「船真实半径」派生（每层 1 单位 = kmPerUnit km）：
+    //   默认 12×船半径（6 船长）；滚轮下限 1.2×（贴脸）、上限 1.4×层半径
+    const shipR = shipRadiusUnits(world.kmPerUnit);
+    const defaultShipDist = chaseDistFor(world.kmPerUnit);
     const dist = (opts.keepAnchor && prevAnchor) ? prevAnchor.dist : (opts.dist || defaultShipDist);
     this.probe.bindWorld(world, spawn);
     this.world = world;
     this.idx = idx;
-    this.engine.chaseCam!.followDist = dist;
+    this.engine.chaseCam!.setDist(dist, shipR * 1.2, world.worldRadius * 1.4);
 
     // 相机与飞船航向：
     // 若向外逃逸，航向继续向外；若向内切入，航向朝向系统中心
