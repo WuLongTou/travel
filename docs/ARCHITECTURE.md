@@ -6,7 +6,7 @@
 准星拾取天体查看真实数据信息卡。
 
 **真实物理口径（六层全部落地）**：天体半径/质量/引力（GM=GM 真实值，
-换算真源 `content/physics.js`）/轨道速度全部真实（地球轨道 29.8 km/s、
+换算真源 `content/physics.ts`）/轨道速度全部真实（地球轨道 29.8 km/s、
 太阳轨道绕银心 220 km/s）；飞船为未来离子推进（0.6 m/s²，巡航
 ≤300 km/s ≈0.001c），速度永远低于光速——从行星际到宇宙网的航行
 节奏由**自动时间倍率**承担（标题画面点击「开始」即解锁音频与操作；
@@ -41,12 +41,15 @@
 
 ```
 src/
-  main.js            # 装配 + 三模式控制状态机（AUTO 全自动 / MANUAL 手动干预 /
+  main.ts            # 装配 + 三模式控制状态机（AUTO 全自动 / MANUAL 手动干预 /
                      # GOD 上帝视角）+ HUD 天文仪表盘 + 自动 LOD 跃迁检测 +
                      # 准星拾取/视角切换
+  types.ts           # 领域类型：Vec3/Entity/GameWorld/GravityWell/MissionCtx 等（全项目真源）
   core/
-    clock.js         # 模拟钟：倍速 ×实时…×千年/秒、暂停
-    input.js         # 游戏键位与手柄轮询（左摇杆推进/右摇杆环视/扳机与
+    game-state.ts    # UI 覆盖层状态机（title/playing/pause-menu/victory）：转换表 +
+                     # 时钟暂停态恢复语义，纯逻辑无 DOM（Vitest 直测）
+    clock.ts         # 模拟钟：倍速 ×实时…×千年/秒、暂停
+    input.ts         # 游戏键位与手柄轮询（左摇杆推进/右摇杆环视/扳机与
                      # 肩键升降加力刹车/Y 视角/Start 暂停菜单/覆盖层内
                      # dpad·A·B 导航）与操作分类
                      # （OP_CATEGORIES：仅飞行操控键构成干预）：
@@ -55,47 +58,48 @@ src/
                      # Z 复位·[ ] 时间·\ 暂停·Esc 暂停菜单·Tab 帮助；鼠标移动=环视（锁定直控/
                      # 未锁定拖拽，拖拽超 5px 标记 dragged 供松手抑制拾取），
                      # 右/中键拖拽=平移视角
-    probe.js         # 飞船单模式动力学：推力 + 全层引力井 8ms 子步统一积分，
+    probe.ts         # 飞船单模式动力学：推力 + 全层引力井 8ms 子步统一积分，
                      # 天体表面碰撞→安全圆轨道重部署；Q/E 横滚，X 反推刹车；
                      # 出生/重生注入开普勒圆轨道速度（防垂直坠入引力中心）
-    missions.js      # 主线任务链（12 环：9 主线 + 3 手动挑战）：声明式
+    missions.ts      # 主线任务链（12 环：9 主线 + 3 手动挑战）：声明式
                      # done(ctx) 谓词，main 每帧构建上下文推进，完成 toast +
                      # 挂件更新；全通关触发结算庆典（教育主线玩法）
-    events.js        # 深空环境事件（纯视觉）：流星雨（相机球壳加色光痕，
+    events.ts        # 深空环境事件（纯视觉）：流星雨（相机球壳加色光痕，
                      # 尺度随跟拍距离）+ 彗星群掠过内太阳系（辉光核+离子尾），
                      # 随机调度 + debugSpawn 供无头验证
     audio.js         # 程序化音效（WebAudio 合成零素材）：引擎噪声随油门/
                      # 加力平滑变化，泊车双音/任务琶音/撞毁爆响/跃迁扫频/
                      # 通关凯旋琶音，M 键静音；AudioContext 在首次用户手势时
                      # 创建/恢复
-    navigator.js     # 层级导航：enter/zoomIn/zoomOut/diveInto + 自动 LOD 跃迁
+    navigator.ts     # 层级导航：enter/zoomIn/zoomOut/diveInto + 自动 LOD 跃迁
                      # （飞近下潜/远离浮升，2 秒冷却），下潜落到 dive.at
                      # 精选层内落点、浮升落点自动避开本层下潜触发圈
                      # （防换层弹跳死循环），锚点记忆 +
                      # onBeforeWorldChange 跃迁前回调（清理旧世界状态）
   render/
-    engine.js        # CosmicEngine：contentGroup + backgroundGroup + Bloom
-    background.js    # 星空球壳点云/银河带/CMB 壳（跟随相机，无界天球）
-    bodies.js        # makeSphere/makeGlowSprite/makeRing/makeOrbitLine
-    labels.js        # 文本 sprite + updateLabelFades（距离淡出）
-    camera.js        # 三视角：chase 真追尾（相机锚在机尾后上方、随飞船
+    engine.ts        # CosmicEngine：contentGroup + backgroundGroup + Bloom
+    background.ts    # 星空球壳点云/银河带/CMB 壳（跟随相机，无界天球）
+    bodies.ts        # makeSphere/makeGlowSprite/makeRing/makeOrbitLine
+    labels.ts        # 文本 sprite + updateLabelFades（距离淡出）
+    camera.ts        # 三视角：chase 真追尾（相机锚在机尾后上方、随飞船
                      # 航向转动，orbitYaw/Pitch 为相对机尾偏移角）/
                      # cockpit 座舱（舱内 360° 转头）/ orbit 环绕（世界系
                      # 固定方位，不随航向）；鼠标方向全视角统一遵循游戏
                      # 常识（右移看右/下移看下）+ 右/中键平移 + 滚轮缩放 +
                      # Z/双击复位；加力 FOV kick（仅追踪视角）
-    freecam.js       # 上帝视角自由相机：WASD 平移/Space·C 或 Q·E 升降/
+    freecam.ts       # 上帝视角自由相机：WASD 平移/Space·C 或 Q·E 升降/
                      # 鼠标转向/滚轮调速档/Shift 加速；进入时无缝接管当前
                      # 相机位姿并按场景尺度校准移速
-    ship.js          # 程序化低多边形飞船（机头 -Z）+ 引擎尾焰/辉光
-    textures.js      # 程序化纹理（glow 径向渐变等）
+    ship.ts          # 程序化低多边形飞船（机头 -Z）+ 引擎尾焰/辉光
+    textures.ts      # 程序化纹理（glow 径向渐变等）
   content/
-    schema.js        # 世界定义元数据（层级链、标题、单位）
-    worlds.js        # 工厂注册表 + LAYER_CHAIN
-    world-*.js       # 六个世界构建器（每层一个文件）
-    galaxy-gen.js    # buildGalaxy（棒旋点云）/buildStarSwarm/buildCosmicWeb
-    data/*.js        # 核实数据：solar/stars/local-group/super-structures/cosmos
-  ui/controller.js   # 标题画面（开始/继续/重开 + 存档概览 + 设置入口，
+    schema.ts        # 世界定义元数据（层级链、标题、单位）
+    worlds.ts        # 工厂注册表 + LAYER_CHAIN
+    world-*.ts       # 六个世界构建器（每层一个文件）
+    galaxy-gen.ts    # buildGalaxy（棒旋点云）/buildStarSwarm/buildCosmicWeb
+    data/*.ts        # 核实数据：solar/stars/local-group/super-structures/cosmos
+                     # 全部源码为 TypeScript（strict）；scripts/smoke.mjs 为 Node 工具脚本保持 JS
+  ui/controller.ts   # 标题画面（开始/继续/重开 + 存档概览 + 设置入口，
                      # 游戏中「回到标题」复用同一显示入口刷新概览）/
                      # 暂停菜单（Esc/手柄 Start：继续/设置/回到标题）/
                      # 通关结算（统计卡：任务/发现/卫星/航程时长）/
@@ -138,7 +142,7 @@ src/
   指哪飞哪；追尾视角为相机相对转向——环视偏移即转动速率指令
   （操纵杆模式，满偏 ≈2 rad/s，偏移指数回零转速自停），避免机头追
   相机视线与相机锚定机尾的正反馈俯冲棘轮）。干预判定按操作分类
-  严格执行（`input.js` 的
+  严格执行（`input.ts` 的
   `OP_CATEGORIES`/`FLIGHT_CONTROL_KEYS`）：仅上述飞行操控键构成干预，
   视角/时间/系统操作绝不打断自动航行。进入干预的边沿把时间倍率钳到
   「1时/秒」档（高倍率下手动机动会一帧获得超光速 Δv 触发数值回滚），
@@ -182,7 +186,7 @@ src/
   多引力井由统一积分实时消费（自适应子步，与时间倍速解耦）。
   **分层真实引力（LOD）**：每层只有「该尺度的天体」有引力效应，
   层级+距离天然过滤，井随天体实体（ref）动态移动；六层 GM 全部
-  真实口径（GM = G·M 真实值按层单位换算，真源 `content/physics.js`）：
+  真实口径（GM = G·M 真实值按层单位换算，真源 `content/physics.ts`）：
   - solar 层：GM☉=3.96e-14 AU³/s²（IAU）+ 八大行星井按真实质量；
     碰撞半径=真实表面。
   - stellar 层：每颗恒星 GM = GM☉×质量（换算到 ly³/s²），碰撞半径=

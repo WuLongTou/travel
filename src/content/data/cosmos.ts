@@ -1,0 +1,16 @@
+// 可观测宇宙信息（宇宙学数据；research 回表后补全/校准）
+export interface CosmosInfo {
+  cmbFacts: [string, string][];
+  cmbText: string;
+  targets: unknown[];
+}
+
+export const COSMOS_INFO: CosmosInfo = {
+  cmbFacts: [
+    ['温度', '2.72548 K'],
+    ['红移', 'z ≈ 1100'],
+    ['年龄', '宇宙 38 万年时释放'],
+  ],
+  cmbText: '宇宙微波背景（CMB）是宇宙在约 38 万岁时因复合而释放的光，如今已红移到微波波段。它是可观测宇宙最远的电磁波信号——在电磁波段之外我们无法看到更早的宇宙。',
+  targets: [],
+};
