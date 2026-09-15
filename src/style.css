@@ -164,6 +164,41 @@ body.danger::after { content: ''; position: fixed; inset: 0; z-index: 40; pointe
 .loading { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center;
   color: var(--fg-dim); font-size: 14px; letter-spacing: 0.15em; background: #000; }
 
+/* ---- 暂停菜单：Esc/手柄 Start 打开（游戏冻结）---- */
+.pause-menu { position: fixed; inset: 0; z-index: 72; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 26px; background: rgba(2, 5, 10, 0.66);
+  backdrop-filter: blur(3px); }
+.pause-title { font-size: 28px; font-weight: 700; letter-spacing: 0.32em;
+  text-shadow: 0 0 26px rgba(127, 180, 255, 0.4); }
+.pause-actions { display: flex; flex-direction: column; gap: 12px; min-width: 260px; }
+.pause-actions button { padding: 11px 26px; font-size: 14px; border-radius: 10px; cursor: pointer;
+  border: 1px solid var(--accent); background: rgba(127, 180, 255, 0.14); color: var(--accent);
+  transition: background 0.2s ease; }
+.pause-actions button:hover, .pause-actions button:focus { background: rgba(127, 180, 255, 0.3); outline: none; }
+.pause-actions .key-hint { opacity: 0.55; font-size: 11px; margin-left: 8px; }
+.pause-actions #btn-pause-title { border-color: var(--danger); color: var(--danger); background: rgba(255, 138, 127, 0.1); }
+.pause-actions #btn-pause-title:hover, .pause-actions #btn-pause-title:focus { background: rgba(255, 138, 127, 0.24); }
+
+/* ---- 通关结算：12 环全通关的一次性庆典 ---- */
+@keyframes victory-in { from { opacity: 0; } to { opacity: 1; } }
+.victory-screen { position: fixed; inset: 0; z-index: 72; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 16px; text-align: center;
+  background: rgba(2, 5, 10, 0.78); backdrop-filter: blur(4px); animation: victory-in 0.9s ease; }
+.victory-k { font-size: 12px; letter-spacing: 0.42em; color: var(--accent); }
+.victory-title { font-size: 42px; font-weight: 800; letter-spacing: 0.14em;
+  color: var(--fg); text-shadow: 0 0 34px rgba(255, 210, 127, 0.5); }
+.victory-text { color: var(--fg-dim); font-size: 13.5px; line-height: 1.9; }
+.victory-stats { display: grid; grid-template-columns: auto auto; gap: 9px 30px; margin-top: 8px;
+  font-size: 14px; background: var(--glass); border: 1px solid var(--line);
+  border-radius: 12px; padding: 18px 30px; }
+.victory-stats div { display: contents; }
+.victory-stats dt { color: var(--fg-dim); text-align: left; }
+.victory-stats dd { color: var(--accent2); text-align: right; font-variant-numeric: tabular-nums; }
+#btn-victory-continue { margin-top: 14px; padding: 12px 34px; font-size: 15px; border-radius: 10px; cursor: pointer;
+  border: 1px solid var(--accent2); background: rgba(255, 210, 127, 0.14); color: var(--accent2);
+  transition: background 0.2s ease; }
+#btn-victory-continue:hover, #btn-victory-continue:focus { background: rgba(255, 210, 127, 0.3); outline: none; }
+
 @media (max-width: 860px) {
   .infocard { width: min(88vw, 330px); }
   .hud { min-width: 150px; }

@@ -66,6 +66,72 @@ async function main() {
     else console.log(`  ✓ ${id}: ${r.entities} 实体, ${r.children} 场景对象`);
   }
 
+  // 3.5 游戏标准 UI 流：暂停菜单（Esc）→ 通关结算 → 回到标题
+  // 键盘事件三连（按下/抬起/再按下）构造一个完整边沿，由下一帧 renderFrame 消费
+  const evalJS = (code) => {
+    const out = run('agent-browser', ['eval', `(() => { ${code} })()`, '--session', SESSION]);
+    // agent-browser stdout 是对返回值的 JSON 编码；返回值本身可能是
+    // JSON.stringify 后的字符串（再解一层）或普通字符串（如 'ok'）
+    let v = JSON.parse(out);
+    if (typeof v === 'string') { try { v = JSON.parse(v); } catch { /* 普通字符串 */ } }
+    return v;
+  };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const pressEsc = () => evalJS(`
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape' }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    return 'ok';
+  `);
+  const uiState = () => evalJS(`
+    const vis = (id) => !document.getElementById(id).classList.contains('hidden');
+    return JSON.stringify({ title: vis('title-screen'), menu: vis('pause-menu'),
+      victory: vis('victory-screen'), paused: window.__universe.clock.paused });
+  `);
+
+  evalJS(`document.getElementById('btn-start').classList.contains('hidden')
+    ? document.getElementById('btn-continue').click() : document.getElementById('btn-start').click();
+    return 'ok';`);
+  let st = uiState();
+  if (st.title || st.menu || st.victory) failures.push(`进入游戏: 覆盖层未关闭 ${JSON.stringify(st)}`);
+  else console.log('  ✓ 开始航行：进入游戏');
+
+  pressEsc();
+  await sleep(300);
+  st = uiState();
+  if (!st.menu || !st.paused) failures.push(`Esc 打开暂停菜单: ${JSON.stringify(st)}`);
+  else console.log('  ✓ Esc 打开暂停菜单并冻结时钟');
+
+  pressEsc();
+  await sleep(300);
+  st = uiState();
+  if (st.menu || st.paused) failures.push(`Esc 关闭暂停菜单: ${JSON.stringify(st)}`);
+  else console.log('  ✓ Esc 关闭菜单并恢复时钟');
+
+  evalJS(`window.__universe.setMission(12); return 'ok';`);
+  await sleep(1000);
+  st = uiState();
+  if (!st.victory || !st.paused) failures.push(`通关结算: ${JSON.stringify(st)}`);
+  else console.log('  ✓ 12 环全通关触发结算画面');
+
+  evalJS(`document.getElementById('btn-victory-continue').click(); return 'ok';`);
+  st = uiState();
+  if (st.victory || st.paused) failures.push(`结算继续: ${JSON.stringify(st)}`);
+  else console.log('  ✓ 继续自由航行：结算关闭并恢复时钟');
+
+  pressEsc();
+  await sleep(300);
+  evalJS(`document.getElementById('btn-pause-title').click(); return 'ok';`);
+  await sleep(200);
+  st = uiState();
+  if (!st.title || st.menu || st.paused) failures.push(`回到标题: ${JSON.stringify(st)}`);
+  else console.log('  ✓ 暂停菜单「回到标题」（吸引模式时钟恢复）');
+
+  evalJS(`document.getElementById('btn-continue').click(); return 'ok';`);
+  st = uiState();
+  if (st.title) failures.push(`继续航行: ${JSON.stringify(st)}`);
+  else console.log('  ✓ 标题「继续航行」：回到游戏');
+
   // 4. 页面错误检查
   const errs = run('agent-browser', ['errors', '--session', SESSION]).trim();
   if (errs && !/0 errors|no errors/i.test(errs)) {

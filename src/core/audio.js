@@ -113,6 +113,12 @@ export class SoundFX {
     this._tone(1318, 0.34, { peak: 0.18, delay: 0.18 });
   }
 
+  victory() {  // 通关凯旋：五音上行琶音收在大和弦长音（比任务 chime 更隆重）
+    const seq = [523, 659, 784, 1046];
+    seq.forEach((f, i) => this._tone(f, 0.22, { peak: 0.17, delay: i * 0.13 }));
+    this._tone(1568, 0.9, { peak: 0.18, delay: seq.length * 0.13 });
+  }
+
   dock() {  // 泊车/新发现：温暖双音
     this._tone(523, 0.22, { type: 'triangle', peak: 0.15 });
     this._tone(659, 0.3, { type: 'triangle', peak: 0.15, delay: 0.11 });

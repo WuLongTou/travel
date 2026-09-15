@@ -11,7 +11,9 @@ export class UI {
       'fade','loading','controls-hint','cockpit-frame','layer-intro',
       'mission-box','mission-idx','mission-title','mission-desc','discoveries',
       'hud-orbit','toast','title-screen','btn-start','btn-continue','btn-reset',
-      'crosshair','settings-panel','set-volume','set-shake','set-close','btn-title-settings','title-progress'];
+      'crosshair','settings-panel','set-volume','set-shake','set-close','btn-title-settings','title-progress',
+      'pause-menu','btn-pause-resume','btn-pause-settings','btn-pause-title',
+      'victory-screen','victory-stats','btn-victory-continue'];
     for (const id of ids) this.el[id] = document.getElementById(id);
     this._bindInfoClose();
     this._setupHintToggle();
@@ -94,23 +96,68 @@ export class UI {
   setCockpitFrame(on) {
     if (this.el['cockpit-frame']) this.el['cockpit-frame'].classList.toggle('hidden', !on);
   }
-  // 标题画面：有存档时显示继续/重开与进度概览，否则仅开始；回调由 main 提供
-  setupTitleScreen({ hasProgress, progressText = '', onStart, onContinue, onReset, onOpenSettings }) {
+  // 标题画面：按钮回调绑定一次；显隐与存档概览由 showTitleScreen 控制
+  //（初始进入与游戏中「回到标题」复用同一入口）
+  setupTitleScreen({ onStart, onContinue, onReset, onOpenSettings }) {
     const scr = this.el['title-screen'];
     if (!scr) return;
-    if (this.el['title-progress'] && progressText) this.el['title-progress'].textContent = progressText;
     this.el['btn-title-settings'].addEventListener('click', () => onOpenSettings && onOpenSettings());
-    if (hasProgress) {
-      this.el['btn-continue'].classList.remove('hidden');
-      this.el['btn-reset'].classList.remove('hidden');
-      this.el['btn-start'].classList.add('hidden');
-    }
-    const close = () => scr.classList.add('hidden');
-    this.el['btn-start'].addEventListener('click', () => { close(); onStart(); });
-    this.el['btn-continue'].addEventListener('click', () => { close(); onContinue(); });
+    this.el['btn-start'].addEventListener('click', () => { scr.classList.add('hidden'); onStart && onStart(); });
+    this.el['btn-continue'].addEventListener('click', () => { scr.classList.add('hidden'); onContinue && onContinue(); });
     this.el['btn-reset'].addEventListener('click', () => {
-      if (window.confirm('确定清空进度并重新开始？')) onReset();
+      if (window.confirm('确定清空进度并重新开始？')) onReset && onReset();
     });
+  }
+  // 显示标题层并按当前存档刷新按钮显隐与进度概览
+  showTitleScreen({ hasProgress, progressText = '' }) {
+    const scr = this.el['title-screen'];
+    if (!scr) return;
+    if (this.el['title-progress']) this.el['title-progress'].textContent = progressText;
+    this.el['btn-continue'].classList.toggle('hidden', !hasProgress);
+    this.el['btn-reset'].classList.toggle('hidden', !hasProgress);
+    this.el['btn-start'].classList.toggle('hidden', !!hasProgress);
+    scr.classList.remove('hidden');
+  }
+  // 暂停菜单：Esc/手柄 Start 开关；回调绑定一次，焦点落首项供手柄/键盘导航
+  setupPauseMenu({ onResume, onSettings, onTitle }) {
+    this.el['btn-pause-resume'].addEventListener('click', () => onResume && onResume());
+    this.el['btn-pause-settings'].addEventListener('click', () => onSettings && onSettings());
+    this.el['btn-pause-title'].addEventListener('click', () => onTitle && onTitle());
+  }
+  showPauseMenu() {
+    const m = this.el['pause-menu'];
+    if (!m) return;
+    m.classList.remove('hidden');
+    this.el['btn-pause-resume'].focus();
+  }
+  hidePauseMenu() {
+    if (this.el['pause-menu']) this.el['pause-menu'].classList.add('hidden');
+  }
+  // 菜单项按钮列表（手柄 dpad 焦点导航用，顺序与视觉一致）
+  pauseMenuButtons() {
+    return ['btn-pause-resume', 'btn-pause-settings', 'btn-pause-title'].map((id) => this.el[id]);
+  }
+  // 通关结算：stats 为 [label, value] 数组；按钮回调绑定一次
+  setupVictory(onContinue) {
+    this.el['btn-victory-continue'].addEventListener('click', () => onContinue && onContinue());
+  }
+  showVictory(stats) {
+    const v = this.el['victory-screen'];
+    if (!v) return;
+    const dl = this.el['victory-stats'];
+    dl.innerHTML = '';
+    for (const [k, val] of stats) {
+      const row = document.createElement('div');
+      const dt = document.createElement('dt'); dt.textContent = k;
+      const dd = document.createElement('dd'); dd.textContent = val;
+      row.appendChild(dt); row.appendChild(dd);
+      dl.appendChild(row);
+    }
+    v.classList.remove('hidden');
+    this.el['btn-victory-continue'].focus();
+  }
+  hideVictory() {
+    if (this.el['victory-screen']) this.el['victory-screen'].classList.add('hidden');
   }
   // 设置面板：挂滑条/开关回调并展示；hide 收起
   showSettings({ volume, shake, onVolume, onShake, onClose }) {

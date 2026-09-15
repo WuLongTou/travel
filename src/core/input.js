@@ -40,7 +40,7 @@ export class Input {
       const k = e.key.toLowerCase();
       if ([' ', 'w', 'a', 's', 'd', 'q', 'e', 'c', 'g', 'r', 'x', 'v', 'z', 't', 'm', 'o',
         'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift', 'f',
-        '[', ']', '\\', 'tab', 'backspace'].includes(k)) {
+        '[', ']', '\\', 'tab', 'backspace', 'escape'].includes(k)) {
         e.preventDefault();
         this.keys.add(k);
       }
@@ -160,7 +160,8 @@ export class Input {
 
   // 手柄轮询（标准映射，含 18% 摇杆死区）：
   //   左摇杆=六向推进平移 · RT=加力 · LT=上升 · LB=下降 · RB=反推刹车
-  //   右摇杆=环视 · Y=切换视角 · Start=暂停
+  //   右摇杆=环视 · Y=切换视角 · Start=暂停菜单
+  //   覆盖层（暂停菜单/结算）打开时：dpad 上下=移动焦点 · A=确认 · B=返回
   // 无手柄返回 null。dtReal 供右摇杆折算成像素增量（与鼠标环视同管线）。
   pollGamepad(dtReal) {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -178,6 +179,7 @@ export class Input {
       up: btn(6), down: btn(4), boost: btn(7), brake: btn(5),
       viewX: rx * GAIN * dtReal, viewY: ry * GAIN * dtReal,
       viewCycle: btn(3), pause: btn(9),
+      dpadUp: btn(12), dpadDown: btn(13), confirm: btn(0), back: btn(1),
     };
   }
 }

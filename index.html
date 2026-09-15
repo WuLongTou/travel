@@ -42,6 +42,25 @@
   <!-- 瞬时提示 toast：独立元素，不再挤占 HUD 模式行 -->
   <div class="toast" id="toast"></div>
 
+  <!-- 暂停菜单：Esc/手柄 Start 打开——继续/设置/回到标题（游戏冻结） -->
+  <div class="pause-menu hidden" id="pause-menu">
+    <div class="pause-title">已暂停</div>
+    <div class="pause-actions">
+      <button id="btn-pause-resume">继续航行 <span class="key-hint">Esc</span></button>
+      <button id="btn-pause-settings">设置</button>
+      <button id="btn-pause-title">回到标题</button>
+    </div>
+  </div>
+
+  <!-- 通关结算：12 环任务链全通关的一次性庆典（统计 + 凯旋音效） -->
+  <div class="victory-screen hidden" id="victory-screen">
+    <div class="victory-k">MISSION COMPLETE</div>
+    <h2 class="victory-title">银河巡礼 · 完成</h2>
+    <p class="victory-text">从地球摇篮到可观测宇宙边缘——十二环任务全部达成。<br>宇宙没有尽头，航程仍将继续。</p>
+    <dl class="victory-stats" id="victory-stats"></dl>
+    <button id="btn-victory-continue">继续自由航行</button>
+  </div>
+
   <!-- 设置面板：主音量 / 屏幕震动（localStorage 持久化） -->
   <div class="settings-panel hidden" id="settings-panel">
     <div class="settings-title">设置</div>
@@ -105,6 +124,7 @@
       <span class="hint-key">R</span><span>安全重置</span>
       <span class="hint-key">[ ]</span><span>时间倍率（巡航自动调节）</span>
       <span class="hint-key">\</span><span>时钟暂停</span>
+      <span class="hint-key">Esc</span><span>暂停菜单</span>
       <span class="hint-key">M</span><span>静音开关</span>
       <span class="hint-key">O</span><span>设置面板</span>
       <span class="hint-key">手柄</span><span>左摇杆推进 · 右摇杆环视 · RT 加力</span>

@@ -6,7 +6,8 @@
 //   - GOD（G 键切换）：上帝视角——相机脱离飞船自由浏览（WASD 移动/Space·C 或 Q/E 升降/
 //     鼠标转向/滚轮调速/Shift 加速），飞船在背景中继续全自动飞行，再按 G 返回飞船
 //   - MANUAL：按下飞行操控键期间人工干预飞船轨迹，松手自动回 AUTO
-// 视角与时间：V 切换追尾/座舱/环绕 · Z 视角复位 · [ ] 时间倍率 · \ 暂停 · R 安全轨道重部署
+// 视角与时间：V 切换追尾/座舱/环绕 · Z 视角复位 · [ ] 时间倍率 · \ 时钟暂停 ·
+// Esc 暂停菜单（继续/设置/回标题） · R 安全轨道重部署
 import './style.css';
 import * as THREE from 'three';
 import { CosmicEngine } from './render/engine.js';
@@ -242,25 +243,120 @@ function openSettings() {
 }
 // 标题画面：有存档显示继续/重开；按钮点击（真实手势）同时解锁音频。
 // 「开始航行」「继续航行」只是收起画面——游戏在背后以吸引模式运行；
-// 「重新开始」清空进度并重载页面
-{
-  let savedIdx = 0, savedDisc = 0;
+// 「重新开始」清空进度并重载页面。存档概览读取抽成函数，游戏中
+// 「回到标题」（暂停菜单）复用同一入口刷新进度
+function titleProgressSnapshot() {
   try {
-    const saved = JSON.parse(localStorage.getItem('universe-roam-progress') || 'null');
-    savedIdx = saved && Number.isInteger(saved.missionIdx) ? saved.missionIdx : 0;
-    savedDisc = saved && Array.isArray(saved.discovered) ? saved.discovered.length : 0;
-  } catch { /* 存储不可用：视为无进度 */ }
-  ui.setupTitleScreen({
-    hasProgress: savedIdx > 0,
-    progressText: savedIdx > 0 ? `任务进度 ${savedIdx}/12 · 已发现 ${savedDisc} 个天体` : '',
-    onStart: () => sfx.ensure(),
-    onContinue: () => sfx.ensure(),
-    onReset: () => {
-      try { localStorage.removeItem('universe-roam-progress'); } catch { /* 忽略 */ }
-      location.reload();
-    },
-    onOpenSettings: () => openSettings(),
-  });
+    const saved = JSON.parse(localStorage.getItem(PROGRESS_KEY) || 'null');
+    const idx = saved && Number.isInteger(saved.missionIdx) ? saved.missionIdx : 0;
+    const disc = saved && Array.isArray(saved.discovered) ? saved.discovered.length : 0;
+    return {
+      hasProgress: idx > 0,
+      progressText: idx > 0 ? `任务进度 ${idx}/12 · 已发现 ${disc} 个天体` : '',
+    };
+  } catch { return { hasProgress: false, progressText: '' }; }
+}
+ui.setupTitleScreen({
+  onStart: () => sfx.ensure(),
+  onContinue: () => sfx.ensure(),
+  onReset: () => {
+    try { localStorage.removeItem(PROGRESS_KEY); } catch { /* 忽略 */ }
+    location.reload();
+  },
+  onOpenSettings: () => openSettings(),
+});
+ui.showTitleScreen(titleProgressSnapshot());
+
+// ==========================================================
+// 覆盖层状态机：暂停菜单（Esc/手柄 Start）+ 通关结算 + 标题画面
+// 打开即冻结时钟（记录此前暂停态，关闭时恢复）；打开期间所有游戏
+// 按键统一失效（renderFrame 每帧 keys.clear，Esc 在清理前单独消费）
+// ==========================================================
+let pauseMenuOpen = false;
+let victoryOpen = false;
+let pausedBeforeOverlay = false; // 覆盖层打开前的时钟暂停态（关闭恢复，保留 \ 键暂停语义）
+let flightSeconds = 0; // 本次航行累计墙上秒（暂停/覆盖层不计；通关结算展示）
+let prevEsc = false; // Esc 键上一帧状态（开关边沿）
+let menuFocusIdx = 0; // 手柄 dpad 焦点位置（暂停菜单按钮下标）
+let prevGpUp = false, prevGpDown = false, prevGpConfirm = false, prevGpBack = false;
+
+// 标题/暂停菜单/结算任一可见即视为覆盖层态（游戏冻结、输入隔离）
+function overlayActive() {
+  return pauseMenuOpen || victoryOpen
+    || !ui.el['title-screen'].classList.contains('hidden');
+}
+
+function openPauseMenu() {
+  if (pauseMenuOpen || victoryOpen) return;
+  pauseMenuOpen = true;
+  pausedBeforeOverlay = clock.paused;
+  clock.paused = true;
+  if (document.pointerLockElement) document.exitPointerLock(); // 释放鼠标点菜单
+  input.keys.clear();
+  menuFocusIdx = 0;
+  ui.showPauseMenu();
+}
+function closePauseMenu() {
+  if (!pauseMenuOpen) return;
+  pauseMenuOpen = false;
+  ui.hidePauseMenu();
+  clock.paused = pausedBeforeOverlay;
+}
+// 回到标题：恢复时钟（吸引模式在背景继续跑），刷新存档概览并显示标题层
+function backToTitle() {
+  closePauseMenu();
+  ui.showTitleScreen(titleProgressSnapshot());
+}
+// 通关结算：一次性庆典（存档恢复到满环不重弹）
+function showVictoryScreen() {
+  if (victoryOpen || pauseMenuOpen) return;
+  victoryOpen = true;
+  pausedBeforeOverlay = clock.paused;
+  clock.paused = true;
+  if (document.pointerLockElement) document.exitPointerLock();
+  input.keys.clear();
+  const moons = [...discovered].filter((id) => MOON_IDS.has(id)).length;
+  const mm = String(Math.floor(flightSeconds / 60)).padStart(2, '0');
+  const ss = String(Math.floor(flightSeconds % 60)).padStart(2, '0');
+  ui.showVictory([
+    ['任务链', `${MISSIONS.length} / ${MISSIONS.length}`],
+    ['发现天体', `${discovered.size}`],
+    ['卫星巡礼', `${moons} / ${MOON_IDS.size}`],
+    ['航行时长', `${mm}:${ss}`],
+  ]);
+  sfx.victory();
+}
+function closeVictory() {
+  if (!victoryOpen) return;
+  victoryOpen = false;
+  ui.hideVictory();
+  clock.paused = pausedBeforeOverlay;
+}
+ui.setupPauseMenu({
+  onResume: () => closePauseMenu(),
+  onSettings: () => openSettings(),
+  onTitle: () => backToTitle(),
+});
+ui.setupVictory(() => closeVictory());
+// 手柄覆盖层导航：dpad 上下移动焦点、A 确认、B 返回（主机菜单惯例）
+function gamepadMenuNav(gp) {
+  if (victoryOpen) {
+    if (gp.confirm && !prevGpConfirm) closeVictory();
+  } else if (pauseMenuOpen) {
+    const btns = ui.pauseMenuButtons();
+    if (gp.dpadUp && !prevGpUp) {
+      menuFocusIdx = (menuFocusIdx + btns.length - 1) % btns.length;
+      btns[menuFocusIdx].focus();
+    }
+    if (gp.dpadDown && !prevGpDown) {
+      menuFocusIdx = (menuFocusIdx + 1) % btns.length;
+      btns[menuFocusIdx].focus();
+    }
+    if (gp.confirm && !prevGpConfirm) btns[menuFocusIdx].click();
+    if (gp.back && !prevGpBack) closePauseMenu();
+  }
+  prevGpUp = gp.dpadUp; prevGpDown = gp.dpadDown;
+  prevGpConfirm = gp.confirm; prevGpBack = gp.back;
 }
 
 // 跃迁前清理指向旧世界实体的目标锁定（防止自动飞控追逐幽灵目标）
@@ -471,33 +567,54 @@ function renderFrame(now) {
   // 模拟时间增量：飞船位置动力学（引力+推进）与天体运动共用同一口径，
   // 时间倍率承担航行节奏（物理始终真实，倍率只放大时间流速）
   const dtSim = clock.paused ? 0 : dtReal * clock.rate;
+  if (!clock.paused) flightSeconds += dtReal; // 航程墙上时（暂停/覆盖层不计）
   lastFrame = now;
   const steer = input.poll();
   const a = input.actions;
-  // 手柄合并：摇杆/扳机与键盘同管线（有任一输入即构成人工干预）
+  // 手柄合并：摇杆/扳机与键盘同管线（有任一输入即构成人工干预）；
+  // 覆盖层（标题/暂停菜单/结算）打开时手柄只用于菜单导航与 Start 开关
   let gpBrake = false, gpThrust = false;
   const gp = input.pollGamepad(dtReal);
   if (gp) {
-    a.fwd = a.fwd || gp.fwd; a.bwd = a.bwd || gp.bwd;
-    a.left = a.left || gp.left; a.right = a.right || gp.right;
-    a.up = a.up || gp.up; a.down = a.down || gp.down;
-    a.boost = a.boost || gp.boost;
-    gpBrake = gp.brake;
-    gpThrust = gp.fwd || gp.bwd || gp.left || gp.right || gp.up || gp.down || gp.brake;
-    if (gp.viewX || gp.viewY) {
-      steer.dx += gp.viewX;
-      steer.dy += gp.viewY;
-    }
-    if (gp.viewCycle && !prevGpView && chaseCam.mode !== 'orbit' && controlMode !== MODE_GOD) {
-      chaseCam.cycleView();
-    }
-    prevGpView = gp.viewCycle;
-    if (gp.pause && !prevGpPause) {
-      clock.paused = !clock.paused;
-      toastMsg(clock.paused ? '⏸ 已暂停' : '▶ 继续航行', 2);
+    if (gp.pause && !prevGpPause && !victoryOpen) {
+      if (pauseMenuOpen) closePauseMenu();
+      else openPauseMenu();
     }
     prevGpPause = gp.pause;
+    if (overlayActive()) {
+      gamepadMenuNav(gp);
+    } else {
+      a.fwd = a.fwd || gp.fwd; a.bwd = a.bwd || gp.bwd;
+      a.left = a.left || gp.left; a.right = a.right || gp.right;
+      a.up = a.up || gp.up; a.down = a.down || gp.down;
+      a.boost = a.boost || gp.boost;
+      gpBrake = gp.brake;
+      gpThrust = gp.fwd || gp.bwd || gp.left || gp.right || gp.up || gp.down || gp.brake;
+      if (gp.viewX || gp.viewY) {
+        steer.dx += gp.viewX;
+        steer.dy += gp.viewY;
+      }
+      if (gp.viewCycle && !prevGpView && chaseCam.mode !== 'orbit' && controlMode !== MODE_GOD) {
+        chaseCam.cycleView();
+      }
+      prevGpView = gp.viewCycle;
+    }
   }
+
+  // Esc 键（边沿）：设置面板开着先关面板；结算画面 Esc=继续自由航行；
+  // 游戏中开关暂停菜单；标题画面下无操作。必须位于下方 keys.clear 之前
+  const escDown = input.keys.has('escape');
+  if (escDown && !prevEsc) {
+    if (!ui.el['settings-panel'].classList.contains('hidden')) ui.hideSettings();
+    else if (victoryOpen) closeVictory();
+    else if (!overlayActive()) openPauseMenu();
+    else if (pauseMenuOpen) closePauseMenu();
+  }
+  prevEsc = escDown;
+
+  // 覆盖层打开期间冻结所有游戏按键：一处清理统一隔离飞行/视角/时间/
+  // 系统键（冻结语义），Esc 边沿已在上方消费
+  if (overlayActive()) input.keys.clear();
 
   // R 键：主动在安全轨道重置部署
   const rDown = input.keys.has('r');
@@ -1072,6 +1189,10 @@ function renderFrame(now) {
         sfx.chime();
         missionIdx++;
         saveProgress();
+        if (missionIdx === MISSIONS.length) {
+          // 全通关：让末环完成 toast 先被看到，再进结算庆典
+          setTimeout(showVictoryScreen, 1400);
+        }
       }
     }
     if (missionIdx < MISSIONS.length) {
@@ -1285,20 +1406,30 @@ window.__universe = { engine, probe, clock, nav, ui, input, chaseCam, ship, sfx,
   get tour() { return tour; },
   get dbg() { return navDbg; },
   get controlMode() { return controlMode; },
+  get pauseMenuOpen() { return pauseMenuOpen; },
+  get victoryOpen() { return victoryOpen; },
+  get flightSeconds() { return flightSeconds; },
   select(id) {
     const e = nav.world?.entities.find((x) => x.id === id);
     if (e) selectEntity(e);
     return !!e;
   },
-  // 测试用：直接设置任务进度（后期任务的无头验证入口）
+  // 测试用：直接设置任务进度（后期任务的无头验证入口）；设到满环即
+  // 触发通关结算（与真实通关同一庆典路径）
   setMission(i) {
     if (Number.isInteger(i) && i >= 0 && i <= MISSIONS.length) {
+      const was = missionIdx;
       missionIdx = i;
       saveProgress();
+      if (i === MISSIONS.length && was < MISSIONS.length) setTimeout(showVictoryScreen, 200);
       return true;
     }
     return false;
   },
+  openPauseMenu,
+  closePauseMenu,
+  showVictoryScreen,
+  closeVictory,
   startTour,
   stopTour,
 };
