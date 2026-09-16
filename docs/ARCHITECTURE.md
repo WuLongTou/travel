@@ -42,10 +42,16 @@
 ```
 src/
   main.ts            # 装配 + 三模式控制状态机（AUTO 全自动 / MANUAL 手动干预 /
-                     # GOD 上帝视角）+ HUD 天文仪表盘 + 自动 LOD 跃迁检测 +
-                     # 准星拾取/视角切换
+                     # GOD 上帝视角）+ 输入事件分发 + 自动 LOD 跃迁检测 + 主循环
   types.ts           # 领域类型：Vec3/Entity/GameWorld/GravityWell/MissionCtx 等（全项目真源）
   core/
+    autopilot.ts     # 自动导航与智能巡航制导：期望速度矢量跟踪、引力井防坠拉起、
+                     # 目标参考系交会制导、泊位外推与进出圈滞回
+    time-warp.ts     # 自动时间倍率控制器：有目标 ETA 配速、无目标轨道周期配速、
+                     # 泊位邻域收尾配速、位移包线防瞬移与层级上限钳制
+    tour.ts          # 大巡游状态机：预设站点自动串联、到站停留/巡游推进与跳站
+    mission-manager.ts # 任务链进度、天体去重收集、引力弹弓测速与 localStorage 持久化
+    settings.ts      # 用户设置管理器：音量、相机震屏、画质档位持久化与响应式联动
     game-state.ts    # UI 覆盖层状态机（title/playing/pause-menu/victory）：转换表 +
                      # 时钟暂停态恢复语义，纯逻辑无 DOM（Vitest 直测）
     codex.ts         # 发现图鉴注册表：换层扫描 world.entities 登记可发现天体
@@ -64,12 +70,11 @@ src/
                      # 天体表面碰撞→安全圆轨道重部署；Q/E 横滚，X 反推刹车；
                      # 出生/重生注入开普勒圆轨道速度（防垂直坠入引力中心）
     missions.ts      # 主线任务链（12 环：9 主线 + 3 手动挑战）：声明式
-                     # done(ctx) 谓词，main 每帧构建上下文推进，完成 toast +
-                     # 挂件更新；全通关触发结算庆典（教育主线玩法）
+                     # done(ctx) 谓词，由 mission-manager 每帧构建上下文推进
     events.ts        # 深空环境事件（纯视觉）：流星雨（相机球壳加色光痕，
                      # 尺度随跟拍距离）+ 彗星群掠过内太阳系（辉光核+离子尾），
                      # 随机调度 + debugSpawn 供无头验证
-    audio.js         # 程序化音效（WebAudio 合成零素材）：引擎噪声随油门/
+    audio.ts         # 程序化音效（WebAudio 合成零素材）：引擎噪声随油门/
                      # 加力平滑变化，泊车双音/任务琶音/撞毁爆响/跃迁扫频/
                      # 通关凯旋琶音，M 键静音；AudioContext 在首次用户手势时
                      # 创建/恢复
@@ -84,6 +89,7 @@ src/
     background.ts    # 星空球壳点云/银河带/CMB 壳（跟随相机，无界天球）
     bodies.ts        # makeSphere/makeGlowSprite/makeRing/makeOrbitLine
     labels.ts        # 文本 sprite + updateLabelFades（距离淡出）
+    picker.ts        # 亚像素级天体射线拾取（远处天体视直径角度放大）与准星悬停
     camera.ts        # 三视角：chase 真追尾（相机锚在机尾后上方、随飞船
                      # 航向转动，orbitYaw/Pitch 为相对机尾偏移角）/
                      # cockpit 座舱（舱内 360° 转头）/ orbit 环绕（世界系
@@ -93,8 +99,7 @@ src/
     freecam.ts       # 上帝视角自由相机：WASD 平移/Space·C 或 Q·E 升降/
                      # 鼠标转向/滚轮调速档/Shift 加速；进入时无缝接管当前
                      # 相机位姿并按场景尺度校准移速
-    ship.ts          # 程序化低多边形飞船（机头 -Z）+ 引擎尾焰/辉光 +
-                     # 亚像素 ◇ 标记（sizeAttenuation:false sprite）
+    ship.ts          # 真实尺度飞船模型、尾焰/辉光渲染联动、亚像素菱形光标与动态近裁剪面
     dust.ts          # 星尘流：盒绕相机粒子线，按 vel·dtSim 平流 + 周期
                      # wrap（任意倍率速度感），盒边长随视速/视距缩放
     textures.ts      # 程序化纹理（glow 径向渐变等）
@@ -105,15 +110,9 @@ src/
     galaxy-gen.ts    # buildGalaxy（棒旋点云）/buildStarSwarm/buildCosmicWeb
     data/*.ts        # 核实数据：solar/stars/local-group/super-structures/cosmos
                      # 全部源码为 TypeScript（strict）；scripts/smoke.mjs 为 Node 工具脚本保持 JS
-  ui/controller.ts   # 标题画面（开始/继续/重开 + 存档概览 + 设置入口，
-                     # 游戏中「回到标题」复用同一显示入口刷新概览）/
-                     # 暂停菜单（Esc/手柄 Start：继续/图鉴/设置/回到标题 +
-                     # 统计行）/发现图鉴（按层分节：已发现显名/???占位）/
-                     # 通关结算（统计卡：任务/发现/卫星/航程时长）/
-                     # 设置面板（音量滑条/震屏开关/画质三档，持久化）/层级栏/任务
-                     # 挂件（含发现计数）/层介绍横幅/座舱框/HUD（轨道独立
-                     # 行）/独立 toast/跨层黑场转场/准星发现脉冲/信息卡
-                     # （进入新尺度层时展示该层 intro 教学文案后淡出）
+  ui/
+    controller.ts    # 标题画面 / 暂停菜单 / 发现图鉴 / 通关结算 / 设置面板 / HUD
+    hud-presenter.ts # HUD 天文物理仪表数据装配：真实速度、光行时、开普勒轨道特征与引力井比机械能
   util/              # units（AU/ly/pc/km 换算、色温→hex）、math（mulberry32）
 ```
 
@@ -265,10 +264,11 @@ src/
 - 视觉放大（行星尺寸、星系盘半径在 Mpc 尺度的可见性、宇宙网拓扑）为教学示意，
   实体 `schematic: true` 并在信息卡中说明，不与真实数据混淆。
 
-## 6. 验证
+## 6. 验证与测试体系
 
-- `npm run build`：vite 产物构建。
-- `npm run smoke`：无头冒烟——起 dev server → agent-browser（Chrome for
-  Testing 独立 session）逐层 `nav.enter` → 断言实体/场景对象/探测球位置/update
-  不抛错 → 页面 error 检查 → 自动清理。
-- 视觉验收：agent-browser 截六层画面人工比对（迭代记录见 git log）。
+- `pnpm run typecheck`：TypeScript 严格类型检查（tsc --noEmit）。
+- `pnpm run test`：Vitest 自动化单元测试套件，全面覆盖动力学、开普勒计算、状态机、任务链、图鉴、巡游及纯逻辑模块（14 个套件，93+ 项用例，纯 Node 零 DOM 依赖或轻量 mock 隔离）。
+- `pnpm run build`：生产环境打包构建，由 Vite 8 + Rolldown 驱动。配置 `manualChunks` 将底层三维引擎 `three` 独立拆分为 vendor chunk（~550 kB），应用核心逻辑单独打包为精简 chunk（~137 kB），消除构建告警并提升浏览器长效缓存命中率。
+- `pnpm run smoke`：无头端到端冒烟验证——起 dev server → agent-browser（Chrome for Testing 独立 session）逐层 `nav.enter` → 断言实体/场景对象/探测球位置/update 不抛错 → 状态机/暂停菜单/通关结算/设置持久化/真实尺度与亚像素标记/掌舵与星尘验证 → 页面 error 检查 → 自动清理。
+- 视觉验收：agent-browser 截六层画面比对（迭代记录见 git log）。
+
