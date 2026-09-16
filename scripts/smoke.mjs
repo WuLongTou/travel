@@ -96,6 +96,18 @@ async function main() {
   if (st.title || st.menu || st.victory) failures.push(`进入游戏: 覆盖层未关闭 ${JSON.stringify(st)}`);
   else console.log('  ✓ 开始航行：进入游戏');
 
+  // 任务挂件初始化：进入游戏即显示当前任务（占位符「—」= 初始推送丢失）
+  const mi = evalJS(`
+    return JSON.stringify({ idx: document.getElementById('mission-idx').textContent,
+      title: document.getElementById('mission-title').textContent,
+      n: document.getElementById('discoveries').textContent });
+  `);
+  if (!/^\d+\/12$/.test(mi.idx) || !mi.title || mi.title === '—' || mi.n === '') {
+    failures.push(`任务挂件初始态: ${JSON.stringify(mi)}`);
+  } else {
+    console.log(`  ✓ 任务挂件初始态：任务 ${mi.idx}「${mi.title}」· 发现 ${mi.n}`);
+  }
+
   pressEsc();
   await sleep(300);
   st = uiState();
@@ -113,6 +125,20 @@ async function main() {
   st = uiState();
   if (!st.victory || !st.paused) failures.push(`通关结算: ${JSON.stringify(st)}`);
   else console.log('  ✓ 12 环全通关触发结算画面');
+
+  // 结算画面必须真实渲染（曾因注释未闭合整段样式被构建丢弃，
+  // DOM 可见但面板塌缩成一条不可见的线——像素级断言防再犯）
+  const vs = evalJS(`
+    const el = document.getElementById('victory-screen');
+    const cs = getComputedStyle(el);
+    return JSON.stringify({ position: cs.position, h: el.offsetHeight,
+      title: document.querySelector('.victory-title')?.textContent });
+  `);
+  if (vs.position !== 'fixed' || vs.h < 200 || !vs.title || vs.title === '—') {
+    failures.push(`通关结算样式: ${JSON.stringify(vs)}`);
+  } else {
+    console.log(`  ✓ 通关结算样式：fixed 全屏面板（高 ${vs.h}px，「${vs.title}」）`);
+  }
 
   evalJS(`document.getElementById('btn-victory-continue').click(); return 'ok';`);
   st = uiState();
@@ -226,7 +252,16 @@ async function main() {
   }
   const zoomed = evalJS(`
     const u = window.__universe;
-    return JSON.stringify({ scale: u.ship.scale.x, marker: u.shipMarker.visible, dist: u.chaseCam.followDist });
+    const cam = u.engine.camera;
+    const rel = new cam.position.constructor(
+      u.probe.pos[0] - cam.position.x,
+      u.probe.pos[1] - cam.position.y,
+      u.probe.pos[2] - cam.position.z);
+    const fwd = new rel.constructor(0, 0, -1).applyQuaternion(cam.quaternion);
+    return JSON.stringify({ scale: u.ship.scale.x, marker: u.shipMarker.visible,
+      dist: u.chaseCam.followDist, along: rel.dot(fwd), dCam: rel.length(),
+      mode: u.chaseCam.mode, cm: u.controlMode, shipVis: u.ship.visible,
+      opacity: u.shipMarker.material.opacity });
   `);
   if (!markerShown || Math.abs(zoomed.scale - real.shipScale) > real.expect * 1e-9) {
     failures.push(`缩放与标记: ${JSON.stringify(zoomed)}`);

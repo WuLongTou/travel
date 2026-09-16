@@ -219,6 +219,11 @@ const ui = new UI(engine.renderer, {
   onInfoClose: () => { selected = null; },
   onResetView: () => resetToShipView(),
 });
+// 启动恢复后挂件与计数需要一次初始化：MissionManager 只在任务完成等
+// 边沿事件推送 UI，恢复存档（或新档）的当前任务文案与发现数若不在此
+// 补推一次，挂件会一直显示 HTML 占位符（「—」/ 0）
+missionManager.syncMissionHud();
+ui.setDiscoveries(missionManager.discovered.size);
 // 手柄连接/断开提示（轮询在 renderFrame 中每帧进行）
 window.addEventListener('gamepadconnected', () => toastMsg('🎮 手柄已连接', 3));
 window.addEventListener('gamepaddisconnected', () => {
@@ -775,6 +780,14 @@ function renderFrame(now: number): void {
       toastMsg('数值异常 · 已回滚本帧状态');
     }
 
+    // 追尾相机先于飞船视觉同步锚定到本帧船位：syncShipPose 的亚像素 ◇
+    // 光标用相机位姿做「船在相机前方」判定，若相机还是上一帧的锚点，
+    // 高时间倍率下船的帧位移远大于跟拍视距，船会被滞后平面误判到相机
+    // 背后，光标随轨道弯曲闪烁/常灭
+    if (controlMode !== MODE_GOD) {
+      chaseCam.update(dtReal, a.boost && probe.thrustOn);
+    }
+
     // 飞船模型可见性与位姿同步（上帝视角下无论休眠视角是哪种都保持可见）
     ship.visible = controlMode === MODE_GOD || chaseCam.mode !== 'cockpit';
     if (ship.visible) {
@@ -906,11 +919,6 @@ function renderFrame(now: number): void {
       : (timeWarp.mode === 'auto' ? clock.rateLabel() : (timeWarp.currentLabel || `×${clock.rate}`));
     if (!clock.paused) rateLabel += timeWarp.mode === 'auto' ? ' · 自动' : ' · 手动';
     ui.setTimeHud({ clockLabel: clock.timeLabel(), rateLabel });
-  }
-
-  // 上帝视角下相机由 FreeCam 全权控制，跳过追尾相机更新
-  if (controlMode !== MODE_GOD) {
-    chaseCam.update(dtReal, a.boost && probe.thrustOn);
   }
   // 撞毁震屏：随机偏移随剩余时间衰减，幅度按跟拍距离缩放（层尺度无关）
   if (crashShakeT > 0) {

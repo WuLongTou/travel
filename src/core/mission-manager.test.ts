@@ -32,6 +32,32 @@ describe('MissionManager', () => {
     expect(storage.getItem(PROGRESS_KEY)).toBeNull();
   });
 
+  it('syncMissionHud: 按当前进度推送任务信息，全通关推送 null', () => {
+    const storage = new MockStorage();
+    storage.setItem(PROGRESS_KEY, JSON.stringify({ missionIdx: 3, discovered: ['earth', 'mars', 'luna'] }));
+
+    const updates: ({ idx: number; total: number; title: string; desc: string } | null)[] = [];
+    const mm = new MissionManager(storage, {
+      onMissionUpdate: (info) => updates.push(info),
+    });
+    mm.syncMissionHud();
+
+    expect(updates).toEqual([{ idx: 4, total: 12, title: '冲出摇篮', desc: '朝任意方向飞出层界，浮升进入星际近邻' }]);
+
+    mm.setMission(12);
+    expect(updates).toHaveLength(2);
+    expect(updates[1]).toBeNull();
+  });
+
+  it('syncMissionHud: 新档推送第 1 环（启动初始化依赖此推送）', () => {
+    const updates: ({ idx: number; total: number; title: string; desc: string } | null)[] = [];
+    const mm = new MissionManager(new MockStorage(), {
+      onMissionUpdate: (info) => updates.push(info),
+    });
+    mm.syncMissionHud();
+    expect(updates).toEqual([{ idx: 1, total: 12, title: '首次接触', desc: '点击眼前的天体，锁定自动导航目标' }]);
+  });
+
   it('handleParkedEdge: 边沿触发新发现收集与去重回调', () => {
     const storage = new MockStorage();
     let discoveryName = '';

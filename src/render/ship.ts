@@ -167,7 +167,8 @@ export function makeShipMarker(): THREE.Sprite {
 }
 
 const _m4 = new THREE.Matrix4();
-const _ndc = new THREE.Vector3();
+const _toShip = new THREE.Vector3();
+const _camFwd = new THREE.Vector3();
 
 export interface ShipSyncContext {
   probePos: Vec3;
@@ -207,8 +208,13 @@ export function syncShipPose(
   const dz = cam.position.z - probePos[2];
   const dCam = Math.hypot(dx, dy, dz) || 1e-12;
 
-  _ndc.set(probePos[0], probePos[1], probePos[2]).applyMatrix4(cam.matrixWorldInverse);
-  const inFront = _ndc.z < 0 && -_ndc.z < cam.far;
+  // 在相机前方判定：用相机当前位姿做点积，不读 matrixWorldInverse——
+  // 该矩阵只在 render 阶段刷新，永远滞后一帧；高时间倍率下船的帧位移
+  // 远大于跟拍视距，滞后平面会把船误判到相机背后，亚像素 ◇ 标记随轨道
+  // 弯曲闪烁/常灭
+  _toShip.set(probePos[0] - cam.position.x, probePos[1] - cam.position.y, probePos[2] - cam.position.z);
+  _camFwd.set(0, 0, -1).applyQuaternion(cam.quaternion);
+  const inFront = _toShip.dot(_camFwd) > 0 && dCam < cam.far;
   const pxR = (shipR / dCam / Math.tan((cam.fov * Math.PI) / 360)) * (viewportHeight / 2);
   const fade = Math.min(1, Math.max(0, (14 - pxR) / 10));
 

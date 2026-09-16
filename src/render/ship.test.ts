@@ -32,6 +32,7 @@ import {
   syncShipPose,
   updateDynamicNearPlane,
   updateShipFlame,
+  type ShipSyncContext,
 } from './ship.js';
 
 describe('Ship Renderer', () => {
@@ -88,6 +89,35 @@ describe('Ship Renderer', () => {
       viewportHeight: 1080,
       chaseCamMode: 'cockpit',
     });
+    expect(marker.visible).toBe(false);
+  });
+
+  it('亚像素光标前方判定用相机当前位姿，不依赖渲染时才刷新的矩阵', () => {
+    const ship = makeShip();
+    const marker = makeShipMarker();
+    const cam = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
+    // 从未渲染过（matrixWorldInverse 仍是初始值）——只更新 position/quaternion，
+    // 模拟主循环中 syncShipPose 先于 render 执行的真实时序
+    cam.position.set(0, 0, 100);
+    cam.lookAt(0, 0, 0);
+
+    const ctx: ShipSyncContext = {
+      probePos: [0, 0, 0],
+      probeForward: [0, 0, -1],
+      probeRight: [1, 0, 0],
+      probeUp: [0, 1, 0],
+      kmPerUnit: 149597870.7,
+      cam,
+      viewportHeight: 1080,
+      chaseCamMode: 'chase',
+    };
+    syncShipPose(ship, marker, ctx);
+    // 相机朝船看 → 光标可见（高倍率下船的帧位移远大于跟拍视距也稳定）
+    expect(marker.visible).toBe(true);
+
+    // 相机背对船（环视别处）→ 不显示
+    cam.lookAt(0, 0, 500);
+    syncShipPose(ship, marker, ctx);
     expect(marker.visible).toBe(false);
   });
 
