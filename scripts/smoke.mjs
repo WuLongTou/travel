@@ -217,10 +217,10 @@ async function main() {
   }
 
   // 3.9 拉远缩放：船尺度恒定（真实物体）+ 亚像素 ◇ 标记接管可见性。
-  // headless 下 rAF 节流，标记在 zoomBy 后数帧才翻转——轮询等待而非定长休眠
+  // headless 下 rAF 节流，标记在 zoomBy 平滑追赶到位后才翻转——轮询等待而非定长休眠
   evalJS(`window.__universe.chaseCam.zoomBy(200); return 'ok';`);
   let markerShown = false;
-  for (let i = 0; i < 30 && !markerShown; i++) {
+  for (let i = 0; i < 50 && !markerShown; i++) {
     await sleep(100);
     markerShown = evalJS(`return window.__universe.shipMarker.visible;`) === true;
   }
@@ -233,7 +233,48 @@ async function main() {
   } else {
     console.log('  ✓ 拉远 200×：船尺度恒定不放大，亚像素 ◇ 标记显示');
   }
-  evalJS(`window.__universe.chaseCam.zoomBy(1 / 200); return 'ok';`);
+
+  // 3.9b 一键回到飞行器视角：点击 HUD 按钮立即恢复追尾视角与默认视距
+  evalJS(`document.getElementById('btn-reset-view').click(); return 'ok';`);
+  await sleep(200);
+  const resetState = evalJS(`
+    const u = window.__universe;
+    return JSON.stringify({
+      mode: u.chaseCam.mode,
+      dist: u.chaseCam.followDist,
+      expectDist: (0.008 / u.world.kmPerUnit) * 12,
+      panLen: u.chaseCam.panOffset.length(),
+      controlMode: u.controlMode,
+    });
+  `);
+  if (resetState.mode !== 'chase' || Math.abs(resetState.dist - resetState.expectDist) > resetState.expectDist * 1e-4 || resetState.panLen > 1e-6) {
+    failures.push(`一键回到飞船按钮: ${JSON.stringify(resetState)}`);
+  } else {
+    console.log('  ✓ 一键回到飞船：点击按钮立即恢复追尾模式、清空平移并重置视距');
+  }
+
+  // 测试在上帝视角下按 Z 键一键回飞船
+  evalJS(`window.__universe.input.keys.add('g'); return 'ok';`);
+  await sleep(100);
+  evalJS(`window.__universe.input.keys.delete('g'); return 'ok';`);
+  await sleep(200);
+  const isGod = evalJS(`return window.__universe.controlMode === 'god';`);
+  evalJS(`window.__universe.input.keys.add('z'); return 'ok';`);
+  await sleep(100);
+  evalJS(`window.__universe.input.keys.delete('z'); return 'ok';`);
+  await sleep(200);
+  const afterZ = evalJS(`
+    const u = window.__universe;
+    return JSON.stringify({
+      controlMode: u.controlMode,
+      mode: u.chaseCam.mode,
+    });
+  `);
+  if (!isGod || afterZ.controlMode !== 'auto' || afterZ.mode !== 'chase') {
+    failures.push(`上帝视角按 Z 一键回飞船: ${JSON.stringify({ isGod, ...afterZ })}`);
+  } else {
+    console.log('  ✓ 上帝视角按 Z：一键退出自由漫游并回到飞行器视角');
+  }
   await sleep(150);
 
   // 3.10 右键直接掌舵：右键按住 + 鼠标右移 → 机头右转（yaw 增大）。

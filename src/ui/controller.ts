@@ -7,6 +7,7 @@ export interface UICallbacks {
   onNav?: (worldId: string) => void;
   onDiveTo?: (entity: import('../types.js').Entity) => void;
   onInfoClose?: () => void;
+  onResetView?: () => void;
 }
 
 export class UI {
@@ -31,10 +32,25 @@ export class UI {
       'pause-menu','btn-pause-resume','btn-pause-settings','btn-pause-title',
       'victory-screen','victory-stats','btn-victory-continue',
       'btn-pause-codex','pause-stats',
-      'codex-panel','codex-progress','codex-close','codex-body','set-quality'];
+      'codex-panel','codex-progress','codex-close','codex-body','set-quality','btn-reset-view'];
     for (const id of ids) this.el[id] = document.getElementById(id) as HTMLElement;
     this._bindInfoClose();
+    this._bindResetView();
     this._setupHintToggle();
+  }
+
+  private _bindResetView(): void {
+    if (this.el['btn-reset-view']) {
+      this.el['btn-reset-view'].addEventListener('click', () => {
+        this.cb.onResetView?.();
+      });
+    }
+  }
+
+  setResetViewHighlight(highlight: boolean): void {
+    if (this.el['btn-reset-view']) {
+      this.el['btn-reset-view'].classList.toggle('highlight', highlight);
+    }
   }
 
   private _bindInfoClose(): void {

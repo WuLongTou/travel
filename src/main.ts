@@ -21,7 +21,7 @@ import { Navigator } from './core/navigator.js';
 import { UI } from './ui/controller.js';
 import { LAYER_CHAIN } from './content/worlds.js';
 import { WORLD_BY_ID } from './content/schema.js';
-import { shipRadiusUnits } from './content/physics.js';
+import { chaseDistFor, shipRadiusUnits } from './content/physics.js';
 import { UiStateMachine } from './core/game-state.js';
 import { Autopilot } from './core/autopilot.js';
 import { TimeWarpController } from './core/time-warp.js';
@@ -191,15 +191,33 @@ function exitGodMode(): void {
   if (controlMode !== MODE_GOD) return;
   controlMode = MODE_AUTO;
   freeCam.exit();
-  // 相机回到飞船追尾位置
-  chaseCam.resetPan();
-  chaseCam.resetPan(); // _inited 私有：复位经公共接口完成
+  // 退出自由漫游时立即将相机锚定回飞船正后方
+  const defaultDist = curWorld ? chaseDistFor(curWorld.kmPerUnit) : undefined;
+  chaseCam.resetToDefault(defaultDist);
+}
+
+/**
+ * 一键完全复位回飞行器视角：
+ * 无论当前处于上帝视角、座舱视角、环绕视角，或视角存在任意平移/滚轮缩放/偏航，
+ * 一键退出自由漫游，切回第三人称追尾，位移与角度回正，并恢复飞行器默认跟拍视距。
+ */
+function resetToShipView(showToast = true): void {
+  if (controlMode === MODE_GOD) {
+    exitGodMode();
+  } else {
+    const defaultDist = curWorld ? chaseDistFor(curWorld.kmPerUnit) : undefined;
+    chaseCam.resetToDefault(defaultDist);
+  }
+  if (showToast) {
+    toastMsg('🚀 视角已复位回飞行器', 2.5);
+  }
 }
 
 const ui = new UI(engine.renderer, {
   onNav: (wid) => { void nav.enter(wid as LayerId); },
   onDiveTo: (entity) => nav.diveInto(entity),
   onInfoClose: () => { selected = null; },
+  onResetView: () => resetToShipView(),
 });
 // 手柄连接/断开提示（轮询在 renderFrame 中每帧进行）
 window.addEventListener('gamepadconnected', () => toastMsg('🎮 手柄已连接', 3));
@@ -401,6 +419,7 @@ let prevBackslash = false;
 let prevG = false;
 let prevT = false;
 let prevF = false;
+let prevZ = false; // Z / Backspace 键上一帧状态（视角复位边沿）
 let prevO = false; // O 键上一帧状态（设置面板开/关边沿）
 let prevGpView = false; // 手柄 Y 键上一帧状态（切换视角边沿）
 let prevGpPause = false; // 手柄 Start 键上一帧状态（暂停边沿）
@@ -563,6 +582,13 @@ function renderFrame(now: number): void {
     }
     prevT = tDown;
 
+    // Z / Backspace 键（边沿触发）：一键完全复位回飞行器视角（无论当前是上帝视角还是追尾视角）
+    const zDown = input.keys.has('z') || input.keys.has('backspace');
+    if (zDown && !prevZ) {
+      resetToShipView();
+    }
+    prevZ = zDown;
+
     if (controlMode === MODE_GOD) {
       // ===== 上帝视角：相机自由浏览，飞船在背景中继续全自动飞行 =====
       if (steer.steerX !== 0 || steer.steerY !== 0) {
@@ -577,10 +603,6 @@ function renderFrame(now: number): void {
       // 鼠标右键/中键拖拽：屏幕平面的自由平移位移（Pan）
       if (steer.panX !== 0 || steer.panY !== 0) {
         chaseCam.panBy(steer.panX, steer.panY);
-      }
-      // Z / Backspace 键：复位观察焦点与观察视线回飞船正后方
-      if (input.keys.has('z') || input.keys.has('backspace')) {
-        chaseCam.resetPan();
       }
 
       // 右键按住 = 直接掌舵：鼠标增量不经环视相机、直接转机头（灵敏度与
@@ -907,6 +929,15 @@ function renderFrame(now: number): void {
 
   // 动态近裁剪面：真实尺度船 + 贴身视距要求 near 随视距缩放
   updateDynamicNearPlane(engine.camera, controlMode, chaseCam.mode, chaseCam.followDist, curWorld);
+
+  // 视角偏离检测：当处于上帝漫游、非追尾视角、存在平移偏置或视距偏离时，HUD 回到飞船按钮高亮提示
+  const defaultDist = curWorld ? chaseDistFor(curWorld.kmPerUnit) : 1;
+  const isViewDiverged = controlMode === MODE_GOD
+    || chaseCam.mode !== 'chase'
+    || chaseCam.panOffset.lengthSq() > 0.0001
+    || Math.abs(chaseCam.followDist - defaultDist) > defaultDist * 0.25;
+  ui.setResetViewHighlight(!!isViewDiverged);
+
   engine.render(dtReal);
 }
 
@@ -944,9 +975,9 @@ canvas.addEventListener('wheel', (ev) => {
   }
 }, { passive: false });
 
-// 双击画布：快速复位相机焦点回飞船中心
+// 双击画布：快速一键复位回飞行器追尾视角
 canvas.addEventListener('dblclick', () => {
-  chaseCam.resetPan();
+  resetToShipView();
 });
 
 async function boot() {
@@ -968,6 +999,7 @@ async function boot() {
 // 全局调试挂载
 window.__universe = { engine, probe, clock, nav, ui, input, chaseCam, ship, shipMarker, dust, sfx, MISSIONS, events: spaceEvents,
   missionManager,
+  resetToShipView,
   get discovered() { return missionManager.discovered; },
   get crashShake() { return crashShakeT; },
   get renderedFrames() { return renderedFrames; },

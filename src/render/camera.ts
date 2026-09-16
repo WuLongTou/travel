@@ -60,6 +60,22 @@ export class ChaseCam {
     this.orbitPitch = 0.25;
   }
 
+  /**
+   * 完全复位回默认飞行器追尾视角：
+   * 视角模式重置为 chase、平移偏置清零、朝向回正、恢复默认视距
+   */
+  resetToDefault(defaultDist?: number): void {
+    this.mode = 'chase';
+    this.panOffset.set(0, 0, 0);
+    this.orbitYaw = 0;
+    this.orbitPitch = 0.25;
+    if (defaultDist && Number.isFinite(defaultDist) && defaultDist > 0) {
+      this.followDist = THREE.MathUtils.clamp(defaultDist, this.minDist, this.maxDist);
+      this._smDist = this.followDist;
+    }
+    this.userInteracted = false;
+  }
+
   // 环视偏移指数回正：追尾视角按 W 转向时由 main 调用，偏移作为转向指令
   // 消耗掉——转向到位后相机稳定停在新机尾正后方。时间常数 ≈0.29s（3.5/s）
   recenter(dtReal: number): void {
