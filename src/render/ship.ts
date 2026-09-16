@@ -10,6 +10,8 @@
 //   - 两侧细杆天线（后掠）
 import * as THREE from 'three';
 import { makeGlowSprite } from './bodies.js';
+import { shipRadiusUnits } from '../content/physics.js';
+import type { Vec3 } from '../types.js';
 
 export function makeShip() {
   const ship = new THREE.Group();
@@ -162,4 +164,77 @@ export function makeShipMarker(): THREE.Sprite {
   marker.scale.setScalar(0.022); // ≈2.2% 屏高
   marker.renderOrder = 5;
   return marker;
+}
+
+const _m4 = new THREE.Matrix4();
+const _ndc = new THREE.Vector3();
+
+export interface ShipSyncContext {
+  probePos: Vec3;
+  probeForward: Vec3;
+  probeRight: Vec3;
+  probeUp: Vec3;
+  kmPerUnit: number;
+  cam: THREE.PerspectiveCamera;
+  viewportHeight: number;
+  chaseCamMode: string;
+}
+
+/**
+ * 飞船位姿同步（真实尺度）：船模型半长 ≈1 单位，scale = 船真实半径的层单位数
+ * 拉远即按透视缩成尘埃，亚像素时由 shipMarker 菱形光标接管可见性
+ */
+export function syncShipPose(
+  ship: THREE.Object3D,
+  marker: THREE.Sprite,
+  ctx: ShipSyncContext,
+): void {
+  const { probePos, probeForward, probeRight, probeUp, kmPerUnit, cam, viewportHeight, chaseCamMode } = ctx;
+
+  ship.position.set(probePos[0], probePos[1], probePos[2]);
+  _m4.makeBasis(
+    new THREE.Vector3(probeRight[0], probeRight[1], probeRight[2]),
+    new THREE.Vector3(probeUp[0], probeUp[1], probeUp[2]),
+    new THREE.Vector3(-probeForward[0], -probeForward[1], -probeForward[2]),
+  );
+  ship.quaternion.setFromRotationMatrix(_m4);
+  const shipR = kmPerUnit > 0 ? shipRadiusUnits(kmPerUnit) : 1e-3;
+  ship.scale.setScalar(shipR);
+
+  // 亚像素标记：船投影角径 <14px 渐显（4px 全亮）；座舱视角船体隐藏，标记同步隐藏
+  const dx = cam.position.x - probePos[0];
+  const dy = cam.position.y - probePos[1];
+  const dz = cam.position.z - probePos[2];
+  const dCam = Math.hypot(dx, dy, dz) || 1e-12;
+
+  _ndc.set(probePos[0], probePos[1], probePos[2]).applyMatrix4(cam.matrixWorldInverse);
+  const inFront = _ndc.z < 0 && -_ndc.z < cam.far;
+  const pxR = (shipR / dCam / Math.tan((cam.fov * Math.PI) / 360)) * (viewportHeight / 2);
+  const fade = Math.min(1, Math.max(0, (14 - pxR) / 10));
+
+  marker.position.set(probePos[0], probePos[1], probePos[2]);
+  marker.visible = inFront && fade > 0 && chaseCamMode !== 'cockpit';
+  (marker.material as THREE.SpriteMaterial).opacity = fade * 0.9;
+}
+
+/**
+ * 动态近裁剪面：真实尺度船 + 贴身视距要求 near 随视距缩放
+ * 对数深度缓冲覆盖 1e-12~2e7 范围。上帝视角按层半径走，座舱模式按船径口径
+ */
+export function updateDynamicNearPlane(
+  camera: THREE.PerspectiveCamera,
+  controlMode: string,
+  chaseCamMode: string,
+  followDist: number,
+  world: { kmPerUnit: number; worldRadius: number } | null,
+): void {
+  const shipR = world ? shipRadiusUnits(world.kmPerUnit) : 1e-3;
+  const refDist = controlMode === 'god'
+    ? (world ? world.worldRadius * 1e-5 : 1e-2)
+    : (chaseCamMode === 'cockpit' ? shipR * 2 : followDist);
+  const near = Math.min(Math.max(refDist * 0.05, 1e-12), 1e6);
+  if (Math.abs(camera.near - near) > near * 1e-6) {
+    camera.near = near;
+    camera.updateProjectionMatrix();
+  }
 }

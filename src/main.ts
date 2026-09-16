@@ -43,7 +43,7 @@ import { ChaseCam, VIEW_NAMES } from './render/camera.js';
 import { FreeCam } from './render/freecam.js';
 import { updateLabelFades } from './render/labels.js';
 import { TrailRibbon } from './render/trail.js';
-import { makeShip, makeShipMarker, updateShipFlame } from './render/ship.js';
+import { makeShip, makeShipMarker, syncShipPose, updateDynamicNearPlane, updateShipFlame } from './render/ship.js';
 import { DustFlow } from './render/dust.js';
 import { SpaceEvents } from './render/events.js';
 
@@ -73,8 +73,6 @@ const shipMarker = makeShipMarker();
 engine.scene.add(shipMarker);
 const dust = new DustFlow();
 engine.scene.add(dust.lines);
-const _m4 = new THREE.Matrix4();
-const _ndc = new THREE.Vector3();
 
 const input = new Input(canvas);
 const sfx = new SoundFX();
@@ -438,38 +436,6 @@ function simulate(dtReal: number, dtSim: number): void {
   curWorld.update(dtSim, clock, probe, dtReal);
 }
 
-// 飞船位姿同步（真实尺度）：船模型半长 ≈1 单位，scale = 船真实半径的
-// 层单位数——船是一切层、一切缩放下尺寸恒定的真实物体，拉远即按透视
-// 缩成尘埃（太阳系层 ~10 m = 5.4e-11 AU，星际层 8.5e-16 ly），亚像素时
-// 由 shipMarker 菱形光标接管可见性（depthTest 被行星自然遮挡）
-function syncShip(): void {
-  ship.position.set(probe.pos[0], probe.pos[1], probe.pos[2]);
-  const f = probe.forward(), r = probe.right(), u = probe.up();
-  _m4.makeBasis(
-    new THREE.Vector3(r[0], r[1], r[2]),
-    new THREE.Vector3(u[0], u[1], u[2]),
-    new THREE.Vector3(-f[0], -f[1], -f[2]),
-  );
-  ship.quaternion.setFromRotationMatrix(_m4);
-  const shipR = curWorld ? shipRadiusUnits(curWorld.kmPerUnit) : 1e-3;
-  ship.scale.setScalar(shipR);
-
-  // 亚像素标记：船投影角径 <14px 渐显（4px 全亮）；座舱视角船体本就
-  // 隐藏，标记同步隐藏。相机空间 z<0 判定「在相机前方」——不能 用 NDC
-  // z<1 判定：滚轮拉远瞬间 near 先扩大、相机距离平滑追赶，船短暂处在
-  // near 面之前被裁剪，恰恰是最需要标记的时刻
-  const cam = engine.camera;
-  const dx = cam.position.x - probe.pos[0], dy = cam.position.y - probe.pos[1], dz = cam.position.z - probe.pos[2];
-  const dCam = Math.hypot(dx, dy, dz) || 1e-12;
-  _ndc.set(probe.pos[0], probe.pos[1], probe.pos[2]).applyMatrix4(cam.matrixWorldInverse);
-  const inFront = _ndc.z < 0 && -_ndc.z < cam.far;
-  const pxR = shipR / dCam / Math.tan((cam.fov * Math.PI) / 360) * (canvas.clientHeight / 2);
-  const fade = Math.min(1, Math.max(0, (14 - pxR) / 10));
-  shipMarker.position.set(probe.pos[0], probe.pos[1], probe.pos[2]);
-  shipMarker.visible = inFront && fade > 0 && chaseCam.mode !== 'cockpit';
-  (shipMarker.material as THREE.SpriteMaterial).opacity = fade * 0.9;
-}
-
 function renderFrame(now: number): void {
   const elapsed = now - lastFrame;
   if (elapsed < FRAME_MIN_MS) return; // 帧率上限：未到 60fps 间隔，跳过本 tick
@@ -802,7 +768,16 @@ function renderFrame(now: number): void {
     // 飞船模型可见性与位姿同步（上帝视角下无论休眠视角是哪种都保持可见）
     ship.visible = controlMode === MODE_GOD || chaseCam.mode !== 'cockpit';
     if (ship.visible) {
-      syncShip();
+      syncShipPose(ship, shipMarker, {
+        probePos: probe.pos,
+        probeForward: probe.forward(),
+        probeRight: probe.right(),
+        probeUp: probe.up(),
+        kmPerUnit: curWorld?.kmPerUnit ?? 0,
+        cam: engine.camera,
+        viewportHeight: canvas.clientHeight,
+        chaseCamMode: chaseCam.mode,
+      });
       updateShipFlame(ship, probe.thrustOn ? 1 : 0, isBoosting);
     } else {
       shipMarker.visible = false; // 座舱视角：船体与标记一并隐藏
@@ -942,21 +917,8 @@ function renderFrame(now: number): void {
     updateLabelFades(curWorld.group, engine.camera, curWorld.labelFadeDist || curWorld.viewDist * 1.6);
   }
 
-  // 动态近裁剪面：真实尺度船（太阳系层 5.4e-11 AU）+ 贴身视距要求 near
-  // 随视距缩放（固定 1e-7 会把船整体裁掉）；对数深度缓冲覆盖 1e-12~2e7
-  // 的 19 个数量级深度范围。上帝视角相机行程按层半径走，near 取层半径
-  // 的 1e-5；座舱模式眼位贴船，按船径口径
-  {
-    const shipR = curWorld ? shipRadiusUnits(curWorld.kmPerUnit) : 1e-3;
-    const refDist = controlMode === MODE_GOD
-      ? (curWorld ? curWorld.worldRadius * 1e-5 : 1e-2)
-      : (chaseCam.mode === 'cockpit' ? shipR * 2 : chaseCam.followDist);
-    const near = Math.min(Math.max(refDist * 0.05, 1e-12), 1e6);
-    if (Math.abs(engine.camera.near - near) > near * 1e-6) {
-      engine.camera.near = near;
-      engine.camera.updateProjectionMatrix();
-    }
-  }
+  // 动态近裁剪面：真实尺度船 + 贴身视距要求 near 随视距缩放
+  updateDynamicNearPlane(engine.camera, controlMode, chaseCam.mode, chaseCam.followDist, curWorld);
   engine.render(dtReal);
 }
 
