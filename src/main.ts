@@ -27,6 +27,8 @@ import { Autopilot } from './core/autopilot.js';
 import { TimeWarpController } from './core/time-warp.js';
 import { ObjectPicker } from './render/picker.js';
 import { TourController } from './core/tour.js';
+import { MissionManager } from './core/mission-manager.js';
+import { presentHud } from './ui/hud-presenter.js';
 // 世界模块（副作用自注册）
 import './content/world-solar.js';
 import './content/world-stellar.js';
@@ -34,7 +36,7 @@ import './content/world-galaxy.js';
 import './content/world-local.js';
 import './content/world-super.js';
 import './content/world-cosmos.js';
-import { formatKm, lightTravelText, unitRulerText, C_KM_S } from './util/units.js';
+import { unitRulerText } from './util/units.js';
 import type { Entity, GameWorld, LayerId, Vec3 } from './types.js';
 import type { GamepadState } from './core/input.js';
 import { ChaseCam, VIEW_NAMES } from './render/camera.js';
@@ -115,30 +117,33 @@ let curWorld: GameWorld | null = null;
 let selected: Entity | null = null; // 当前选中的目标天体
 let navDbg: Record<string, unknown> | null = null; // 自动导航诊断快照（__universe.dbg 暴露，无头验证用）
 let hoveredId: string | null = null;
-let missionIdx = 0; // 当前主线任务下标（MISSIONS 线性推进）
-const discovered = new Set<string>(); // 已泊入发现的天体（收集玩法，localStorage 持久化）
-const PROGRESS_KEY = 'universe-roam-progress';
-// 启动时恢复进度（任务下标 + 发现列表）；格式变更/损坏则静默用默认值
-try {
-  const saved = JSON.parse(localStorage.getItem(PROGRESS_KEY) || 'null');
-  if (saved && Number.isInteger(saved.missionIdx) && saved.missionIdx >= 0 && saved.missionIdx <= MISSIONS.length) {
-    missionIdx = saved.missionIdx;
-  }
-  if (saved && Array.isArray(saved.discovered)) saved.discovered.forEach((id: string) => discovered.add(id));
-} catch { /* 隐私模式等存储不可用：忽略，进度仅会话内有效 */ }
-function saveProgress() {
-  try {
-    localStorage.setItem(PROGRESS_KEY, JSON.stringify({ missionIdx, discovered: [...discovered] }));
-  } catch { /* 存储不可用：忽略 */ }
-}
-let prevParked = false; // 上一帧是否处于伴飞/悬停泊车态（边沿触发泊车音与新发现）
+const missionManager = new MissionManager(localStorage, {
+  onMissionDone: (title) => {
+    toastMsg(`✅ 任务完成：${title}`);
+    sfx.chime();
+  },
+  onAllMissionsDone: () => {
+    setTimeout(showVictoryScreen, 1400);
+  },
+  onNewDiscovery: (name, count) => {
+    ui.setDiscoveries(count);
+    ui.pingCrosshair();
+    toastMsg(`🛰 新发现：${name}`);
+  },
+  onDock: () => {
+    sfx.dock();
+  },
+  onMissionUpdate: (info) => {
+    ui.setMission(info);
+  },
+  onDiscoveriesCountChange: (count) => {
+    ui.setDiscoveries(count);
+  },
+});
+
 let prevCrashTime = 0; // 最近一次撞毁时间戳（边沿触发撞毁音效与红闪）
 let crashShakeT = 0; // 撞毁震屏剩余时长（秒，随时间衰减的随机相机偏移）
 let prevM = false; // M 键上一帧状态（静音切换边沿）
-let slingWellId: string | null = null; // 引力弹弓计速：当前主导井实体 id
-let slingVEntry = 0; // 入井速度（km/s）
-let slingVPeak = 0; // 井内速度峰值（km/s）
-let everLeft = false; // 是否曾离开太阳系层（「回到家园」任务判定用）
 let edgeHintShown = false; // 层界浮升提示每层只提示一次（换层重置）
 
 function clearSelection(): void {
@@ -234,15 +239,7 @@ function openSettings() {
 // 「重新开始」清空进度并重载页面。存档概览读取抽成函数，游戏中
 // 「回到标题」（暂停菜单）复用同一入口刷新进度
 function titleProgressSnapshot() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(PROGRESS_KEY) || 'null');
-    const idx = saved && Number.isInteger(saved.missionIdx) ? saved.missionIdx : 0;
-    const disc = saved && Array.isArray(saved.discovered) ? saved.discovered.length : 0;
-    return {
-      hasProgress: idx > 0,
-      progressText: idx > 0 ? `任务进度 ${idx}/12 · 已发现 ${disc} 个天体` : '',
-    };
-  } catch { return { hasProgress: false, progressText: '' }; }
+  return missionManager.getProgressSnapshot();
 }
 const uiState = new UiStateMachine({
   clock,
@@ -261,7 +258,7 @@ ui.setupTitleScreen({
   onStart: () => { sfx.ensure(); uiState.start(); },
   onContinue: () => { sfx.ensure(); uiState.start(); },
   onReset: () => {
-    try { localStorage.removeItem(PROGRESS_KEY); } catch { /* 忽略 */ }
+    missionManager.reset();
     location.reload();
   },
   onOpenSettings: () => openSettings(),
@@ -285,7 +282,7 @@ function openCodex() {
     let items: { name: string; found: boolean }[] = [];
     let f = 0, total = 0;
     if (snap) {
-      items = [...snap.entries].map(([eid, name]) => ({ name, found: discovered.has(eid) }));
+      items = [...snap.entries].map(([eid, name]) => ({ name, found: missionManager.discovered.has(eid) }));
       f = items.filter((it) => it.found).length;
       total = snap.total;
     }
@@ -296,7 +293,7 @@ function openCodex() {
       explored: !!snap,
     };
   });
-  const prog = codexProgress(discovered);
+  const prog = codexProgress(missionManager.discovered);
   ui.showCodex(layers, `已收录 ${prog.found} / ${prog.total}`);
 }
 
@@ -308,7 +305,7 @@ function openPauseMenu() {
   // 统计行：任务进度 / 发现 / 航程（打开瞬间快照）
   const mm = String(Math.floor(flightSeconds / 60)).padStart(2, '0');
   const ss = String(Math.floor(flightSeconds % 60)).padStart(2, '0');
-  ui.setPauseStats(`任务 <b>${missionIdx}/${MISSIONS.length}</b> · 已发现 <b>${discovered.size}</b> · 航程 <b>${mm}:${ss}</b>`);
+  ui.setPauseStats(`任务 <b>${missionManager.missionIdx}/${MISSIONS.length}</b> · 已发现 <b>${missionManager.discovered.size}</b> · 航程 <b>${mm}:${ss}</b>`);
   ui.showPauseMenu();
 }
 function closePauseMenu() {
@@ -329,12 +326,12 @@ function showVictoryScreen() {
   if (!uiState.showVictory()) return;
   if (document.pointerLockElement) document.exitPointerLock();
   input.keys.clear();
-  const moons = [...discovered].filter((id) => MOON_IDS.has(id)).length;
+  const moons = [...missionManager.discovered].filter((id) => MOON_IDS.has(id)).length;
   const mm = String(Math.floor(flightSeconds / 60)).padStart(2, '0');
   const ss = String(Math.floor(flightSeconds % 60)).padStart(2, '0');
   ui.showVictory([
     ['任务链', `${MISSIONS.length} / ${MISSIONS.length}`],
-    ['发现天体', `${discovered.size}`],
+    ['发现天体', `${missionManager.discovered.size}`],
     ['卫星巡礼', `${moons} / ${MOON_IDS.size}`],
     ['航行时长', `${mm}:${ss}`],
   ] as [string, string][]);
@@ -385,6 +382,7 @@ nav.onBeforeWorldChange = (world) => {
 nav.onWorldChanged = (world, idx) => {
   curWorld = world;
   registerLayerEntities(world.id, world.entities); // 图鉴收录本层可发现天体
+  missionManager.onLayerChanged(idx); // 换层通知（记录是否离开太阳系）
   timeWarp.resetToAuto(); // 换层恢复自动时间倍率
   edgeHintShown = false; // 新层重新允许层界提示
   engine.loadWorld(world, world.group, []);
@@ -439,8 +437,6 @@ function simulate(dtReal: number, dtSim: number): void {
   if (!curWorld || !curWorld.update) return;
   curWorld.update(dtSim, clock, probe, dtReal);
 }
-
-function dist3(a: Vec3, b: Vec3): number { return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]); }
 
 // 飞船位姿同步（真实尺度）：船模型半长 ≈1 单位，scale = 船真实半径的
 // 层单位数——船是一切层、一切缩放下尺寸恒定的真实物体，拉远即按透视
@@ -840,57 +836,18 @@ function renderFrame(now: number): void {
         toastMsg(`接近层界 · 继续向外将浮升至「${WORLD_BY_ID[nextId].name}」`, 6);
       }
     }
-    if (nav.idx >= 1) everLeft = true;
-
-    // 引力弹弓计速：进入新主导井记录入场速度，井内持续更新速度峰值——
-    // 「井内峰值增速」即挑战判定口径（自动巡航入井后只减速，永远不触发）
-    {
-      const wid = probe.dominantWell && probe.dominantWell.ref ? probe.dominantWell.ref.id : null;
-      if (wid !== slingWellId) {
-        slingWellId = wid;
-        slingVEntry = probe.speedKmS();
-        slingVPeak = slingVEntry;
-      } else if (wid) {
-        slingVPeak = Math.max(slingVPeak, probe.speedKmS());
-      }
-    }
-
-    // 任务链推进：条件满足即完成并 toast；全部完成转自由航行态
-    if (missionIdx < MISSIONS.length) {
-      const sun = curWorld.entities.find((e) => e.id === 'sun');
-      const ctx = {
-        layer: curWorld.id, idx: nav.idx,
-        selectedId: selected ? selected.id : null,
-        selType: selected ? selected.type : null,
-        branch: (navDbg?.branch as string) ?? null,
-        distToSel: selected ? dist3(probe.pos, selected.pos) : Infinity,
-        distToSun: sun ? dist3(probe.pos, sun.pos) : Infinity,
-        rFromCenter: Math.hypot(probe.pos[0], probe.pos[1], probe.pos[2]),
-        everLeft,
-        wellId: probe.dominantWell && probe.dominantWell.ref ? probe.dominantWell.ref.id : null,
-        wellSpeedGain: slingWellId ? Math.max(0, slingVPeak - slingVEntry) : 0,
-        targetRadius: selected ? selected.pickRadius : 0,
-        moonsDiscovered: [...discovered].filter((id) => MOON_IDS.has(id)).length,
-      };
-      if (MISSIONS[missionIdx].done(ctx)) {
-        toastMsg(`✅ 任务完成：${MISSIONS[missionIdx].title}`);
-        sfx.chime();
-        missionIdx++;
-        saveProgress();
-        if (missionIdx === MISSIONS.length) {
-          // 全通关：让末环完成 toast 先被看到，再进结算庆典
-          setTimeout(showVictoryScreen, 1400);
-        }
-      }
-    }
-    if (missionIdx < MISSIONS.length) {
-      ui.setMission({ idx: missionIdx + 1, total: MISSIONS.length,
-        title: MISSIONS[missionIdx].title, desc: MISSIONS[missionIdx].desc });
-    } else {
-      ui.setMission(null);
-    }
-    // 启动恢复后挂件与计数需要一次初始化
-    ui.setDiscoveries(discovered.size);
+    // 任务链与引力弹弓测速推进
+    const sun = curWorld.entities.find((e) => e.id === 'sun');
+    missionManager.tick({
+      layerId: curWorld.id,
+      layerIdx: nav.idx,
+      selected,
+      navBranch: (navDbg?.branch as string) ?? null,
+      probePos: probe.pos,
+      probeSpeedKmS: probe.speedKmS(),
+      dominantWellRefId: probe.dominantWell && probe.dominantWell.ref ? probe.dominantWell.ref.id : null,
+      sunPos: sun ? sun.pos : null,
+    });
 
     // 天体自转公转动力学推进
     clock.advance(dtReal);
@@ -905,77 +862,29 @@ function renderFrame(now: number): void {
     // ==========================================
     // HUD 真实天文物理仪表盘
     // ==========================================
-    const spKmS = probe.speedKmS();
-    const cfrac = spKmS / C_KM_S;
-    // 速度自适应单位：亚 km/s 的近景机动用 m/s 表达，避免显示「0 km/s」
-    const spText = spKmS >= C_KM_S
-      ? '≈' + cfrac.toFixed(2) + ' c'
-      : spKmS >= 1
-        ? Math.max(spKmS, 0).toLocaleString('zh-CN', { maximumFractionDigits: 0 }) + ' km/s'
-        : Math.max(spKmS * 1000, 0).toFixed(spKmS * 1000 >= 100 ? 0 : 2) + ' m/s';
-
-    let distText = '无目标（点击天体锁定）';
-    const showEnt = selected || (hoveredId && curWorld.entities.find((e) => e.id === hoveredId));
-    if (showEnt) {
-      const dkm = dist3(probe.pos, showEnt.pos) * curWorld.kmPerUnit;
-      distText = `${showEnt.name} · ${formatKm(dkm)} · 光 ${lightTravelText(dkm)}`;
-      // 锁定的目标可下潜时提示 F 快捷键（与信息卡「进入…」按钮同效）
-      if (selected === showEnt && showEnt.dive) distText += ' · F 下潜进入';
-    }
-
     const viewName = controlMode === MODE_GOD ? '上帝视角' : (VIEW_NAMES[chaseCam.mode] || '');
     const godSpeed = controlMode === MODE_GOD ? ` · 移速 ${freeCam.speed.toPrecision(2)} u/s` : '';
-    let modeText = `${flightStatus} · ${viewName}${godSpeed}`;
-
-    // 真实开普勒轨道能量判定与引力状态
-    if (probe.dominantWell) {
-      const well = probe.dominantWell;
-      const c = (well.ref ? well.ref.pos : well.center)!;
-      const r = Math.hypot(probe.pos[0] - c[0], probe.pos[1] - c[1], probe.pos[2] - c[2]) || 1;
-      const speedSq = probe.vel[0] ** 2 + probe.vel[1] ** 2 + probe.vel[2] ** 2;
-      // 比机械能 E = v^2/2 - GM/r
-      const energy = speedSq / 2 - well.GM / r;
-      const orbitState = energy < 0 ? '束缚轨道' : '逃逸轨道';
-      modeText = `${flightStatus} · ${well.name} (${orbitState}) · ${viewName}${godSpeed}`;
-    }
-
-    // 真实物理碰撞损毁提示（发生撞击后高亮反馈）
     const nowSec = performance.now() / 1000;
-    if (probe.crashEvent && nowSec - probe.lastCrashTime < 4.0) {
-      modeText = `⚠ 撞入 ${probe.crashEvent.name}！已在安全轨道部署`;
-    }
-
-    // 大巡游进度前缀（系统提示已拆分到独立 toast 元素）
-    if (tourCtrl.active) {
-      const tourStatus = tourCtrl.formatStatus();
-      if (tourStatus) modeText = `${tourStatus} · ${modeText}`;
-    }
-    // 轨道行：主导井 + 束缚/逃逸能量态独立展示
-    let orbitText = '—';
-    if (probe.dominantWell) {
-      const well = probe.dominantWell;
-      const c = (well.ref ? well.ref.pos : well.center)!;
-      const r = Math.hypot(probe.pos[0] - c[0], probe.pos[1] - c[1], probe.pos[2] - c[2]) || 1;
-      const speedSq = probe.vel[0] ** 2 + probe.vel[1] ** 2 + probe.vel[2] ** 2;
-      orbitText = `${well.name} · ${speedSq / 2 - well.GM / r < 0 ? '束缚' : '逃逸'}轨道`;
-    }
+    const hudData = presentHud({
+      probePos: probe.pos,
+      probeVel: probe.vel,
+      speedKmS: probe.speedKmS(),
+      dominantWell: probe.dominantWell,
+      selected,
+      hoveredEntity: hoveredId ? curWorld.entities.find((e) => e.id === hoveredId) ?? null : null,
+      kmPerUnit: curWorld.kmPerUnit,
+      flightStatus,
+      viewName,
+      godSpeed,
+      crashEventName: probe.crashEvent?.name ?? null,
+      isRecentlyCrashed: !!probe.crashEvent && nowSec - probe.lastCrashTime < 4.0,
+      tourStatusPrefix: tourCtrl.active ? tourCtrl.formatStatus() : '',
+    });
+    ui.setHud(hudData);
 
     // 泊车边沿：进圈一次性的泊车音 + 新发现收集（同一目标只记一次）
     const parked = navDbg ? (navDbg.branch === 'rendezvous' || navDbg.branch === 'station') : false;
-    if (parked && !prevParked && selected) {
-      // 弹弓基线重置：以泊入时的匹配速度为起点，此后井内加速才算「增速」
-      slingVEntry = probe.speedKmS();
-      slingVPeak = slingVEntry;
-      if (!discovered.has(selected.id)) {
-        discovered.add(selected.id);
-        ui.setDiscoveries(discovered.size);
-        ui.pingCrosshair(); // 准星扩散脉冲：收集反馈
-        toastMsg(`🛰 新发现：${selected.name}`);
-        saveProgress();
-      }
-      sfx.dock();
-    }
-    prevParked = parked;
+    missionManager.handleParkedEdge(parked, selected);
 
     // 撞毁边沿：爆响 + 红闪 + 震屏
     if (probe.lastCrashTime !== prevCrashTime) {
@@ -1007,7 +916,6 @@ function renderFrame(now: number): void {
         : 0,
     );
 
-    ui.setHud({ speedText: spText, distText, modeText, orbitText });
     let rateLabel = clock.paused
       ? '已暂停'
       : (timeWarp.mode === 'auto' ? clock.rateLabel() : (timeWarp.currentLabel || `×${clock.rate}`));
@@ -1108,7 +1016,9 @@ async function boot() {
 // （窗口 resize 由 engine 构造函数内注册的监听统一处理）
 
 // 全局调试挂载
-window.__universe = { engine, probe, clock, nav, ui, input, chaseCam, ship, shipMarker, dust, sfx, discovered, MISSIONS, events: spaceEvents,
+window.__universe = { engine, probe, clock, nav, ui, input, chaseCam, ship, shipMarker, dust, sfx, MISSIONS, events: spaceEvents,
+  missionManager,
+  get discovered() { return missionManager.discovered; },
   get crashShake() { return crashShakeT; },
   get renderedFrames() { return renderedFrames; },
   get world() { return nav.world; },
@@ -1127,14 +1037,12 @@ window.__universe = { engine, probe, clock, nav, ui, input, chaseCam, ship, ship
   // 测试用：直接设置任务进度（后期任务的无头验证入口）；设到满环即
   // 触发通关结算（与真实通关同一庆典路径）
   setMission(i: number): boolean {
-    if (Number.isInteger(i) && i >= 0 && i <= MISSIONS.length) {
-      const was = missionIdx;
-      missionIdx = i;
-      saveProgress();
-      if (i === MISSIONS.length && was < MISSIONS.length) setTimeout(showVictoryScreen, 200);
-      return true;
+    const was = missionManager.missionIdx;
+    const ok = missionManager.setMission(i);
+    if (ok && i === MISSIONS.length && was < MISSIONS.length) {
+      setTimeout(showVictoryScreen, 200);
     }
-    return false;
+    return ok;
   },
   openPauseMenu,
   closePauseMenu,
