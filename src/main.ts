@@ -29,6 +29,7 @@ import { ObjectPicker } from './render/picker.js';
 import { TourController } from './core/tour.js';
 import { MissionManager } from './core/mission-manager.js';
 import { presentHud } from './ui/hud-presenter.js';
+import { SettingsManager } from './core/settings.js';
 // 世界模块（副作用自注册）
 import './content/world-solar.js';
 import './content/world-stellar.js';
@@ -76,26 +77,13 @@ engine.scene.add(dust.lines);
 
 const input = new Input(canvas);
 const sfx = new SoundFX();
-// 用户设置（音量/震屏/画质）：localStorage 持久化，缺失用默认值
-const SETTINGS_KEY = 'universe-roam-settings';
-const QUALITIES = ['low', 'medium', 'high'] as const;
-type Quality = (typeof QUALITIES)[number];
-function loadSettings() {
-  try {
-    const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-    return {
-      volume: Number.isFinite(s.volume) ? Math.min(1, Math.max(0, s.volume)) : 0.5,
-      shake: s.shake !== false,
-      quality: (QUALITIES as readonly string[]).includes(s.quality) ? s.quality as Quality : 'high',
-    };
-  } catch { return { volume: 0.5, shake: true, quality: 'high' as Quality }; }
-}
-function saveSettings() {
-  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* 忽略 */ }
-}
-const settings = loadSettings();
-sfx.volume = settings.volume;
-engine.setQuality(settings.quality); // 画质档即时生效（high = 出厂默认观感）
+// 用户设置（音量/震屏/画质）：localStorage 持久化与响应式联动
+const settingsMgr = new SettingsManager(typeof localStorage !== 'undefined' ? localStorage : null, {
+  onVolumeChange: (v) => { sfx.setVolume(v); },
+  onQualityChange: (q) => { engine.setQuality(q); },
+});
+settingsMgr.applyInitial();
+const settings = settingsMgr.settings;
 // 音频需用户手势后才能启动：任意按键/点击时初始化或恢复（标题画面的
 // 「开始航行」是标准入口——真实点击手势，音频随之解锁）
 window.addEventListener('keydown', () => sfx.ensure());
@@ -226,9 +214,9 @@ function openSettings() {
     volume: Math.round(settings.volume * 100),
     shake: settings.shake,
     quality: settings.quality,
-    onVolume: (v) => { settings.volume = v / 100; sfx.setVolume(settings.volume); saveSettings(); },
-    onShake: (on) => { settings.shake = on; saveSettings(); },
-    onQuality: (q) => { settings.quality = q; engine.setQuality(q); saveSettings(); },
+    onVolume: (v) => { settingsMgr.setVolume(v / 100); },
+    onShake: (on) => { settingsMgr.setShake(on); },
+    onQuality: (q) => { settingsMgr.setQuality(q); },
     onClose: () => ui.hideSettings(),
   });
 }
