@@ -51,6 +51,41 @@ export class Input {
   private _dragDist = 0;
   pointerLocked = false;
   onLockChange: ((locked: boolean) => void) | null = null; // UI 提示回调
+
+  // ---- 触屏 ----
+  // 粗指针（手机/平板）或无精确指针的触屏设备；触屏本有 fine 指针，
+  // 判为桌面（键鼠照常，不显示虚拟控件）。URL 带 ?touch 可在任何设备
+  // 强制触屏模式（自动化测试 / 桌面预览虚拟控件布局）
+  readonly isTouch: boolean =
+    (typeof location !== 'undefined' && new URLSearchParams(location.search).has('touch')) ||
+    (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches) ||
+    (navigator.maxTouchPoints > 0 && !(typeof matchMedia === 'function' && matchMedia('(pointer: fine)').matches));
+  // 双指捏合缩放回调（factor = 上次指距/当前指距，>1 拉远、<1 拉近，
+  // 与滚轮 deltaY 的拉远方向约定一致）；上帝视角由 main 转为移速档调节
+  onPinchZoom: ((factor: number) => void) | null = null;
+  // 虚拟按住按钮状态（右下按钮写入，语义 = Shift 加力 / X 刹车）
+  holds = { boost: false, brake: false };
+  // 虚拟摇杆向量，归一化 [-1,1]（屏幕上方 = 前进）
+  private joy = { x: 0, y: 0 };
+  // canvas 上的活动手指（单指=环视，双指=捏合）
+  private touchPts = new Map<number, { x: number; y: number }>();
+  private pinchDist = 0;
+  private touchDragDist = 0;
+
+  // 摇杆死区：actions 是布尔语义，按比例阈值合成为四向
+  private static readonly JOY_DEAD = 0.35;
+
+  /** 虚拟摇杆写入（ui/touch.ts 摇杆拖动调用；回中传 0,0） */
+  setJoystick(x: number, y: number): void {
+    this.joy.x = Math.max(-1, Math.min(1, x));
+    this.joy.y = Math.max(-1, Math.min(1, y));
+  }
+
+  private joyActive(): boolean {
+    return this.joy.x < -Input.JOY_DEAD || this.joy.x > Input.JOY_DEAD
+      || this.joy.y < -Input.JOY_DEAD || this.joy.y > Input.JOY_DEAD;
+  }
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     const kd = (e: KeyboardEvent) => {
@@ -65,7 +100,15 @@ export class Input {
       }
     };
     const ku = (e: KeyboardEvent) => this.keys.delete(e.key.toLowerCase());
-    const blur = () => { this.keys.clear(); this.buttons.clear(); this.mouseDown = false; };
+    const blur = () => {
+      this.keys.clear();
+      this.buttons.clear();
+      this.mouseDown = false;
+      // 触屏虚拟控件同样随失焦释放（按住加力时切后台，回来不该还在推进）
+      this.holds.boost = false;
+      this.holds.brake = false;
+      this.setJoystick(0, 0);
+    };
     window.addEventListener('keydown', kd);
     window.addEventListener('keyup', ku);
     window.addEventListener('blur', blur);
@@ -82,8 +125,9 @@ export class Input {
       if (e.button === 0) {
         this.dragged = false;
         this._dragDist = 0;
-        // 未锁定时：首次左键点击请求指针锁定（游戏惯例）；锁定状态下左键仅用于拾取
-        if (!this.pointerLocked && canvas.requestPointerLock) {
+        // 未锁定时：首次左键点击请求指针锁定（游戏惯例）；锁定状态下左键仅用于拾取。
+        // 触屏无指针锁定概念，跳过（tap 合成的 mousedown 会走到这里）
+        if (!this.isTouch && !this.pointerLocked && canvas.requestPointerLock) {
           const pr = canvas.requestPointerLock();
           if (pr && pr.catch) pr.catch(() => {});
         }
@@ -132,20 +176,82 @@ export class Input {
     window.addEventListener('mousemove', mm);
     window.addEventListener('mouseup', mu);
     document.addEventListener('pointerlockchange', plc);
+
+    // ---- 触屏手势 ----
+    // 单指拖动=环视（与鼠标左键拖拽同管线、同非干预语义）；双指捏合=缩放；
+    // 纯 tap 不拦截也不置 dragged，让浏览器合成 click 走天体拾取。
+    // touchmove preventDefault 抑制页面滚动与合成 mousemove（canvas 的
+    // touch-action:none 是 CSS 侧双保险）
+    const touchList = (e: TouchEvent) => Array.from(e.changedTouches);
+    const pinchCurrent = (): number => {
+      const pts = [...this.touchPts.values()];
+      return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    };
+    const ts = (e: TouchEvent) => {
+      for (const t of touchList(e)) {
+        this.touchPts.set(t.identifier, { x: t.clientX, y: t.clientY });
+      }
+      if (this.touchPts.size === 1) {
+        // 新单指：重置拖拽计数（拖超阈值置 dragged 抑制松手合成 click 误拾取）
+        this.touchDragDist = 0;
+        this.dragged = false;
+      } else if (this.touchPts.size >= 2) {
+        // 进入捏合：终止环视并抑制松手误拾取；以当前两指间距重新基准化
+        //（覆盖 3 指→抬 1 指回到捏合等边界，避免用陈旧间距算出巨幅因子）
+        this.dragged = true;
+        this.pinchDist = pinchCurrent();
+      }
+    };
+    const tm = (e: TouchEvent) => {
+      e.preventDefault();
+      for (const t of touchList(e)) {
+        const p = this.touchPts.get(t.identifier);
+        if (!p) continue;
+        if (this.touchPts.size === 1) {
+          const dx = t.clientX - p.x;
+          const dy = t.clientY - p.y;
+          this.steer.dx += dx;
+          this.steer.dy += dy;
+          this.touchDragDist += Math.hypot(dx, dy);
+          if (this.touchDragDist > 5) this.dragged = true;
+        }
+        p.x = t.clientX;
+        p.y = t.clientY;
+      }
+      if (this.touchPts.size === 2) {
+        const d = pinchCurrent();
+        if (this.pinchDist > 0 && d > 0) {
+          // 单次事件限幅，避免抬指/落指瞬间距离突变造成视距跳变
+          this.onPinchZoom?.(Math.min(1.15, Math.max(0.87, this.pinchDist / d)));
+        }
+        this.pinchDist = d;
+      }
+    };
+    const te = (e: TouchEvent) => {
+      for (const t of touchList(e)) this.touchPts.delete(t.identifier);
+      // 回到两指：重新基准化捏合间距；不足两指：清除捏合状态
+      if (this.touchPts.size === 2) this.pinchDist = pinchCurrent();
+      else if (this.touchPts.size < 2) this.pinchDist = 0;
+    };
+    canvas.addEventListener('touchstart', ts, { passive: true });
+    canvas.addEventListener('touchmove', tm, { passive: false });
+    canvas.addEventListener('touchend', te);
+    canvas.addEventListener('touchcancel', te);
   }
 
 
-  // 每帧开头调用：从 keys 合成动作，并消费 steer 和 pan
+  // 每帧开头调用：从 keys + 触屏虚拟控件合成动作，并消费 steer 和 pan
   poll(): { steerX: number; steerY: number; panX: number; panY: number } {
     const a = this.actions;
-    a.fwd = this.keys.has('w') || this.keys.has('arrowup');
-    a.bwd = this.keys.has('s') || this.keys.has('arrowdown');
-    a.left = this.keys.has('a') || this.keys.has('arrowleft');
-    a.right = this.keys.has('d') || this.keys.has('arrowright');
+    const J = Input.JOY_DEAD;
+    a.fwd = this.keys.has('w') || this.keys.has('arrowup') || this.joy.y < -J;
+    a.bwd = this.keys.has('s') || this.keys.has('arrowdown') || this.joy.y > J;
+    a.left = this.keys.has('a') || this.keys.has('arrowleft') || this.joy.x < -J;
+    a.right = this.keys.has('d') || this.keys.has('arrowright') || this.joy.x > J;
     // 上浮/下沉：Space 上、C 下（Q/E 让位给横滚；Shift 只做加力，不再复用为下沉）
     a.up = this.keys.has(' ');
     a.down = this.keys.has('c');
-    a.boost = this.keys.has('shift');
+    a.boost = this.keys.has('shift') || this.holds.boost;
     a.rollL = this.keys.has('q');
     a.rollR = this.keys.has('e');
     const sd = this.steer.dx, sdy = this.steer.dy;
@@ -158,6 +264,10 @@ export class Input {
   // 严格仅对「飞行操控类」操作判断用户是否正在进行人工干预
   isFlightIntervening(): boolean {
     if (this.steerHold) return true; // 右键直接掌舵=飞行干预
+    // 触屏：摇杆推进（=WASD 语义）与刹车按钮（=X 语义）构成干预；
+    // 加力按钮单独按住不算（与 Shift 单独按住同规则：仅改推力不改变航线，
+    // 摇杆推进 + 加力会经由摇杆判定为干预）
+    if (this.joyActive() || this.holds.brake) return true;
     for (const key of FLIGHT_CONTROL_KEYS) {
       if (this.keys.has(key)) {
         // 单独按 Shift 且未按下任何方向或平移键时，不判定为飞行干预
@@ -177,7 +287,8 @@ export class Input {
   hasThrustInput(): boolean {
     return this.keys.has('w') || this.keys.has('s') || this.keys.has('a') || this.keys.has('d') ||
            this.keys.has('arrowup') || this.keys.has('arrowdown') || this.keys.has('arrowleft') || this.keys.has('arrowright') ||
-           this.keys.has(' ') || this.keys.has('c') || this.keys.has('x');
+           this.keys.has(' ') || this.keys.has('c') || this.keys.has('x') ||
+           this.joyActive() || this.holds.brake;
   }
 
   // 手柄轮询（标准映射，含 18% 摇杆死区）：

@@ -30,6 +30,7 @@ import { TourController } from './core/tour.js';
 import { MissionManager } from './core/mission-manager.js';
 import { presentHud } from './ui/hud-presenter.js';
 import { SettingsManager } from './core/settings.js';
+import { setupTouchControls } from './ui/touch.js';
 // 世界模块（副作用自注册）
 import './content/world-solar.js';
 import './content/world-stellar.js';
@@ -224,6 +225,22 @@ const ui = new UI(engine.renderer, {
 // 补推一次，挂件会一直显示 HTML 占位符（「—」/ 0）
 missionManager.syncMissionHud();
 ui.setDiscoveries(missionManager.discovered.size);
+
+// 触屏虚拟控件：摇杆/加力/刹车/视角/暂停（仅触屏设备装配显示）。
+// 捏合缩放与滚轮同语义：追尾/环绕调视距，上帝视角调移速档
+if (input.isTouch) {
+  input.onPinchZoom = (factor) => {
+    if (controlMode === MODE_GOD) freeCam.adjustSpeed(factor > 1 ? 0.8 : 1.25);
+    else chaseCam.zoomBy(factor);
+  };
+  setupTouchControls(input, {
+    onPause: () => openPauseMenu(),
+    onViewCycle: () => {
+      if (!curWorld || controlMode === MODE_GOD) return; // 与 V 键同守卫
+      chaseCam.cycleView();
+    },
+  });
+}
 // 手柄连接/断开提示（轮询在 renderFrame 中每帧进行）
 window.addEventListener('gamepadconnected', () => toastMsg('🎮 手柄已连接', 3));
 window.addEventListener('gamepaddisconnected', () => {
@@ -632,7 +649,8 @@ function renderFrame(now: number): void {
     const isIntervening = controlMode !== MODE_GOD && (input.isFlightIntervening() || gpThrust);
     const rollIn = (input.keys.has('q') ? 1 : 0) - (input.keys.has('e') ? 1 : 0);
     const manualThrustKeys = a.fwd || a.bwd || a.left || a.right || a.up || a.down;
-    const isBraking = input.keys.has('x') || gpBrake;
+    // 触屏刹车按钮 = X 键语义（反推制动，构成人工干预）
+    const isBraking = input.keys.has('x') || gpBrake || input.holds.brake;
     // 上帝视角下 Shift 加速只作用于相机移动，绝不让背景中的飞船尾焰呈现加力
     const isBoosting = controlMode !== MODE_GOD && a.boost && manualThrustKeys;
     const maxSp = curWorld.maxSpeedWorldPerS || 5.0;

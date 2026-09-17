@@ -65,7 +65,11 @@ src/
                      # X 刹车·G 上帝视角·V 视角·F 下潜·T 大巡游·R 安全重置·
                      # Z 复位·[ ] 时间·\ 暂停·Esc 暂停菜单·Tab 帮助；鼠标移动=环视（锁定直控/
                      # 未锁定拖拽，拖拽超 5px 标记 dragged 供松手抑制拾取），
-                     # 右/中键拖拽=平移视角
+                     # 右/中键拖拽=平移视角；触屏（isTouch：coarse 指针/
+                     # 无 fine 指针/URL ?touch）：单指拖动=环视（同 dragged
+                     # 抑制）、双指捏合=onPinchZoom 缩放回调、虚拟摇杆
+                     # setJoystick 与按住按钮 holds 合成进 actions 与干预
+                     # 判定（加力单独按住不算干预，与 Shift 同规则）
     probe.ts         # 飞船单模式动力学：推力 + 全层引力井 8ms 子步统一积分，
                      # 天体表面碰撞→安全圆轨道重部署；Q/E 横滚，X 反推刹车；
                      # 出生/重生注入开普勒圆轨道速度（防垂直坠入引力中心）
@@ -114,6 +118,8 @@ src/
   ui/
     controller.ts    # 标题画面 / 暂停菜单 / 发现图鉴 / 通关结算 / 设置面板 / HUD
     hud-presenter.ts # HUD 天文物理仪表数据装配：真实速度、光行时、开普勒轨道特征与引力井比机械能
+    touch.ts         # 触屏虚拟控件装配（仅 input.isTouch 时）：右下摇杆
+                     # （四向推进）+ 加力/刹车按住按钮 + 视角点按 + 右上 ⏸ 暂停
   util/              # units（AU/ly/pc/km 换算、色温→hex）、math（mulberry32）
 ```
 

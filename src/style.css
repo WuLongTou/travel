@@ -12,7 +12,7 @@
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { width: 100%; height: 100%; overflow: hidden; background: #000; color: var(--fg); font-family: var(--font-ui); }
-canvas#scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+canvas#scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
 
 /* ---- 屏幕准星（游戏式）：常显十字，悬停目标时扩散高亮 ---- */
 .crosshair { position: fixed; left: 50%; top: 50%; width: 22px; height: 22px;
@@ -107,6 +107,28 @@ canvas#scene { position: fixed; inset: 0; width: 100%; height: 100%; display: bl
 .info-actions button { flex: 1 1 auto; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--accent);
   background: rgba(127,180,255,0.15); color: var(--accent); cursor: pointer; font-size: 13px; }
 .info-actions button:hover { background: rgba(127,180,255,0.28); }
+
+/* ---- 触屏虚拟控件：body.touch 由 ui/touch.ts 装配时添加，桌面不显示 ---- */
+.touch-controls { position: fixed; inset: 0; z-index: 25; pointer-events: none; }
+body.touch .topbar { padding-right: 56px; } /* 让出右上 ⏸ 暂停按钮的位置 */
+.btn-pause-touch { position: absolute; top: 10px; right: 10px; width: 44px; height: 38px;
+  pointer-events: auto; border-radius: 10px; cursor: pointer; font-size: 15px;
+  background: var(--glass); border: 1px solid var(--line); color: var(--fg); }
+.joy-zone { position: absolute; right: 18px; bottom: 18px; width: 132px; height: 132px;
+  border-radius: 50%; background: rgba(127, 180, 255, 0.07); border: 1px solid var(--line);
+  pointer-events: auto; touch-action: none; }
+.joy-stick { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px;
+  margin: -28px 0 0 -28px; border-radius: 50%;
+  background: rgba(127, 180, 255, 0.22); border: 1px solid var(--accent); }
+.touch-actions { position: absolute; right: 22px; bottom: 170px;
+  display: flex; flex-direction: column; gap: 10px; pointer-events: auto; }
+.touch-actions button { width: 78px; height: 54px; border-radius: 12px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  background: var(--glass); border: 1px solid var(--line); color: var(--fg-dim);
+  font-size: 15px; line-height: 1; touch-action: none; }
+.touch-actions button span { font-size: 10.5px; letter-spacing: 0.08em; }
+.touch-actions button.active { background: rgba(127, 180, 255, 0.28);
+  border-color: var(--accent); color: var(--fg); }
 
 /* ---- 操控提示覆盖层 ---- */
 .controls-hint { position: fixed; right: 16px; bottom: 14px; z-index: 15;
@@ -251,4 +273,16 @@ body.danger::after { content: ''; position: fixed; inset: 0; z-index: 40; pointe
   .infocard { width: min(88vw, 330px); }
   .hud { min-width: 150px; }
   .controls-hint { display: none; }
+}
+
+/* 手机档：压缩面板留出画面与触控区（虚拟控件在右下，HUD 留在左下） */
+@media (max-width: 600px) {
+  .mission-box { top: 46px; left: 8px; max-width: 46vw; padding: 8px 10px; font-size: 11px; }
+  .mission-title { font-size: 12px; }
+  .hud { left: 8px; bottom: 8px; font-size: 11px; max-width: 58vw; padding: 8px 10px; }
+  .hud-row:has(#hud-orbit) { display: none; } /* 轨道行长文案在窄屏换行严重 */
+  .hud-row:has(#hud-dist) { display: none; }
+  .topbar { font-size: 11px; }
+  .crumb a, .crumb b { white-space: nowrap; } /* 层名整词换行，不拆字 */
+  .codex-panel { width: 96vw; }
 }

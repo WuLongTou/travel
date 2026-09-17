@@ -158,6 +158,19 @@
   <!-- 加载提示 -->
   <div class="loading hidden" id="loading">载入宇宙…</div>
 
+  <!-- 触屏虚拟控件：仅触屏设备由 JS 装配显示（桌面保持 hidden） -->
+  <div class="touch-controls hidden" id="touch-controls">
+    <button class="btn-pause-touch" title="暂停菜单">⏸</button>
+    <div class="joy-zone" title="推进摇杆（离芯即手动接管，回中恢复自动航行）">
+      <div class="joy-stick"></div>
+    </div>
+    <div class="touch-actions">
+      <button class="btn-view">👁<span>视角</span></button>
+      <button class="btn-boost">🔥<span>加力</span></button>
+      <button class="btn-brake">🛑<span>刹车</span></button>
+    </div>
+  </div>
+
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
