@@ -291,6 +291,25 @@ async function main() {
     console.log('  ✓ 一键回到飞船：点击按钮立即恢复追尾模式、清空平移并重置视距');
   }
 
+  // 3.9c 大巡游按钮：点击启程（巡游状态非空 + 按钮高亮），再点结束（双清空）
+  evalJS(`document.getElementById('btn-tour').click(); return 'ok';`);
+  await sleep(200);
+  const tourOn = evalJS(`
+    return JSON.stringify({ active: !!window.__universe.tour,
+      btnActive: document.getElementById('btn-tour').classList.contains('active') });
+  `);
+  evalJS(`document.getElementById('btn-tour').click(); return 'ok';`);
+  await sleep(200);
+  const tourOff = evalJS(`
+    return JSON.stringify({ active: !!window.__universe.tour,
+      btnActive: document.getElementById('btn-tour').classList.contains('active') });
+  `);
+  if (!tourOn.active || !tourOn.btnActive || tourOff.active || tourOff.btnActive) {
+    failures.push(`大巡游按钮: ${JSON.stringify({ tourOn, tourOff })}`);
+  } else {
+    console.log('  ✓ 大巡游按钮：点击启程并高亮，再点结束');
+  }
+
   // 测试在上帝视角下按 Z 键一键回飞船
   evalJS(`window.__universe.input.keys.add('g'); return 'ok';`);
   await sleep(100);

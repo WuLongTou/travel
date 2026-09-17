@@ -219,6 +219,7 @@ const ui = new UI(engine.renderer, {
   onDiveTo: (entity) => nav.diveInto(entity),
   onInfoClose: () => { selected = null; },
   onResetView: () => resetToShipView(),
+  onTour: () => { if (curWorld) tourCtrl.toggle(curWorld); }, // 与 T 键同语义（触屏/鼠标入口）
 });
 // 启动恢复后挂件与计数需要一次初始化：MissionManager 只在任务完成等
 // 边沿事件推送 UI，恢复存档（或新档）的当前任务文案与发现数若不在此
@@ -963,6 +964,7 @@ function renderFrame(now: number): void {
     || chaseCam.panOffset.lengthSq() > 0.0001
     || Math.abs(chaseCam.followDist - defaultDist) > defaultDist * 0.25;
   ui.setResetViewHighlight(!!isViewDiverged);
+  ui.setTourActive(tourCtrl.active); // 大巡游按钮：进行中高亮（结束路径有多处，每帧同步最可靠）
 
   engine.render(dtReal);
 }

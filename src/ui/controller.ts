@@ -8,6 +8,7 @@ export interface UICallbacks {
   onDiveTo?: (entity: import('../types.js').Entity) => void;
   onInfoClose?: () => void;
   onResetView?: () => void;
+  onTour?: () => void;
 }
 
 export class UI {
@@ -32,11 +33,12 @@ export class UI {
       'pause-menu','btn-pause-resume','btn-pause-settings','btn-pause-title',
       'victory-screen','victory-stats','btn-victory-continue',
       'btn-pause-codex','pause-stats',
-      'codex-panel','codex-progress','codex-close','codex-body','set-quality','btn-reset-view'];
+      'codex-panel','codex-progress','codex-close','codex-body','set-quality','btn-reset-view','btn-tour'];
     for (const id of ids) this.el[id] = document.getElementById(id) as HTMLElement;
     this._bindInfoClose();
     this._bindResetView();
     this._setupHintToggle();
+    this.el['btn-tour']?.addEventListener('click', () => this.cb.onTour?.());
   }
 
   private _bindResetView(): void {
@@ -51,6 +53,11 @@ export class UI {
     if (this.el['btn-reset-view']) {
       this.el['btn-reset-view'].classList.toggle('highlight', highlight);
     }
+  }
+
+  // 大巡游进行中：按钮高亮（启程/结束各有 toast，高亮用于持续状态可见）
+  setTourActive(active: boolean): void {
+    this.el['btn-tour']?.classList.toggle('active', active);
   }
 
   private _bindInfoClose(): void {

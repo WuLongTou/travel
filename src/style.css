@@ -69,14 +69,16 @@ canvas#scene { position: fixed; inset: 0; width: 100%; height: 100%; display: bl
 .hud { position: fixed; left: 14px; bottom: 14px; z-index: 15; font-size: 12px;
   background: var(--glass); border: 1px solid var(--line); border-radius: var(--panel-r);
   padding: 10px 12px; backdrop-filter: blur(8px); min-width: 220px; }
-.hud-top-actions { display: flex; margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
-.btn-reset-view { width: 100%; display: flex; align-items: center; justify-content: space-between;
+.hud-top-actions { display: flex; gap: 6px; margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.btn-reset-view, .btn-tour { flex: 1; display: flex; align-items: center; justify-content: space-between;
   padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line); background: rgba(127, 180, 255, 0.08);
   color: var(--fg); font-size: 11.5px; font-weight: 500; cursor: pointer; transition: all 0.2s ease; }
-.btn-reset-view:hover { background: rgba(127, 180, 255, 0.22); border-color: var(--accent); color: var(--accent); }
-.btn-reset-view .key-hint { font-size: 10px; padding: 1px 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); color: var(--accent2); }
+.btn-reset-view:hover, .btn-tour:hover { background: rgba(127, 180, 255, 0.22); border-color: var(--accent); color: var(--accent); }
+.btn-reset-view .key-hint, .btn-tour .key-hint { font-size: 10px; padding: 1px 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); color: var(--accent2); }
 .btn-reset-view.highlight { border-color: var(--accent); background: rgba(127, 180, 255, 0.22);
   box-shadow: 0 0 10px rgba(127, 180, 255, 0.35); animation: pulse-border 2s infinite ease-in-out; }
+.btn-tour.active { border-color: var(--accent); background: rgba(127, 180, 255, 0.22); color: var(--accent);
+  box-shadow: 0 0 10px rgba(127, 180, 255, 0.35); }
 @keyframes pulse-border {
   0%, 100% { opacity: 0.85; border-color: var(--line); }
   50% { opacity: 1; border-color: var(--accent); box-shadow: 0 0 12px rgba(127, 180, 255, 0.6); }
