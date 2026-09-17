@@ -77,12 +77,15 @@ async function main() {
     return v;
   };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const pressEsc = () => evalJS(`
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape' }));
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    return 'ok';
-  `);
+  // Esc 单边沿：按下→隔帧→抬起→隔帧。旧的「按/抬/再按」三连能否只产生
+  // 一个边沿取决于事件与 rAF 帧边界的相对时序（跨帧=两次翻转=开了又关），
+  // 是冒烟的间歇性失败源
+  const pressEsc = async () => {
+    evalJS(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); return 'ok';`);
+    await sleep(120);
+    evalJS(`window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape' })); return 'ok';`);
+    await sleep(120);
+  };
   const uiState = () => evalJS(`
     const vis = (id) => !document.getElementById(id).classList.contains('hidden');
     return JSON.stringify({ title: vis('title-screen'), menu: vis('pause-menu'),
@@ -108,13 +111,13 @@ async function main() {
     console.log(`  ✓ 任务挂件初始态：任务 ${mi.idx}「${mi.title}」· 发现 ${mi.n}`);
   }
 
-  pressEsc();
+  await pressEsc();
   await sleep(300);
   st = uiState();
   if (!st.menu || !st.paused) failures.push(`Esc 打开暂停菜单: ${JSON.stringify(st)}`);
   else console.log('  ✓ Esc 打开暂停菜单并冻结时钟');
 
-  pressEsc();
+  await pressEsc();
   await sleep(300);
   st = uiState();
   if (st.menu || st.paused) failures.push(`Esc 关闭暂停菜单: ${JSON.stringify(st)}`);
@@ -145,7 +148,7 @@ async function main() {
   if (st.victory || st.paused) failures.push(`结算继续: ${JSON.stringify(st)}`);
   else console.log('  ✓ 继续自由航行：结算关闭并恢复时钟');
 
-  pressEsc();
+  await pressEsc();
   await sleep(300);
   evalJS(`document.getElementById('btn-pause-title').click(); return 'ok';`);
   await sleep(200);
@@ -159,7 +162,7 @@ async function main() {
   else console.log('  ✓ 标题「继续航行」：回到游戏');
 
   // 3.6 发现图鉴：暂停菜单 → 图鉴分节渲染 → 关闭回菜单 → 继续航行
-  pressEsc();
+  await pressEsc();
   await sleep(300);
   evalJS(`document.getElementById('btn-pause-codex').click(); return 'ok';`);
   await sleep(200);
@@ -183,14 +186,14 @@ async function main() {
   st = uiState();
   if (st.victory || !st.menu) failures.push(`图鉴关闭回菜单: ${JSON.stringify(st)}`);
   else console.log('  ✓ 图鉴关闭：回到暂停菜单');
-  pressEsc();
+  await pressEsc();
   await sleep(300);
   st = uiState();
   if (st.menu || st.paused) failures.push(`菜单关闭: ${JSON.stringify(st)}`);
   else console.log('  ✓ Esc 继续航行');
 
   // 3.7 画质档：切换即时生效（像素比）并持久化
-  pressEsc();
+  await pressEsc();
   await sleep(300);
   evalJS(`document.getElementById('btn-pause-settings').click(); return 'ok';`);
   await sleep(200);
@@ -211,7 +214,7 @@ async function main() {
   }
   evalJS(`document.querySelector('#set-quality button[data-q="high"]').click(); return 'ok';`);
   evalJS(`document.getElementById('set-close').click(); return 'ok';`);
-  pressEsc();
+  await pressEsc();
   await sleep(200);
 
   // 3.8 真实尺度飞行器：scale = 8 m 包络的层单位换算，绝不随视距缩放
