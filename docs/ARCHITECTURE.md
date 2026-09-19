@@ -274,7 +274,7 @@ src/
 ## 6. 验证与测试体系
 
 - `pnpm run typecheck`：TypeScript 严格类型检查（tsc --noEmit）。
-- `pnpm run test`：Vitest 自动化单元测试套件，全面覆盖动力学、开普勒计算、状态机、任务链、图鉴、巡游及纯逻辑模块（15 个套件，100 项用例，纯 Node 零 DOM 依赖或轻量 mock 隔离）。
+- `pnpm run test`：Vitest 自动化单元测试套件，全面覆盖动力学、开普勒计算、状态机、任务链、图鉴、巡游及纯逻辑模块（全部为纯 Node 零 DOM 依赖或轻量 mock 隔离，套件随测试文件数走 `pnpm test` 输出）。
 - `pnpm run build`：生产环境打包构建，由 Vite 8 + Rolldown 驱动。配置 `manualChunks` 将底层三维引擎 `three` 独立拆分为 vendor chunk（~550 kB），应用核心逻辑单独打包为精简 chunk（~137 kB），消除构建告警并提升浏览器长效缓存命中率。
 - `pnpm run smoke`：无头端到端冒烟验证——起 dev server → agent-browser（Chrome for Testing 独立 session）逐层 `nav.enter` → 断言实体/场景对象/探测球位置/update 不抛错 → 状态机/暂停菜单/通关结算/设置持久化/真实尺度与亚像素标记/掌舵与星尘验证 → 页面 error 检查 → 自动清理。
 - 视觉验收：agent-browser 截六层画面比对（迭代记录见 git log）。

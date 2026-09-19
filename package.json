@@ -1,6 +1,7 @@
 {
   "name": "universe-roam",
   "private": true,
+  "packageManager": "pnpm@12.4.2",
   "version": "0.1.0",
   "type": "module",
   "scripts": {

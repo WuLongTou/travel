@@ -1,6 +1,6 @@
 // 无头冒烟测试：真浏览器加载页面 → 逐层构建断言 → 页面错误检查。
 // 依赖：vite dev server（本脚本自启）+ agent-browser CLI（Chrome for Testing）。
-// 用法：npm run smoke
+// 用法：pnpm smoke
 import { spawn, execFileSync } from 'node:child_process';
 
 const PORT = 5178;
@@ -26,7 +26,7 @@ async function waitFor(fn, ms, what) {
 
 async function main() {
   // 1. 起 dev server
-  vite = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], { stdio: 'ignore', detached: false });
+  vite = spawn('pnpm', ['exec', 'vite', '--port', String(PORT), '--strictPort'], { stdio: 'ignore', detached: false });
   await waitFor(async () => {
     const r = await fetch(URL);
     return r.ok;

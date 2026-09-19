@@ -20,9 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # version 省略时 action-setup 自动读 package.json 的 packageManager（单一真源）
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       - uses: actions/setup-node@v6
         with:

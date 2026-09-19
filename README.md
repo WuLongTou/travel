@@ -117,3 +117,4 @@ SIMBAD/Hipparcos、McConnachie+2012 本星系群星表、NED。
 
 - `docs/ARCHITECTURE.md`：三模式控制、飞控算法、渲染约定、验证体系
 - `docs/CONTENT.md`：数据文件与来源、示意清单、核实状态
+- `docs/DEPLOY.md`：部署门禁与 rsync 推送流程
