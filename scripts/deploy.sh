@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ── travel 部署脚本（Vite 纯静态站）────────────────────────────
-# 流程：门禁（typecheck＋单测）→ 生产构建 →（可选）冒烟 →（可选）推送。
+# 流程：门禁（单测）→ 生产构建（前置 tsc --noEmit 全量类型检查）
+# →（可选）冒烟 →（可选）推送。
 #
 # 用法（仓库根目录）：
 #   ./scripts/deploy.sh                  # 仅本地：门禁＋构建，产物在 dist/
@@ -23,8 +24,7 @@ for arg in "$@"; do
   esac
 done
 
-echo "==> 门禁：typecheck＋单测…"
-pnpm run typecheck
+echo "==> 门禁：单测…"
 pnpm run test
 
 echo "==> 生产构建…"
