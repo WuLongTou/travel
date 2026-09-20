@@ -6,12 +6,12 @@
 ## 快速开始
 
 ```bash
-npm install   # 首次
-npm run dev       # 本地运行（浏览器打开输出地址）
-npm run build     # 生产构建（前置 tsc --noEmit 全量类型检查）
-npm run test      # Vitest 单测（units/clock/missions/UI 状态机）
-npm run typecheck # 仅类型检查
-npm run smoke     # 无头冒烟 e2e（六层逐层进入断言 + 游戏 UI 流断言）
+pnpm install      # 首次
+pnpm dev          # 本地运行（浏览器打开输出地址）
+pnpm build        # 生产构建（前置 tsc --noEmit 全量类型检查）
+pnpm test         # Vitest 单测（units/clock/missions/UI 状态机）
+pnpm typecheck    # 仅类型检查
+pnpm smoke        # 无头冒烟 e2e（六层逐层进入断言 + 游戏 UI 流断言）
 ```
 
 技术栈（标准 web 游戏栈）：TypeScript 5（strict 全量）· three.js ·
