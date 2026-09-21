@@ -396,6 +396,7 @@ async function main() {
 }
 
 main().catch((e) => { console.error(e.message); process.exitCode = 1; }).finally(async () => {
-  try { run('agent-browser', ['close', '--all']); } catch { /* 已关闭 */ }
+  // 只关本脚本自己起的 session（--all 会误伤本机其他 agent-browser 任务）
+  try { run('agent-browser', ['close', '--session', SESSION]); } catch { /* 已关闭 */ }
   if (vite) vite.kill('SIGTERM');
 });

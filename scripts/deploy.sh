@@ -30,6 +30,10 @@ pnpm run test
 echo "==> 生产构建…"
 pnpm run build
 VERSION="$(git describe --always --tags --dirty 2>/dev/null || echo dev)"
+# git describe 无 tag 可用时退化为短 SHA（--always）——版本戳定位能力变弱，提醒运维
+if ! git describe --tags --abbrev=0 >/dev/null 2>&1; then
+  echo "警告: 仓库无 tag，版本戳仅有 SHA（打 tag 后版本信息更完整）" >&2
+fi
 echo "$VERSION $(date -u +%Y-%m-%dT%H:%M:%SZ)" > dist/.deploy-version
 echo "==> 产物就绪: dist/（版本 ${VERSION}）"
 

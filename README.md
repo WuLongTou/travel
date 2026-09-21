@@ -14,6 +14,9 @@ pnpm typecheck    # 仅类型检查
 pnpm smoke        # 无头冒烟 e2e（六层逐层进入断言 + 游戏 UI 流断言）
 ```
 
+部署在域名子路径（如 `example.com/roam/`）时，构建加 `VITE_BASE` 环境变量：
+`VITE_BASE=/roam/ pnpm build`（值需带首尾斜杠）；默认按根路径 `/` 构建。
+
 技术栈（标准 web 游戏栈）：TypeScript 5（strict 全量）· three.js ·
 Vite · Vitest（单测）+ agent-browser（e2e）· WebAudio（程序化音效）。
 核心领域类型集中在 `src/types.ts`，UI 覆盖层状态机见

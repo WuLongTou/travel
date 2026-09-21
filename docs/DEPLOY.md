@@ -19,5 +19,15 @@ SERVER=<ssh-host> REMOTE_DIR=<服务器 dist 目录> \
 
 ## CI
 
-push/PR 到 main 自动跑：`pnpm install` → typecheck → test → build。
+push/PR 到 main 自动跑：`pnpm install` → typecheck → test → build →
+preview 冒烟（起 `vite preview` 断言 200 + HTML 后关闭）→ 上传 `dist/`
+产物留档（保留 7 天）。
 `smoke`（真浏览器 e2e）只在本地/部署时按需跑，不进 CI。
+
+## 子路径部署
+
+站点默认按根路径 `/` 构建；挂在域名子路径（如 `example.com/roam/`）时：
+
+```bash
+VITE_BASE=/roam/ pnpm build   # 值需带首尾斜杠
+```

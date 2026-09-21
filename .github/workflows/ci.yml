@@ -36,3 +36,28 @@ jobs:
         run: pnpm run test
       - name: production build
         run: pnpm run build
+
+      # CI 只验证「能构建」不够，再验证「能跑」：起 preview 服务，
+      # 断言首页返回 200 且响应是 HTML，然后关闭
+      - name: preview smoke (起 preview 并断言 200 + HTML)
+        run: |
+          pnpm run preview &
+          pid=$!
+          code=0
+          for _ in $(seq 1 30); do
+            code=$(curl -s -o /tmp/preview.html -w '%{http_code}' http://127.0.0.1:4173/ || true)
+            if [ "$code" = "200" ]; then break; fi
+            sleep 1
+          done
+          kill "$pid" 2>/dev/null || true
+          test "$code" = "200" || { echo "preview 未返回 200（实际: $code）"; exit 1; }
+          grep -qi '<html' /tmp/preview.html || { echo "preview 响应非 HTML"; exit 1; }
+          echo "preview smoke 通过 (HTTP 200 + HTML)"
+
+      # 构建产物留档（如线上异常时可直接下载对照），保留期短，只为排查用
+      - name: upload dist artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
