@@ -1,11 +1,13 @@
 // 无头冒烟测试：真浏览器加载页面 → 逐层构建断言 → 页面错误检查。
-// 依赖：vite dev server（本脚本自启）+ agent-browser CLI（Chrome for Testing）。
+// 依赖：vite dev server（本脚本自启）+ agent-browser CLI。
 // 用法：pnpm smoke
 import { spawn, execFileSync } from 'node:child_process';
 
 const PORT = 5178;
 const URL = `http://localhost:${PORT}/`;
-const SESSION = `smoke-${process.pid}`;
+// session 名固定（反复运行复用同一实例，不要用 process.pid 每次新建浏览器；
+// 结束时 close 清理）。浏览器二进制由本机 agent-browser 全局配置决定。
+const SESSION = 'travel-smoke';
 const LAYERS = ['solar', 'stellar', 'galaxy', 'local', 'super', 'cosmos'];
 
 let vite;
