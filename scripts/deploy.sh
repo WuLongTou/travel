@@ -45,7 +45,7 @@ fi
 if [ "$PUSH" = "1" ]; then
   : "${SERVER:?--push 需要 SERVER（如 workwork-server）}"
   : "${REMOTE_DIR:?--push 需要 REMOTE_DIR（服务器 dist 目录）}"
-  echo "==> 推送 dist/ → $SERVER:$REMOTE_DIR…"
+  echo "==> 推送 dist/ → $SERVER:${REMOTE_DIR}…"
   rsync -az --delete --exclude '.deploy-version' dist/ "$SERVER:$REMOTE_DIR/"
   scp dist/.deploy-version "$SERVER:$REMOTE_DIR/.deploy-version"
   echo "🎉 部署完成（版本 ${VERSION}）"
