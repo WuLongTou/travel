@@ -42,9 +42,11 @@ jobs:
       - name: preview smoke (起 preview 并断言 200 + HTML)
         run: |
           # 显式绑 IPv4 loopback:Actions runner(Ubuntu/Node 17+)上 vite 默认
-          # host localhost 只落 ::1,curl 探测的 127.0.0.1 永远 000(实测 2026-09-25 起
-          # 连续两提交 CI 红)。本地 macOS 双栈解析正常,故仅 CI 暴露。
-          pnpm run preview -- --host 127.0.0.1 &
+          # host localhost 只落 ::1,curl 探测的 127.0.0.1 永远 000(实测连续
+          # 多提交 CI 红;本地 macOS 双栈解析正常,故仅 CI 暴露)。
+          # 注意 pnpm run 会把 -- 原样转发(vite 收到 '-- --host' 参数失效),
+          # 必须用 pnpm exec 直接调 vite 让 flag 生效。
+          pnpm exec vite preview --host 127.0.0.1 &
           pid=$!
           code=0
           for _ in $(seq 1 30); do
