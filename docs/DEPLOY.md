@@ -11,8 +11,10 @@ SERVER=<ssh-host> REMOTE_DIR=<服务器 dist 目录> \
   ./scripts/deploy.sh --push         # 构建后 rsync 推送
 ```
 
-- 门禁与 CI（`.github/workflows/ci.yml`，main 分支强制）一致：
-  `typecheck` → `test`（vitest）→ `build`，任一步失败即停。
+- 发布门禁以 **main 上 CI 全绿**为准（`.github/workflows/ci.yml`，main 分支强制；
+  日常全量单测、构建、preview 冒烟交 GitHub Actions，本地只跑秒级 `pnpm typecheck`）。
+  `deploy.sh` 仍会在本地执行 `test`（vitest）→ `build`（内含 `tsc --noEmit` 类型检查）
+  生成产物——这是发布构建动作，不是合并前验证；任一步失败即停。
 - 构建产物附带 `dist/.deploy-version`（git describe＋时间），线上核对版本用它。
 - 回滚：重新推送上一个版本的 `dist/`（本地保留或 `git stash` 前构建），
   静态站无状态，直接覆盖即回滚。
